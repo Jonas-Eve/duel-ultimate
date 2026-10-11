@@ -68,7 +68,13 @@ no-ticket entry, `pilot-spec/SKILL.md`).
 5. This phase always runs paired (`.pilot/pilot-process.md` §4 "Interaction modes" —
    `/pilot-discovery` has no `--auto`): show the human the drafted story/stories (and epic
    decision, if any) and the architecture already anticipated — pointing at the real
-   issue number(s) from step 4, not just conversation text. For each `type:feature` draft
+   issue number(s) from step 4, not just conversation text. Put the PM's open questions
+   (`.pilot/pilot-task-write-story.md`) to the human too — at most four at a time, the most
+   shape-changing first, through whatever question tool you have, each with its provisional
+   default as the recommended option — and feed the answers back into the dialogue; an
+   answer that opens new questions gets another round. A draft isn't approved while a
+   question that changes its acceptance criteria is still open, unless the human says to
+   go with the provisional defaults. For each `type:feature` draft
    involving user-facing UI, also ask once whether the human has an existing mockup,
    wants to sketch one live (e.g. the `design` skill, if available), or is fine with the
    PM's own prose description. No tool here can upload an image to a GitHub comment the

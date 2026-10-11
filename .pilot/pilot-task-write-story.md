@@ -48,6 +48,15 @@ duplicating it.
      look disconnected from the rest of the product. Don't reach for a design tool to
      produce a mockup; scoping and implementation shouldn't be left guessing either way.
    - Explicit out-of-scope notes for anything adjacent you're deliberately not including.
+   - **Open questions** — treat the raw idea as a starting point, not a spec: probe it for
+     holes before fixing acceptance criteria (undefined states, edge cases, rules or
+     numbers left unstated, a degenerate way to use the feature). Never invent an answer
+     to a decision that belongs to the human. List the ones that would change the
+     product's shape under an "Open questions" section (same language as the story),
+     most shape-changing first, each with a provisional default so the story isn't
+     blocked and acceptance criteria that stay true either way; leave out anything a
+     sensible default settles. Also end your turn's text with that same list, so the
+     calling skill can put it to the human.
 4. Do not decompose into technical tasks or record dependencies between them — that's
    Spec's job (phase 2). Architecture decisions belong in this same dialogue (the
    architect's own contribution), but never split the story into dev-sized tasks over
