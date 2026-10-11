@@ -23,17 +23,43 @@ hand-edited here. Read it before creating or moving a ticket through any phase.
 <!-- PILOT:INTRO:END -->
 
 <!-- PILOT:ARCHITECTURE:START -->
-_Architecture not yet defined — run `/pilot-init-archi` to describe this monorepo's apps
-and technologies. That will generate this section (per-app doc references, tech stack,
-Clean Architecture layering) and scaffold each app's skeleton._
+## Architecture
+
+Monorepo : un workspace Cargo (cœur en Rust) et une application web TypeScript. Le moteur est
+**pur et déterministe** (`état + action → nouvel état + événements`, hasard issu d'une graine
+portée par l'état) : il n'a ni I/O, ni horloge, ni dépendance au réseau. Le **serveur est
+l'autorité** sur la partie et filtre l'information cachée envoyée à chaque joueur ; le client
+ne décide jamais d'un résultat. Parties **anonymes** (par lien), en mémoire, joueur contre
+joueur ou contre IA (l'IA réutilise le moteur côté serveur).
+
+| Composant | Rôle | Stack |
+|---|---|---|
+| `crates/engine` | Règles de base minimales ; les mécaniques des decks seront des briques composables, qu'un deck active ou non | Rust 2024, `rand_chacha` (graine) |
+| `crates/cards` | Cartes, decks et extensions en **données JSON** versionnées, avec validation | Rust, `serde`/`serde_json` |
+| `crates/simulator` | Parties IA contre IA pour mesurer les taux de victoire entre decks (équilibrage) | Rust |
+| `crates/server` | Parties en ligne (HTTP + WebSocket) | Rust, `axum` 0.8, `tokio` |
+| `crates/engine-wasm` | Binding WASM du moteur pour le client (mêmes règles que le serveur) | Rust, `wasm-bindgen` |
+| `apps/web` | Client **mobile-first et responsive** (PWA ensuite, appli native Capacitor plus tard) | React 19, TypeScript, Vite |
+
+Règles propres à ce repo :
+- **Une carte est une donnée, pas du code** ; une extension est un dossier versionné, et chaque
+  partie enregistre les versions utilisées (parties rejouables, équilibrage traçable).
+- **Aucun hasard hors de la graine du moteur** : toute règle qui tire au sort passe par
+  `GameState::random_below`.
+- Une nouvelle mécanique ajoute une brique au moteur sans modifier le comportement des decks
+  qui ne l'utilisent pas (à vérifier par le simulateur).
+- Pas de base de données ni de comptes joueurs tant qu'aucune story ne l'exige.
 <!-- PILOT:ARCHITECTURE:END -->
 
 ---
 
 ## 2. COMMON COMMANDS
 <!-- PILOT:COMMANDS:START -->
-_Not yet defined — run `/pilot-init-archi` to generate the per-app dev/test/build
-commands for this section._
+- **Rust (workspace) :** `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`,
+  `cargo test --workspace`
+- **Simulateur :** `cargo run -p duel-simulator -- 1000` (nombre de parties)
+- **Serveur :** `cargo run -p duel-server` (`PORT`, 8080 par défaut ; `GET /health`)
+- **Web :** `cd apps/web && npm ci && npm run dev` ; `npm run build` ; `npm test`
 <!-- PILOT:COMMANDS:END -->
 
 ---

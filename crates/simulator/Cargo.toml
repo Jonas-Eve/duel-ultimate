@@ -1,0 +1,9 @@
+[package]
+name = "duel-simulator"
+description = "AI-vs-AI games to measure win rates between decks"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+duel-engine.workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "duel-server"
+description = "Authoritative online game server (HTTP + WebSocket)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+duel-engine.workspace = true
+axum.workspace = true
+tokio.workspace = true
