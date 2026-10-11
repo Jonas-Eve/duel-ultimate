@@ -1,0 +1,108 @@
+# CLAUDE CODE GUIDE & DIRECTIVES (MONOREPO ROOT)
+
+## 1. OVERVIEW & SPECIFICATIONS REFERENCE
+duel-ultimate — LCG (Living Card Game) en ligne, évolutif : des duels 1 contre 1 au tour par tour avec des decks préconstruits et équilibrés, sans booster ni collection. Le moteur de règles est générique et indépendant du thème ; cartes, decks et extensions sont des données versionnées, et l'équilibrage est mesuré par un simulateur IA contre IA.
+
+The functional scope is specified in `PROJECT-FUNCTIONAL-SCOPE.md`. Read it before
+designing anything that touches product behavior.
+
+<!-- PILOT:INTRO:START -->
+Ticket work (functional or purely technical) goes through **PILOT**, a lightweight agent
+process — `discovery` → `spec` → `dev` → `review` — each its
+own isolated, low-token agent context instead of one accumulating one, plus a mandatory
+fifth phase, human QA, for every `type:feature` story once every task (including its
+automated end-to-end test) has merged. Its skills
+(`.claude/skills/pilot-*`) and agent personas (`.claude/agents/pilot-*.md`) are copied
+into this repo from the `pilot` distribution repo (github.com/Jonas-Eve/pilot) rather
+than written here from scratch: the phase skills are invoked as `/pilot-discovery`,
+`/pilot-spec`, `/pilot-dev`, `/pilot-review`, `/pilot-qa` — driven one
+phase at a time, there's no single command that runs the whole pipeline end to end.
+`.pilot/pilot-process.md` in this repo is a verbatim copy of that repo's canonical spec —
+the state machine, labels, and claim protocol — kept in sync by `/pilot-update`, never
+hand-edited here. Read it before creating or moving a ticket through any phase.
+<!-- PILOT:INTRO:END -->
+
+<!-- PILOT:ARCHITECTURE:START -->
+_Architecture not yet defined — run `/pilot-init-archi` to describe this monorepo's apps
+and technologies. That will generate this section (per-app doc references, tech stack,
+Clean Architecture layering) and scaffold each app's skeleton._
+<!-- PILOT:ARCHITECTURE:END -->
+
+---
+
+## 2. COMMON COMMANDS
+<!-- PILOT:COMMANDS:START -->
+_Not yet defined — run `/pilot-init-archi` to generate the per-app dev/test/build
+commands for this section._
+<!-- PILOT:COMMANDS:END -->
+
+---
+
+## 3. CODING STANDARDS & GLOBAL RULES
+- **New Framework/Dependency → Latest Compatible Version:** when introducing a new
+  framework or library (not bumping an existing one), pin the latest stable release
+  compatible with the app's runtime — check the registry (`npm view <pkg> version`,
+  `pip index versions <pkg>`) rather than guessing or reusing an older version from
+  memory. Existing dependencies keep their current upgrade cadence; this rule is about
+  the version picked at introduction time.
+- **Clean Architecture:** Strict dependency isolation between Domain, Use Cases,
+  Adapters, and Infrastructure across all services.
+- **Security:** Never log secrets or tokens. Inter-service calls that cross a trust
+  boundary require an explicit shared secret or equivalent, never an implicit trust
+  assumption.
+
+---
+
+## 4. DOCUMENTATION MAINTENANCE RULE
+At the end of any task that modifies architecture, endpoints, folder structures, or API contracts:
+1. Check if files in `docs/` or subfolder `CLAUDE.md` files are outdated.
+2. Automatically update the corresponding `.md` files before finalizing the task.
+3. **Keep `CLAUDE.md` and `README.md` (root and per-app) synchronized in substance, not
+   verbatim.** They target different audiences — `CLAUDE.md` instructs the LLM, `README.md`
+   informs human developers — so the same facts (workflow, architecture, conventions)
+   should hold true in both, but phrasing, depth, and emphasis can differ per audience.
+   A change that touches one MUST be checked against the other before finalizing the task.
+<!-- PILOT:MAINTENANCE:START -->
+4. **PILOT's file family is tightly cross-referenced** — `.pilot/pilot-process.md`, every
+   `.pilot/pilot-link-*.md`, `.pilot/pilot-process-*.md`, and `.pilot/pilot-task-*.md`, every
+   `.claude/skills/pilot-*/SKILL.md`, every `.claude/agents/pilot-*.md`, the
+   `PILOT:INTRO` blocks in this file and `README.md`, and the rest of the PILOT mentions
+   in both. All of it is PILOT-owned, copied in from
+   [github.com/Jonas-Eve/pilot](https://github.com/Jonas-Eve/pilot): never hand-edit any
+   of it, run `/pilot-update` instead. A renamed label, moved section heading, or
+   changed mechanism upstream can leave stale references in the rest of this
+   file/`README.md` outside the marked blocks (e.g. a command name in prose) — after
+   running `/pilot-update`, check cheaply: `grep` the exact term(s) that changed across
+   both files and fix what turns up.
+5. **A synced mechanism change can also leave a gap a `grep` won't find** — this file's
+   or `README.md`'s own prose about PILOT (a workflow description, a walkthrough) can go
+   stale in substance even when no single term was renamed, if what it describes no
+   longer matches the freshly-synced canonical behavior. After `/pilot-update`, skim that
+   prose against what actually changed, not just the renamed-term grep above.
+<!-- PILOT:MAINTENANCE:END -->
+
+---
+
+## 5. GIT WORKFLOW
+- **Commit Freely On A Work Branch, Never On `main`:** on a short-lived work branch,
+  committing and pushing completed work is authorized by default. On `main`, never commit
+  or push without the user explicitly asking in the current task.
+- **Amend, Don't Stack, Within The Same Not-Yet-Merged Context:** commits on a work
+  branch exist to separate distinct contexts. If a new commit only fixes, corrects, or
+  completes the change the immediately preceding commit made (not yet merged into `main`),
+  amend that commit instead of adding a separate commit for the same context. Once a
+  commit has merged into `main` (or a review has already landed on it), it's shared
+  history — never amend or force-push it. A branch is also "shared" the moment another
+  branch is created from it, even before either merges into `main`.
+- **Trunk-Based Development:** `main` is the single trunk. Work happens on short-lived
+  branches created from `main` and merged back quickly — no long-lived feature or release
+  branches.
+- **Conventional Commits:** Every commit message follows `type(scope): description`
+  (e.g. `fix(backend): resolve null pointer in session lookup`). Common types: `feat`,
+  `fix`, `docs`, `refactor`, `test`, `style`, `chore`. `scope` is typically the affected
+  app, or omitted for repo-wide changes.
+- **Squash Merge By Default, Rebase Merge For Deliberately Separate Commits:** squash a PR
+  into `main` as one commit unless it carries multiple commits that are each independently
+  meaningful on purpose (not fixups of an earlier commit in the same PR — those should have
+  been amended per the rule above) — rebase-merge those instead, to keep them distinct in
+  `main`'s history. Never a merge commit either way, and never force-push `main`.
