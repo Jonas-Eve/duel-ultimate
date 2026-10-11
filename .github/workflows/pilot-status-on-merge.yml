@@ -1,0 +1,250 @@
+name: PILOT Status On Merge
+
+on:
+  pull_request:
+    types: [closed]
+  issues:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to process (manual test path — no real merge required)"
+        required: true
+        type: number
+      dry_run:
+        description: "If true, log intended label changes without writing them"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: pilot-status-cascade
+  cancel-in-progress: false
+
+jobs:
+  update-status:
+    if: >
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      (github.event_name == 'issues' && github.event.action == 'closed') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve closed issues and update status labels
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const STATUS_PREFIX = 'status:';
+
+            function statusLabelsOf(issue) {
+              return issue.labels.map(l => (typeof l === 'string' ? l : l.name)).filter(n => n && n.startsWith(STATUS_PREFIX));
+            }
+
+            async function getIssue(issueNumber) {
+              const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+              return issue;
+            }
+
+            async function getStatusLabels(issueNumber) {
+              return statusLabelsOf(await getIssue(issueNumber));
+            }
+
+            async function swapToDone(issueNumber, dryRun, targetStatus = 'status:done') {
+              const issue = await getIssue(issueNumber);
+              const currentStatusLabels = statusLabelsOf(issue);
+              core.info(`Issue #${issueNumber}: removing [${currentStatusLabels.join(', ')}], adding ${targetStatus}` + (dryRun ? ' (dry run)' : ''));
+              if (dryRun) return;
+
+              for (const label of currentStatusLabels) {
+                if (label === targetStatus) continue;
+                try {
+                  await github.rest.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: label });
+                } catch (err) {
+                  if (err.status !== 404) throw err;
+                }
+              }
+              if (!currentStatusLabels.includes(targetStatus)) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: [targetStatus] });
+              }
+
+              // A task reaching status:done here was itself the target of a merged
+              // PR's "Closes #N", so GitHub has already closed it by this point. A
+              // status:split parent cascaded to status:done, however, was never
+              // merged directly (pilot-process.md §3 "Cascading completion") — nothing
+              // else in the pipeline ever closes its issue, so it would otherwise sit
+              // open forever despite carrying status:done. Close explicitly, for
+              // either case, whenever the target is the terminal status — reusing the
+              // issue already fetched above instead of a second GET.
+              if (targetStatus === 'status:done' && issue.state !== 'closed') {
+                await github.rest.issues.update({ owner, repo, issue_number: issueNumber, state: 'closed', state_reason: 'completed' });
+              }
+            }
+
+            async function maybeCascadeParent(issueNumber, dryRun) {
+              let parent;
+              try {
+                const { data } = await github.request('GET /repos/{owner}/{repo}/issues/{issue_number}/parent', {
+                  owner, repo, issue_number: issueNumber,
+                });
+                parent = data;
+              } catch (err) {
+                if (err.status === 404) return;
+                throw err;
+              }
+              if (!parent) return;
+
+              const parentLabels = parent.labels.map(l => (typeof l === 'string' ? l : l.name));
+
+              // An Epic carries no status: label — "done" is just every one of its
+              // stories being closed already. No further parent to check
+              // (pilot-process.md §2 "Three levels" caps the tree at Epic).
+              if (parentLabels.includes('level:epic')) {
+                if (parent.state === 'closed') return;
+
+                // Cheap pre-check only, same as the status:split fast path below: skips
+                // the sub_issues call in the common case where this issue payload's own
+                // summary already shows an open story. Never the sole basis for actually
+                // closing the Epic below — sub_issues_summary's presence on this exact
+                // REST response isn't guaranteed, so the real close decision always
+                // re-verifies against the live sub-issue list, not this summary alone.
+                const summary = parent.sub_issues_summary;
+                if (summary && summary.completed < summary.total) {
+                  core.info(`Epic #${parent.number} still has open stories; leaving open.`);
+                  return;
+                }
+
+                const { data: children } = await github.request('GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
+                  owner, repo, issue_number: parent.number,
+                });
+                const allClosed = children.length > 0 && children.every(child => child.state === 'closed');
+                if (!allClosed) {
+                  core.info(`Epic #${parent.number} still has open stories; leaving open.`);
+                  return;
+                }
+
+                core.info(`All of epic #${parent.number}'s stories are closed; closing the epic.` + (dryRun ? ' (dry run)' : ''));
+                if (!dryRun) {
+                  await github.rest.issues.update({ owner, repo, issue_number: parent.number, state: 'closed', state_reason: 'completed' });
+                }
+                return;
+              }
+
+              if (!parentLabels.includes('status:split')) return;
+
+              // Cheap pre-check, using the summary already on the parent object fetched
+              // above (no extra call): status:done/wont-do both require the issue to be
+              // closed first, so if not everything is closed yet, it can't be all
+              // done/wont-do either — skip the sibling-label fetch below in that case.
+              const splitSummary = parent.sub_issues_summary;
+              if (splitSummary && splitSummary.completed < splitSummary.total) {
+                core.info(`Parent #${parent.number} is status:split but not all sub-issues are closed yet; leaving as-is.`);
+                return;
+              }
+
+              const { data: siblings } = await github.request('GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
+                owner, repo, issue_number: parent.number,
+              });
+
+              const allDone = siblings.every(sib => {
+                const labels = sib.labels.map(l => (typeof l === 'string' ? l : l.name));
+                return labels.includes('status:done') || labels.includes('status:wont-do');
+              });
+
+              if (!allDone) {
+                core.info(`Parent #${parent.number} is status:split but not all sub-issues are done yet; leaving as-is.`);
+                return;
+              }
+
+              // A type:feature story always splits into dev task(s) plus exactly
+              // one e2e task depending on all of them (.pilot/pilot-link-e2e-tasks.md),
+              // so "all done" here is the same moment the
+              // e2e task itself just finished. That story goes to status:qa for a
+              // human to confirm (§7 "Phase 6 — Human QA") instead of straight to
+              // status:done — a type:tech parent (the only other type that can reach
+              // status:split; type:bug never does, pilot-process.md §2 "Three levels")
+              // is unaffected, unchanged cascade.
+              if (parentLabels.includes('type:feature')) {
+                core.info(`All sub-issues of #${parent.number} are done/wont-do; cascading status:qa (type:feature) to parent.`);
+                await swapToDone(parent.number, dryRun, 'status:qa');
+              } else {
+                core.info(`All sub-issues of #${parent.number} are done/wont-do; cascading status:done to parent.`);
+                await swapToDone(parent.number, dryRun);
+                // The story itself just closed — check whether it was an Epic's last
+                // open story too (recurses into the level:epic branch above; a story
+                // parent, if any, is capped at one Epic, so this never loops further).
+                if (!dryRun) {
+                  await maybeCascadeParent(parent.number, dryRun);
+                }
+              }
+            }
+
+            if (context.eventName === 'issues') {
+              // Reacts to a task closed outside the merge path: a status:wont-do
+              // ticket closed directly by the architect in phase 2, or a hand-closed
+              // ticket. A closure GitHub attributes to a merged "Closes #N" commit is
+              // already this workflow's pull_request:closed path's job — skip it here
+              // so the two triggers never both run cascade for the same event.
+              const issueNumber = context.payload.issue.number;
+
+              const { data: timeline } = await github.rest.issues.listEventsForTimeline({
+                owner, repo, issue_number: issueNumber, per_page: 100,
+              });
+              const closedByCommit = timeline.some(e => e.event === 'closed' && e.commit_id);
+              if (closedByCommit) {
+                core.info(`Issue #${issueNumber} was closed via a commit reference; pull_request:closed already owns this case.`);
+                return;
+              }
+
+              const labels = await getStatusLabels(issueNumber);
+              if (!labels.includes('status:done') && !labels.includes('status:wont-do')) {
+                core.info(`Issue #${issueNumber} closed without status:done/status:wont-do; not a PILOT-recognized completion, skipping.`);
+                return;
+              }
+
+              await maybeCascadeParent(issueNumber, false);
+              return;
+            }
+
+            const isDispatch = context.eventName === 'workflow_dispatch';
+            const dryRun = isDispatch && String(context.payload.inputs.dry_run) !== 'false';
+            const prNumber = isDispatch
+              ? Number(context.payload.inputs.pr_number)
+              : context.payload.pull_request.number;
+
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+            if (!pr.merged) {
+              core.info(`PR #${prNumber} is not merged (merged=${pr.merged}); nothing to do.`);
+              return;
+            }
+
+            const query = `
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $number) {
+                    closingIssuesReferences(first: 20) {
+                      nodes { number }
+                    }
+                  }
+                }
+              }`;
+            const result = await github.graphql(query, { owner, repo, number: prNumber });
+            const closedIssueNumbers = result.repository.pullRequest.closingIssuesReferences.nodes.map(n => n.number);
+
+            if (closedIssueNumbers.length === 0) {
+              core.info(`PR #${prNumber} merged but closes no issues; nothing to do.`);
+              return;
+            }
+
+            for (const issueNumber of closedIssueNumbers) {
+              await swapToDone(issueNumber, dryRun);
+              if (!dryRun) {
+                await maybeCascadeParent(issueNumber, dryRun);
+              } else {
+                core.info(`(dry run) would also check cascading-completion for #${issueNumber}'s parent, if any.`);
+              }
+            }
