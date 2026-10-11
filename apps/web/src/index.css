@@ -1,0 +1,4 @@
+/* Mobile-first: base styles target a phone, wider screens opt in with min-width queries. */
+:root { font-family: system-ui, sans-serif; }
+body { margin: 0; padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom); }
+main { max-width: 40rem; margin: 0 auto; }

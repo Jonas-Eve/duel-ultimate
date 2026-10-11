@@ -2,10 +2,42 @@
   "pilotInitialized": true,
   "pilotInitializedAt": "2026-10-11T16:37:29Z",
   "projectName": "duel-ultimate",
-  "archInitialized": false,
-  "archInitializedAt": null,
+  "archInitialized": true,
+  "archInitializedAt": "2026-10-11T16:52:50Z",
   "lastProcessDocSyncAt": "2026-10-11T16:37:29Z",
   "lastLabelsSyncAt": null,
   "lastIntroSyncAt": "2026-10-11T16:37:29Z",
-  "lastSkillsSyncAt": "2026-10-11T16:37:29Z"
+  "lastSkillsSyncAt": "2026-10-11T16:37:29Z",
+  "apps": [
+    {
+      "name": "engine",
+      "purpose": "Moteur de règles pur et déterministe",
+      "stack": "Rust 2024"
+    },
+    {
+      "name": "cards",
+      "purpose": "Cartes, decks et extensions en données JSON",
+      "stack": "Rust, serde"
+    },
+    {
+      "name": "simulator",
+      "purpose": "Équilibrage IA contre IA",
+      "stack": "Rust"
+    },
+    {
+      "name": "server",
+      "purpose": "Serveur de parties en ligne",
+      "stack": "Rust, axum, tokio"
+    },
+    {
+      "name": "engine-wasm",
+      "purpose": "Binding WASM du moteur",
+      "stack": "Rust, wasm-bindgen"
+    },
+    {
+      "name": "web",
+      "purpose": "Client web mobile-first",
+      "stack": "React 19, TypeScript, Vite"
+    }
+  ]
 }
