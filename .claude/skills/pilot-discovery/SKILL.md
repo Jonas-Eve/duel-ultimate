@@ -68,8 +68,8 @@ no-ticket entry, `pilot-spec/SKILL.md`).
 5. This phase always runs paired (`.pilot/pilot-process.md` §4 "Interaction modes" —
    `/pilot-discovery` has no `--auto`): show the human the drafted story/stories (and epic
    decision, if any) and the architecture already anticipated — pointing at the real
-   issue number(s) from step 4, not just conversation text. Put the PM's open questions
-   (`.pilot/pilot-task-write-story.md`) to the human too — at most four at a time, the most
+   issue number(s) from step 4, not just conversation text. Put the PM's open questions and
+   challenges (`.pilot/pilot-task-write-story.md`) to the human too — at most four at a time, the most
    shape-changing first, through whatever question tool you have, each with its provisional
    default as the recommended option — and feed the answers back into the dialogue; an
    answer that opens new questions gets another round. A draft isn't approved while a
