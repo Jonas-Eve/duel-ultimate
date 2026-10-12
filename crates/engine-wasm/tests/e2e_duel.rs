@@ -951,3 +951,95 @@ fn a_non_lethal_attack_can_cross_the_budget_and_each_creature_can_attack() {
     assert_eq!(count(&events, "game_won"), 0);
     assert_eq!(token(&events).0, "Two");
 }
+
+// ---------------------------------------------------------------------------------------
+// Attacking a creature through the JSON boundary
+// ---------------------------------------------------------------------------------------
+
+fn strike(attacker: u64, victim: u64) -> Value {
+    json!({"attack": {"attacker": attacker, "target": {"creature": victim}}})
+}
+
+#[test]
+fn a_creature_attack_kills_logs_its_events_and_hostile_or_misdirected_ones_are_refused() {
+    // Every card costs 1 to play and to attack with and has 1 force and 1 health: each
+    // action crosses the budget (One holds 1 time unit).
+    let mut setup = fixture();
+    uniform_cards(&mut setup, 1, 1);
+    setup["one"]["hero"]["initiative"] = 9.into();
+    setup["one"]["hero"]["start_budget"] = 1.into();
+    setup["two"]["hero"]["initiative"] = 1.into();
+    let mut game = start(&setup, 3);
+
+    let a = plays(&legal(&game))[0];
+    apply(&mut game, &play(a));
+    let x = plays(&legal(&game))[0];
+    apply(&mut game, &play(x));
+    assert!(active_effects(&game) > 0, "One is active again");
+
+    let events = apply(&mut game, &strike(a, x));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "creature_damaged",
+            "died",
+            "token_moved",
+            "active_player_changed"
+        ]
+    );
+    assert_eq!(
+        find(&events, "creature_damaged"),
+        Some(&json!({"player": "Two", "creature": x, "amount": 1}))
+    );
+    assert_eq!(
+        find(&events, "died"),
+        Some(&json!({"player": "Two", "creature": x}))
+    );
+    assert_eq!(count(&events, "damaged"), 0, "no hero damage");
+    assert_eq!(count(&events, "game_won"), 0);
+    assert_eq!(token(&events), ("Two".to_owned(), 1));
+
+    // The dead creature cannot attack.
+    let before = game.legal_actions_json().unwrap();
+    assert_eq!(refusal(&mut game, &strike(x, a)), "attacker_not_on_board");
+    assert_eq!(game.legal_actions_json().unwrap(), before);
+
+    // Back to One with a creature of its own: nothing but a creature of Two's board is a
+    // target, and every refusal is the same error without touching the game.
+    let hand = plays(&legal(&game));
+    apply(&mut game, &play(hand[0]));
+    let before = game.legal_actions_json().unwrap();
+    // The dead creature, its own creature, a card still in the opponent's hand, an unknown id.
+    for victim in [x, a, hand[1], 9999] {
+        assert_eq!(
+            refusal(&mut game, &strike(a, victim)),
+            "target_not_on_board",
+            "{victim}"
+        );
+    }
+    assert_eq!(game.legal_actions_json().unwrap(), before);
+    assert_eq!(
+        refusal(&mut game, &strike(9999, 9999)),
+        "attacker_not_on_board"
+    );
+
+    // Hostile target shapes never reach the rules.
+    for hostile in [
+        r#"{"creature":-1}"#,
+        "4294967296",
+        r#""7""#,
+        "1.5",
+        "null",
+        r#"{"creature":7,"x":1}"#,
+        r#"{"Creature":7}"#,
+    ] {
+        let action = format!(r#"{{"attack":{{"attacker":{a},"target":{hostile}}}}}"#);
+        assert_eq!(
+            error_code(&game.apply_json(&action).unwrap_err()),
+            "invalid_json",
+            "{hostile}"
+        );
+    }
+    assert_eq!(game.legal_actions_json().unwrap(), before);
+}

@@ -26,11 +26,13 @@ pub enum Action {
     Concede,
 }
 
-/// What an attack aims at. Only the opposing hero for now.
+/// What an attack aims at: the opposing hero or a creature of the opposing board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Target {
     Hero,
+    /// An opposing creature in play (untrusted id, validated by the engine).
+    Creature(CardInstanceId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +67,18 @@ pub enum Event {
         player: PlayerId,
         amount: u32,
     },
+    /// The creature `creature` of `player` (its owner) took `amount` damage (the attacker's
+    /// nominal force: the excess over its remaining health is lost).
+    CreatureDamaged {
+        player: PlayerId,
+        creature: CardInstanceId,
+        amount: u32,
+    },
+    /// The creature left `player`'s board for their discard pile.
+    Died {
+        player: PlayerId,
+        creature: CardInstanceId,
+    },
     /// After every non-final action: `player` holds the token with `budget`.
     TokenMoved {
         player: PlayerId,
@@ -92,6 +106,8 @@ pub enum RuleError {
     EffectNotApplicable,
     #[error("that creature is not on the active player's board")]
     AttackerNotOnBoard,
+    #[error("that target is not a creature of the opposing board")]
+    TargetNotOnBoard,
 }
 
 impl RuleError {
@@ -103,6 +119,7 @@ impl RuleError {
             Self::UnknownEffect => "unknown_effect",
             Self::EffectNotApplicable => "effect_not_applicable",
             Self::AttackerNotOnBoard => "attacker_not_on_board",
+            Self::TargetNotOnBoard => "target_not_on_board",
         }
     }
 }
@@ -131,6 +148,15 @@ fn board_position(state: &GameState, card: CardInstanceId) -> Option<usize> {
         .position(|c| c.id == card)
 }
 
+/// Position in the opposing player's board of the creature `card`, if it is there.
+fn opposing_board_position(state: &GameState, card: CardInstanceId) -> Option<usize> {
+    state
+        .player(state.active.opponent())
+        .board
+        .iter()
+        .position(|c| c.id == card)
+}
+
 /// The single legality check, shared by [`apply`] and [`legal_actions`].
 pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleError> {
     if state.winner.is_some() {
@@ -141,11 +167,17 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
         Action::Play { card } => hand_position(state, *card)
             .map(|_| ())
             .ok_or(RuleError::CardNotInHand),
-        Action::Attack { attacker, target } => match target {
-            Target::Hero => board_position(state, *attacker)
-                .map(|_| ())
-                .ok_or(RuleError::AttackerNotOnBoard),
-        },
+        Action::Attack { attacker, target } => {
+            // Order of the checks: the attacker, then the target. Every refused target
+            // gets the same error, whatever zone (hidden or not) the id is in.
+            board_position(state, *attacker).ok_or(RuleError::AttackerNotOnBoard)?;
+            match target {
+                Target::Hero => Ok(()),
+                Target::Creature(creature) => opposing_board_position(state, *creature)
+                    .map(|_| ())
+                    .ok_or(RuleError::TargetNotOnBoard),
+            }
+        }
         Action::Activate { effect } => {
             let hero_effect = hero_effect(state, *effect).ok_or(RuleError::UnknownEffect)?;
             if effects::applicable(state, state.active, &hero_effect.effect) {
@@ -221,6 +253,7 @@ pub fn apply(state: &mut GameState, action: Action) -> Result<Vec<Event>, RuleEr
                 cost,
             }];
             combat::resolve_damage(state, player, attacker, target, &mut events);
+            combat::bury_dead(state, &mut events);
             let victim = player.opponent();
             if state.player(victim).health == 0 {
                 // The game stops here: no time is spent, the token does not move and the
@@ -289,6 +322,9 @@ fn pay(state: &mut GameState, cost: u32, events: &mut Vec<Event>) {
 /// Every action the active player may take: one `Play` per card in hand, hero effects in the
 /// order of the hero's list, one `Attack` (on the hero) per creature of the board in order of
 /// summoning, then `Concede`. Empty once the game is over.
+///
+/// Transitional: [`apply`] already accepts an attack on a creature of the opposing board,
+/// which this list does not offer yet (a later task of the same story adds those attacks).
 pub fn legal_actions(state: &GameState) -> Vec<Action> {
     if state.winner.is_some() {
         return Vec::new();

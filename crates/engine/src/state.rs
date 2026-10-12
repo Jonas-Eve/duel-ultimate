@@ -35,6 +35,8 @@ pub enum WinReason {
 }
 
 /// A card of a game, carrying a copy of its stats: the engine never queries a data store.
+/// `stats.health` is the instance's *current* health (damage lowers it; a creature at 0 is
+/// buried): there is no second field, which would be a second source of truth.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CardInstance {
     pub(crate) id: CardInstanceId,
@@ -51,6 +53,8 @@ pub(crate) struct PlayerState {
     pub(crate) hand: Vec<CardInstance>,
     /// Summoned creatures, in order of summoning.
     pub(crate) board: Vec<CardInstance>,
+    /// Dead creatures, in order of death. Public information.
+    pub(crate) discard: Vec<CardInstance>,
 }
 
 /// Invariant while the game runs: `1 <= budget <= max_time` of the active player's hero.
@@ -124,6 +128,20 @@ impl GameState {
         self.player(player).board.iter().map(|c| c.id).collect()
     }
 
+    /// The creatures that died on `player`'s side, in order of death (the discard is public).
+    pub fn discard(&self, player: PlayerId) -> Vec<CardInstanceId> {
+        self.player(player).discard.iter().map(|c| c.id).collect()
+    }
+
+    /// Current health of the creature `creature` if it is on a board.
+    pub fn creature_health(&self, creature: CardInstanceId) -> Option<u32> {
+        [&self.one, &self.two]
+            .into_iter()
+            .flat_map(|side| side.board.iter())
+            .find(|c| c.id == creature)
+            .map(|c| c.stats.health)
+    }
+
     pub(crate) fn player(&self, player: PlayerId) -> &PlayerState {
         match player {
             PlayerId::One => &self.one,
@@ -153,6 +171,7 @@ mod tests {
     use super::*;
     use crate::testing::{draw, hero, setup};
     use crate::{Action, Event, RuleError, apply, legal_actions, new_game};
+    use duel_cards::CreatureStats;
     use rand::{Rng, SeedableRng};
     use rand_chacha::ChaCha8Rng;
 
@@ -286,6 +305,160 @@ mod tests {
         assert!(!events.iter().any(|e| matches!(e, Event::GameWon { .. })));
     }
 
+    /// `running` (One active, 8 time units) with a creature of `attack_cost` and force 5 on
+    /// One's board facing a lone 1-health creature on Two's, Two having neither hand nor
+    /// pile. Returns the state, the attacker and the victim.
+    fn about_to_kill_twos_last_creature(
+        attack_cost: u32,
+    ) -> (GameState, crate::CardInstanceId, crate::CardInstanceId) {
+        let mut state = running(vec![draw(1, 1)]);
+        let mut attacker = state.one.hand.remove(0);
+        attacker.stats.force = 5;
+        attacker.stats.attack_cost = attack_cost;
+        let mut victim = state.two.hand.remove(0);
+        victim.stats.health = 1;
+        let (a, x) = (attacker.id, victim.id);
+        state.one.board.push(attacker);
+        state.two.board.push(victim);
+        state.two.hand.clear();
+        state.two.deck.clear();
+        (state, a, x)
+    }
+
+    fn strike(a: crate::CardInstanceId, x: crate::CardInstanceId) -> Action {
+        Action::Attack {
+            attacker: a,
+            target: crate::Target::Creature(x),
+        }
+    }
+
+    #[test]
+    fn killing_the_last_creature_of_a_receiver_without_cards_ends_the_game_by_exhaustion() {
+        // c >= b (8 >= 8): the token crosses to Two, who has nothing left to do.
+        let (mut state, a, x) = about_to_kill_twos_last_creature(8);
+        let events = apply(&mut state, strike(a, x)).unwrap();
+        assert_eq!(state.winner(), Some((PlayerId::One, WinReason::Exhaustion)));
+        assert_eq!(state.active(), PlayerId::Two);
+        assert_eq!(state.hero_health(PlayerId::Two), 10, "no hero damage");
+        let tail: Vec<_> = events.iter().rev().take(4).rev().cloned().collect();
+        assert_eq!(
+            tail,
+            vec![
+                Event::Died {
+                    player: PlayerId::Two,
+                    creature: x
+                },
+                Event::TokenMoved {
+                    player: PlayerId::Two,
+                    budget: 1
+                },
+                Event::ActivePlayerChanged {
+                    player: PlayerId::Two
+                },
+                Event::GameWon {
+                    winner: PlayerId::One,
+                    reason: WinReason::Exhaustion
+                },
+            ]
+        );
+        assert!(legal_actions(&state).is_empty());
+    }
+
+    #[test]
+    fn a_creature_kill_that_keeps_the_token_exhausts_nobody() {
+        // c < b (2 < 8): One stays active, and its creature can still attack.
+        let (mut state, a, x) = about_to_kill_twos_last_creature(2);
+        let events = apply(&mut state, strike(a, x)).unwrap();
+        assert_eq!(state.winner(), None);
+        assert_eq!((state.active(), state.budget()), (PlayerId::One, 6));
+        assert!(!events.iter().any(|e| matches!(e, Event::GameWon { .. })));
+    }
+
+    #[test]
+    fn a_receiver_with_another_creature_is_not_exhausted_by_a_kill() {
+        let (mut state, a, x) = about_to_kill_twos_last_creature(8);
+        let mut other = state.two.board[0].clone();
+        other.id = crate::CardInstanceId(999);
+        other.stats.health = 5;
+        state.two.board.push(other);
+        apply(&mut state, strike(a, x)).unwrap();
+        assert_eq!(state.winner(), None);
+        assert_eq!(state.active(), PlayerId::Two);
+    }
+
+    #[test]
+    fn a_receiver_with_a_card_in_hand_is_not_exhausted_by_a_kill() {
+        let (mut state, a, x) = about_to_kill_twos_last_creature(8);
+        let card = state.one.hand.remove(0);
+        state.two.hand.push(card);
+        apply(&mut state, strike(a, x)).unwrap();
+        assert_eq!(state.winner(), None);
+        assert_eq!(state.active(), PlayerId::Two);
+    }
+
+    #[test]
+    fn a_receiver_with_a_card_in_the_pile_is_not_exhausted_by_a_kill() {
+        // Its hero can still draw.
+        let (mut state, a, x) = about_to_kill_twos_last_creature(8);
+        let card = state.one.hand.remove(0);
+        state.two.deck.push(card);
+        apply(&mut state, strike(a, x)).unwrap();
+        assert_eq!(state.winner(), None);
+        assert_eq!(state.active(), PlayerId::Two);
+    }
+
+    fn creature(id: u32, health: u32) -> CardInstance {
+        CardInstance {
+            id: CardInstanceId(id),
+            stats: CreatureStats {
+                cost: 1,
+                force: 1,
+                attack_cost: 1,
+                health,
+            },
+        }
+    }
+
+    #[test]
+    fn bury_dead_discards_the_dead_of_both_boards_in_instance_id_order() {
+        let mut state = running(vec![draw(1, 1)]);
+        // Board orders and sides deliberately disagree with the id order.
+        state.one.board = vec![creature(9, 0), creature(40, 2), creature(5, 0)];
+        state.two.board = vec![creature(50, 3), creature(1, 0)];
+        let mut events = Vec::new();
+        crate::combat::bury_dead(&mut state, &mut events);
+        assert_eq!(
+            events,
+            vec![
+                Event::Died {
+                    player: PlayerId::Two,
+                    creature: CardInstanceId(1)
+                },
+                Event::Died {
+                    player: PlayerId::One,
+                    creature: CardInstanceId(5)
+                },
+                Event::Died {
+                    player: PlayerId::One,
+                    creature: CardInstanceId(9)
+                },
+            ]
+        );
+        assert_eq!(
+            state.discard(PlayerId::One),
+            vec![CardInstanceId(5), CardInstanceId(9)]
+        );
+        assert_eq!(state.discard(PlayerId::Two), vec![CardInstanceId(1)]);
+        assert_eq!(state.board(PlayerId::One), vec![CardInstanceId(40)]);
+        assert_eq!(state.board(PlayerId::Two), vec![CardInstanceId(50)]);
+        // Nothing left to bury: a second sweep changes nothing.
+        let before = state.clone();
+        events.clear();
+        crate::combat::bury_dead(&mut state, &mut events);
+        assert!(events.is_empty());
+        assert_eq!(state, before);
+    }
+
     #[test]
     fn a_non_empty_hand_is_never_exhausted() {
         // Empty pile and no effect at all, but cards in hand: playing is still possible.
@@ -397,5 +570,70 @@ mod tests {
                 assert!(steps < 1000, "seed {seed}: the game does not end");
             }
         }
+    }
+
+    /// The termination potential of `combat.rs`: heroes' health plus, per card, its current
+    /// health and 2 in a pile, 1 in a hand, 0 more on a board, nothing in a discard.
+    fn potential(state: &GameState) -> u64 {
+        let side = |p: &PlayerState| {
+            let health = |cards: &[CardInstance], extra: u64| {
+                cards
+                    .iter()
+                    .map(|c| u64::from(c.stats.health) + extra)
+                    .sum::<u64>()
+            };
+            u64::from(p.health) + health(&p.deck, 2) + health(&p.hand, 1) + health(&p.board, 0)
+        };
+        side(&state.one) + side(&state.two)
+    }
+
+    #[test]
+    fn the_potential_strictly_decreases_at_every_action_even_when_creatures_are_attacked() {
+        let mut deaths = 0;
+        for seed in 0..100u64 {
+            let (mut state, _) = new_game(
+                setup(
+                    hero(1 + (seed % 2) as u32, 3, 8, vec![draw(1, 1), draw(4, 3)]),
+                    hero(1, 2, 6, vec![draw(2, 2)]),
+                ),
+                seed,
+            )
+            .unwrap();
+            let mut policy = ChaCha8Rng::seed_from_u64(seed ^ 0x5A5A);
+            let mut steps = 0;
+            while state.winner().is_none() {
+                // Everything `legal_actions` offers, plus every attack on a creature
+                // (which `apply` accepts before `legal_actions` lists it).
+                let mine = state.board(state.active());
+                let theirs = state.board(state.active().opponent());
+                let mut playable: Vec<Action> = legal_actions(&state)
+                    .into_iter()
+                    .filter(|a| *a != Action::Concede)
+                    .collect();
+                playable.extend(
+                    mine.iter()
+                        .flat_map(|a| theirs.iter().map(move |x| strike(*a, *x))),
+                );
+                let pick = playable
+                    .get(policy.next_u32() as usize % playable.len().max(1))
+                    .copied()
+                    .unwrap_or(Action::Concede);
+                let before = potential(&state);
+                let events = apply(&mut state, pick).unwrap();
+                deaths += events
+                    .iter()
+                    .filter(|e| matches!(e, Event::Died { .. }))
+                    .count();
+                if pick != Action::Concede {
+                    assert!(
+                        potential(&state) < before,
+                        "seed {seed}: {pick:?} did not decrease the potential"
+                    );
+                }
+                steps += 1;
+                assert!(steps < 2000, "seed {seed}: the game does not end");
+            }
+        }
+        assert!(deaths > 100, "the games really kill creatures: {deaths}");
     }
 }
