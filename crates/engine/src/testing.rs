@@ -1,5 +1,6 @@
 //! Fixtures shared by the in-crate tests.
 
+use crate::state::{CardInstance, GameState, PlayerState};
 use crate::{GameSetup, PlayerSetup};
 use duel_cards::{CreatureStats, Effect, Hero, HeroEffect};
 
@@ -52,4 +53,19 @@ pub(crate) fn setup(one: Hero, two: Hero) -> GameSetup {
         },
         data_versions: vec!["fixture@1.0.0".into()],
     }
+}
+
+/// The termination potential Φ of `combat.rs`: the heroes' health plus, per card, its
+/// current health and 2 in a pile, 1 in a hand, 0 more on a board, nothing in a discard.
+pub(crate) fn potential(state: &GameState) -> u64 {
+    let side = |p: &PlayerState| {
+        let health = |cards: &[CardInstance], extra: u64| {
+            cards
+                .iter()
+                .map(|c| u64::from(c.stats.health) + extra)
+                .sum::<u64>()
+        };
+        u64::from(p.health) + health(&p.deck, 2) + health(&p.hand, 1) + health(&p.board, 0)
+    };
+    side(&state.one) + side(&state.two)
 }

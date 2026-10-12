@@ -8,9 +8,9 @@
 //! `Duel`s of the same seed fed the same actions, the refused action going to one only.
 //!
 //! Defeat by exhaustion cannot happen in play between the real fixture decks (every hero
-//! keeps a draw effect and a pile, and no creature dies before S2a), but it is reachable
-//! through the JSON boundary by mutating the setup (a hero with no effect and no hand): it
-//! is exercised both at setup and as the consequence of a handover.
+//! keeps a draw effect and a pile), but it is reachable through the JSON boundary by
+//! mutating the setup (a hero with no effect and no hand): it is exercised both at setup and
+//! as the consequence of a handover.
 
 use duel_cards::{CardsError, parse_cards, parse_decks, resolve_deck};
 use duel_engine::{GameSetup, PlayerSetup};
@@ -1042,4 +1042,84 @@ fn a_creature_attack_kills_logs_its_events_and_hostile_or_misdirected_ones_are_r
         );
     }
     assert_eq!(game.legal_actions_json().unwrap(), before);
+}
+
+// ---------------------------------------------------------------------------------------
+// Targets offered by legal_actions
+// ---------------------------------------------------------------------------------------
+
+/// The attack actions of a list of legal actions, as `(attacker, target)` pairs.
+fn attacks(actions: &[Value]) -> Vec<(u64, Value)> {
+    actions
+        .iter()
+        .filter(|a| kind(a) == "attack")
+        .map(|a| {
+            (
+                a["attack"]["attacker"].as_u64().unwrap(),
+                a["attack"]["target"].clone(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn legal_actions_offer_the_hero_then_each_opposing_creature_and_forget_the_dead() {
+    // Every card costs 1 to play and to attack with, has 1 force and 1 health; every action
+    // crosses the budget of 1 time unit.
+    let mut setup = fixture();
+    uniform_cards(&mut setup, 1, 1);
+    setup["one"]["hero"]["initiative"] = 9.into();
+    setup["one"]["hero"]["start_budget"] = 1.into();
+    setup["two"]["hero"]["initiative"] = 1.into();
+    let mut game = start(&setup, 3);
+
+    let a = plays(&legal(&game))[0];
+    apply(&mut game, &play(a));
+    // Two has no creature yet, so it has no attack to offer (only a play and an effect).
+    assert!(attacks(&legal(&game)).is_empty());
+    let x = plays(&legal(&game))[0];
+    apply(&mut game, &play(x));
+    assert_eq!(
+        attacks(&legal(&game)),
+        [(a, json!("hero")), (a, json!({"creature": x}))]
+    );
+
+    // One summons a second creature (the token crosses), Two does the same.
+    let b = plays(&legal(&game))[0];
+    apply(&mut game, &play(b));
+    let y = plays(&legal(&game))[0];
+    apply(&mut game, &play(y));
+    let offered = legal(&game);
+    assert_eq!(
+        attacks(&offered),
+        [
+            (a, json!("hero")),
+            (a, json!({"creature": x})),
+            (a, json!({"creature": y})),
+            (b, json!("hero")),
+            (b, json!({"creature": x})),
+            (b, json!({"creature": y})),
+        ],
+        "per attacker: the hero first, then the opposing board in order"
+    );
+    assert!(
+        offered.contains(&json!({"attack": {"attacker": a, "target": {"creature": x}}})),
+        "the exact JSON shape a client sends back"
+    );
+    assert_eq!(offered.last(), Some(&json!("concede")));
+
+    // A kill removes the victim from the targets, and a dead creature stops attacking.
+    apply(&mut game, &strike(a, x));
+    assert_eq!(count(&apply(&mut game, &strike(y, b)), "died"), 1);
+    let after = legal(&game);
+    for (attacker, target) in attacks(&after) {
+        assert_ne!(attacker, b, "dead creatures do not attack");
+        assert_ne!(
+            target,
+            json!({"creature": b}),
+            "dead creatures are not targets"
+        );
+        assert_ne!(target, json!({"creature": x}));
+    }
+    assert!(!attacks(&after).is_empty());
 }
