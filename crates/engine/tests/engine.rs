@@ -3,8 +3,8 @@
 
 use duel_cards::{CardsError, CreatureStats, Effect, Hero, HeroEffect, MAX_STAT};
 use duel_engine::{
-    Action, Event, GameSetup, GameState, PlayerId, PlayerSetup, RuleError, SetupError, WinReason,
-    apply, legal_actions, new_game,
+    Action, CardInstanceId, Event, GameSetup, GameState, PlayerId, PlayerSetup, RuleError,
+    SetupError, WinReason, apply, legal_actions, new_game,
 };
 use std::collections::BTreeSet;
 
@@ -72,6 +72,7 @@ fn kinds(events: &[Event]) -> Vec<&'static str> {
             Event::GameStarted { .. } => "GameStarted",
             Event::EffectActivated { .. } => "EffectActivated",
             Event::Drew { .. } => "Drew",
+            Event::Played { .. } => "Played",
             Event::TokenMoved { .. } => "TokenMoved",
             Event::ActivePlayerChanged { .. } => "ActivePlayerChanged",
             Event::GameWon { .. } => "GameWon",
@@ -357,8 +358,12 @@ fn a_hero_with_several_effects_can_activate_each_at_its_own_cost() {
         4,
     )
     .unwrap();
+    let effect_actions: Vec<_> = legal_actions(&state)
+        .into_iter()
+        .filter(|a| !matches!(a, Action::Play { .. }))
+        .collect();
     assert_eq!(
-        legal_actions(&state),
+        effect_actions,
         vec![
             Action::Activate { effect: 0 },
             Action::Activate { effect: 1 },
@@ -412,11 +417,10 @@ fn nothing_is_drawn_automatically_and_the_pile_only_shrinks_through_activations(
 #[test]
 fn there_is_no_pass_action() {
     let (state, _) = duel(vec![draw(1, 1)], 8);
-    assert!(
-        legal_actions(&state)
-            .iter()
-            .all(|a| matches!(a, Action::Activate { .. } | Action::Concede))
-    );
+    assert!(legal_actions(&state).iter().all(|a| matches!(
+        a,
+        Action::Play { .. } | Action::Activate { .. } | Action::Concede
+    )));
 }
 
 // ---- concede, game over ---------------------------------------------------------------
@@ -445,6 +449,7 @@ fn concede_records_the_winner_and_the_reason_and_ends_the_game() {
 fn rule_errors_have_stable_codes() {
     assert_eq!(RuleError::GameOver.code(), "game_over");
     assert_eq!(RuleError::UnknownEffect.code(), "unknown_effect");
+    assert_eq!(RuleError::CardNotInHand.code(), "card_not_in_hand");
     assert_eq!(
         RuleError::EffectNotApplicable.code(),
         "effect_not_applicable"
@@ -469,6 +474,9 @@ fn legal_actions_agree_with_apply() {
             assert_eq!(legal.last(), Some(&Action::Concede));
             let universe = (0..12)
                 .map(|effect| Action::Activate { effect })
+                .chain((0..64).map(|n| Action::Play {
+                    card: CardInstanceId(n),
+                }))
                 .chain([Action::Concede, Action::Activate { effect: u32::MAX }]);
             for action in universe {
                 let mut probe = state.clone();
@@ -478,7 +486,13 @@ fn legal_actions_agree_with_apply() {
                     "seed {seed}: {action:?}"
                 );
             }
-            let pick = legal.first().copied().unwrap();
+            // Alternate between the first (a Play when there is a card) and the last
+            // non-Concede action, to exercise both kinds.
+            let playable: Vec<_> = legal.iter().filter(|a| **a != Action::Concede).collect();
+            let pick = match (playable.first(), playable.last()) {
+                (Some(first), Some(last)) => **if state.budget() % 2 == 0 { first } else { last },
+                _ => Action::Concede,
+            };
             apply(&mut state, pick).unwrap();
         }
         assert!(legal_actions(&state).is_empty());
@@ -546,9 +560,249 @@ fn actions_travel_as_snake_case_json_and_reject_unknown_fields() {
         r#""concede""#
     );
     assert_eq!(
+        serde_json::to_string(&Action::Play {
+            card: CardInstanceId(5)
+        })
+        .unwrap(),
+        r#"{"play":{"card":5}}"#
+    );
+    assert_eq!(
+        serde_json::from_str::<Action>(r#"{"play":{"card":5}}"#).unwrap(),
+        Action::Play {
+            card: CardInstanceId(5)
+        }
+    );
+    assert!(serde_json::from_str::<Action>(r#"{"play":{"card":5,"x":1}}"#).is_err());
+    assert!(serde_json::from_str::<Action>(r#"{"play":{"card":-1}}"#).is_err());
+    assert_eq!(
         serde_json::from_str::<Action>(r#"{"activate":{"effect":2}}"#).unwrap(),
         Action::Activate { effect: 2 }
     );
     assert!(serde_json::from_str::<Action>(r#"{"activate":{"effect":2,"x":1}}"#).is_err());
     assert!(serde_json::from_str::<Action>(r#"{"activate":{"effect":-1}}"#).is_err());
+}
+
+// ---- Play ----------------------------------------------------------------------------------
+
+/// A deck where every card costs `cost` to summon.
+fn flat_cards(cost: u32) -> Vec<CreatureStats> {
+    (0..30)
+        .map(|_| CreatureStats {
+            cost,
+            force: 2,
+            attack_cost: 1,
+            health: 3,
+        })
+        .collect()
+}
+
+/// One (budget 3, max_time 8) against a Two of `two_max`; every card costs `cost`.
+fn flat_duel(cost: u32, two_max: u32) -> GameState {
+    let mut s = setup(
+        hero(2, 3, 8, vec![draw(1, 1)]),
+        hero(1, 1, two_max, vec![draw(1, 1)]),
+    );
+    s.one.cards = flat_cards(cost);
+    s.two.cards = flat_cards(cost);
+    new_game(s, 7).unwrap().0
+}
+
+fn first_in_hand(state: &GameState, player: PlayerId) -> CardInstanceId {
+    state.hand(player)[0]
+}
+
+fn play_first(state: &mut GameState) -> Vec<Event> {
+    let card = first_in_hand(state, state.active());
+    apply(state, Action::Play { card }).unwrap()
+}
+
+#[test]
+fn playing_moves_the_card_from_the_hand_to_the_board() {
+    let mut state = flat_duel(1, 8);
+    let card = first_in_hand(&state, PlayerId::One);
+    assert!(state.board(PlayerId::One).is_empty());
+    apply(&mut state, Action::Play { card }).unwrap();
+    assert_eq!(state.hand_len(PlayerId::One), 3);
+    assert!(!state.hand(PlayerId::One).contains(&card));
+    assert_eq!(state.board(PlayerId::One), vec![card]);
+    assert!(state.board(PlayerId::Two).is_empty());
+    assert_eq!(
+        state.hand_len(PlayerId::Two),
+        4,
+        "the opponent is untouched"
+    );
+}
+
+#[test]
+fn the_board_keeps_the_order_of_summoning() {
+    let mut state = flat_duel(1, 8);
+    let hand = state.hand(PlayerId::One);
+    let order = [hand[2], hand[0], hand[3]];
+    for card in order {
+        apply(&mut state, Action::Play { card }).unwrap();
+    }
+    assert_eq!(state.board(PlayerId::One), order);
+    assert_eq!(state.hand(PlayerId::One), vec![hand[1]]);
+}
+
+#[test]
+fn play_with_cost_below_budget_keeps_the_token() {
+    let mut state = flat_duel(2, 8);
+    let events = play_first(&mut state);
+    assert_eq!((state.active(), state.budget()), (PlayerId::One, 1));
+    assert!(!kinds(&events).contains(&"ActivePlayerChanged"));
+}
+
+#[test]
+fn play_with_cost_equal_to_budget_crosses_and_the_opponent_gets_one() {
+    let mut state = flat_duel(3, 8);
+    let events = play_first(&mut state);
+    assert_eq!((state.active(), state.budget()), (PlayerId::Two, 1));
+    assert!(events.contains(&Event::ActivePlayerChanged {
+        player: PlayerId::Two
+    }));
+}
+
+#[test]
+fn play_with_cost_above_budget_gives_the_excess_plus_one() {
+    let mut state = flat_duel(5, 8);
+    play_first(&mut state);
+    assert_eq!((state.active(), state.budget()), (PlayerId::Two, 3));
+}
+
+#[test]
+fn play_is_capped_by_the_receivers_max_time_and_may_exceed_the_own_one() {
+    let mut state = flat_duel(9, 5);
+    play_first(&mut state);
+    assert_eq!((state.active(), state.budget()), (PlayerId::Two, 5));
+    // A cost above One's own max_time (8) is legal.
+    let mut state = flat_duel(30, 10);
+    play_first(&mut state);
+    assert_eq!((state.active(), state.budget()), (PlayerId::Two, 10));
+}
+
+#[test]
+fn a_play_logs_played_then_token_then_player_change() {
+    let mut state = flat_duel(3, 8);
+    let card = first_in_hand(&state, PlayerId::One);
+    let events = apply(&mut state, Action::Play { card }).unwrap();
+    assert_eq!(
+        events,
+        vec![
+            Event::Played {
+                player: PlayerId::One,
+                card,
+                cost: 3
+            },
+            Event::TokenMoved {
+                player: PlayerId::Two,
+                budget: 1
+            },
+            Event::ActivePlayerChanged {
+                player: PlayerId::Two
+            },
+        ]
+    );
+    let mut state = flat_duel(1, 8);
+    assert_eq!(kinds(&play_first(&mut state)), ["Played", "TokenMoved"]);
+}
+
+#[test]
+fn an_illegal_play_is_refused_and_changes_nothing() {
+    let mut state = flat_duel(1, 8);
+    let on_board = first_in_hand(&state, PlayerId::One);
+    apply(&mut state, Action::Play { card: on_board }).unwrap();
+    // Ids 0..30 are One's cards, 30..60 Two's: find one still in One's pile.
+    let in_pile = (0..30)
+        .map(CardInstanceId)
+        .find(|c| !state.hand(PlayerId::One).contains(c) && !state.board(PlayerId::One).contains(c))
+        .unwrap();
+    let cases = [
+        (CardInstanceId(9999), "unknown id"),
+        (on_board, "already on the board"),
+        (first_in_hand(&state, PlayerId::Two), "the opponent's card"),
+        (in_pile, "a card still in the pile"),
+    ];
+    for (card, why) in cases {
+        let before = state.clone();
+        assert_eq!(
+            apply(&mut state, Action::Play { card }),
+            Err(RuleError::CardNotInHand),
+            "{why}"
+        );
+        assert_eq!(state, before, "{why}");
+    }
+}
+
+#[test]
+fn play_is_refused_once_the_game_is_over() {
+    let mut state = flat_duel(1, 8);
+    let card = first_in_hand(&state, PlayerId::One);
+    apply(&mut state, Action::Concede).unwrap();
+    let after = state.clone();
+    assert_eq!(
+        apply(&mut state, Action::Play { card }),
+        Err(RuleError::GameOver)
+    );
+    assert_eq!(state, after);
+}
+
+#[test]
+fn legal_actions_list_the_hand_first_then_effects_then_concede() {
+    let state = flat_duel(1, 8);
+    let mut expected: Vec<Action> = state
+        .hand(PlayerId::One)
+        .into_iter()
+        .map(|card| Action::Play { card })
+        .collect();
+    expected.push(Action::Activate { effect: 0 });
+    expected.push(Action::Concede);
+    assert_eq!(legal_actions(&state), expected);
+    assert_eq!(expected.len(), 6);
+}
+
+#[test]
+fn only_the_active_players_hand_is_playable() {
+    let state = flat_duel(1, 8);
+    let theirs = state.hand(PlayerId::Two);
+    assert!(legal_actions(&state).iter().all(|a| match a {
+        Action::Play { card } => !theirs.contains(card),
+        _ => true,
+    }));
+}
+
+#[test]
+fn a_hero_without_effects_can_still_play_its_hand() {
+    let mut s = setup(hero(2, 3, 8, vec![]), hero(1, 1, 8, vec![draw(1, 1)]));
+    s.one.cards = flat_cards(1);
+    let (mut state, _) = new_game(s, 3).unwrap();
+    assert_eq!(state.winner(), None);
+    for _ in 0..2 {
+        play_first(&mut state);
+    }
+    assert_eq!(state.winner(), None);
+}
+
+#[test]
+fn drawing_everything_then_activating_again_is_refused_as_not_applicable() {
+    // With `Play`, an empty pile no longer ends the game, so this error is reachable.
+    let (mut state, _) = new_game(
+        setup(
+            hero(2, 8, 8, vec![draw(1, 30)]),
+            hero(1, 1, 8, vec![draw(1, 1)]),
+        ),
+        1,
+    )
+    .unwrap();
+    apply(&mut state, Action::Activate { effect: 0 }).unwrap();
+    assert_eq!(state.deck_len(PlayerId::One), 0);
+    assert_eq!(state.winner(), None, "the hand keeps One alive");
+    assert_eq!(state.active(), PlayerId::One);
+    let before = state.clone();
+    assert_eq!(
+        apply(&mut state, Action::Activate { effect: 0 }),
+        Err(RuleError::EffectNotApplicable)
+    );
+    assert_eq!(state, before);
+    assert!(!legal_actions(&state).contains(&Action::Activate { effect: 0 }));
 }
