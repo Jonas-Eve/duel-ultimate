@@ -1,4 +1,4 @@
-use crate::{Card, CreatureStats, Deck, Hero};
+use crate::{Card, CreatureStats, Deck, Effect, Hero};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Exact number of cards in a deck.
@@ -145,7 +145,44 @@ pub fn validate_hero(hero: &Hero) -> Result<(), CardsError> {
             max_time: hero.max_time,
         });
     }
-    positive_in_range("health", hero.health)
+    positive_in_range("health", hero.health)?;
+    validate_effects(hero)
+}
+
+fn validate_effects(hero: &Hero) -> Result<(), CardsError> {
+    if hero.effects.len() > MAX_HERO_EFFECTS {
+        return Err(CardsError::TooManyEffects {
+            found: hero.effects.len(),
+            max: MAX_HERO_EFFECTS,
+        });
+    }
+    for (effect, hero_effect) in hero.effects.iter().enumerate() {
+        if hero_effect.cost < 1 {
+            return Err(CardsError::EffectCostBelowOne { effect });
+        }
+        too_high(effect, "cost", hero_effect.cost)?;
+        match hero_effect.effect {
+            Effect::Draw { count } => {
+                if count < 1 {
+                    return Err(CardsError::EffectCountBelowOne { effect });
+                }
+                too_high(effect, "count", count)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn too_high(effect: usize, field: &'static str, value: u32) -> Result<(), CardsError> {
+    if value > MAX_STAT {
+        return Err(CardsError::EffectStatTooHigh {
+            effect,
+            field,
+            value,
+            max: MAX_STAT,
+        });
+    }
+    Ok(())
 }
 
 /// Checks what depends on the deck length: exactly [`DECK_SIZE`] cards, and a starting
