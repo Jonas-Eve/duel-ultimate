@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const DECK_SIZE: usize = 30;
 /// Upper bound of every numeric stat (keeps hostile data from producing endless games).
 pub const MAX_STAT: u32 = 10_000;
+/// Maximum number of effects a hero can have (bounds hostile data, like [`MAX_STAT`]).
+pub const MAX_HERO_EFFECTS: usize = 8;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum CardsError {
@@ -30,6 +32,19 @@ pub enum CardsError {
     WrongDeckSize { found: usize, expected: usize },
     #[error("`{field}` is {value}, above the maximum of {max}")]
     StatTooHigh {
+        field: &'static str,
+        value: u32,
+        max: u32,
+    },
+    #[error("a hero has at most {max} effects, found {found}")]
+    TooManyEffects { found: usize, max: usize },
+    #[error("effect #{effect}: `cost` must be at least 1 (a cost of 0 would be free)")]
+    EffectCostBelowOne { effect: usize },
+    #[error("effect #{effect}: `count` must be at least 1")]
+    EffectCountBelowOne { effect: usize },
+    #[error("effect #{effect}: `{field}` is {value}, above the maximum of {max}")]
+    EffectStatTooHigh {
+        effect: usize,
         field: &'static str,
         value: u32,
         max: u32,
@@ -120,7 +135,6 @@ pub fn validate_creature(stats: &CreatureStats) -> Result<(), CardsError> {
 }
 
 pub fn validate_hero(hero: &Hero) -> Result<(), CardsError> {
-    cost_in_range("draw_cost", hero.draw_cost)?;
     if hero.max_time < 1 {
         return Err(CardsError::MaxTimeBelowOne);
     }
