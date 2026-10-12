@@ -4,7 +4,7 @@
 use duel_cards::{CardsError, CreatureStats, Effect, Hero, HeroEffect, MAX_STAT};
 use duel_engine::{
     Action, CardInstanceId, Event, GameSetup, GameState, PlayerId, PlayerSetup, RuleError,
-    SetupError, WinReason, apply, legal_actions, new_game,
+    SetupError, Target, WinReason, apply, legal_actions, new_game,
 };
 use std::collections::BTreeSet;
 
@@ -73,6 +73,8 @@ fn kinds(events: &[Event]) -> Vec<&'static str> {
             Event::EffectActivated { .. } => "EffectActivated",
             Event::Drew { .. } => "Drew",
             Event::Played { .. } => "Played",
+            Event::Attacked { .. } => "Attacked",
+            Event::Damaged { .. } => "Damaged",
             Event::TokenMoved { .. } => "TokenMoved",
             Event::ActivePlayerChanged { .. } => "ActivePlayerChanged",
             Event::GameWon { .. } => "GameWon",
@@ -454,6 +456,10 @@ fn rule_errors_have_stable_codes() {
         RuleError::EffectNotApplicable.code(),
         "effect_not_applicable"
     );
+    assert_eq!(
+        RuleError::AttackerNotOnBoard.code(),
+        "attacker_not_on_board"
+    );
 }
 
 // ---- legal_actions ---------------------------------------------------------------------
@@ -476,6 +482,10 @@ fn legal_actions_agree_with_apply() {
                 .map(|effect| Action::Activate { effect })
                 .chain((0..64).map(|n| Action::Play {
                     card: CardInstanceId(n),
+                }))
+                .chain((0..64).map(|n| Action::Attack {
+                    attacker: CardInstanceId(n),
+                    target: Target::Hero,
                 }))
                 .chain([Action::Concede, Action::Activate { effect: u32::MAX }]);
             for action in universe {
@@ -805,4 +815,324 @@ fn drawing_everything_then_activating_again_is_refused_as_not_applicable() {
     );
     assert_eq!(state, before);
     assert!(!legal_actions(&state).contains(&Action::Activate { effect: 0 }));
+}
+
+// ---- Attack ----------------------------------------------------------------------------------
+
+/// A deck where every card has these stats (summoning costs 1).
+fn attackers(force: u32, attack_cost: u32) -> Vec<CreatureStats> {
+    (0..30)
+        .map(|_| CreatureStats {
+            cost: 1,
+            force,
+            attack_cost,
+            health: 3,
+        })
+        .collect()
+}
+
+/// One is active with `budget` left (max_time 8) after summoning a creature of `force` and
+/// `attack_cost`; Two has `two_max` and `two_health`. Returns the state and the creature.
+fn armed(
+    force: u32,
+    attack_cost: u32,
+    budget: u32,
+    two_max: u32,
+    two_health: u32,
+) -> (GameState, CardInstanceId) {
+    let mut s = setup(
+        hero(2, budget + 1, 8, vec![draw(1, 1)]),
+        hero(1, 1, two_max, vec![draw(1, 1)]),
+    );
+    s.one.cards = attackers(force, attack_cost);
+    s.two.cards = attackers(force, attack_cost);
+    s.two.hero.health = two_health;
+    let (mut state, _) = new_game(s, 7).unwrap();
+    play_first(&mut state);
+    assert_eq!((state.active(), state.budget()), (PlayerId::One, budget));
+    let creature = state.board(PlayerId::One)[0];
+    (state, creature)
+}
+
+fn hit(creature: CardInstanceId) -> Action {
+    Action::Attack {
+        attacker: creature,
+        target: Target::Hero,
+    }
+}
+
+#[test]
+fn an_attack_deals_the_force_of_the_creature_to_the_opposing_hero() {
+    let (mut state, creature) = armed(3, 1, 5, 8, 10);
+    let events = apply(&mut state, hit(creature)).unwrap();
+    assert_eq!(state.hero_health(PlayerId::Two), 7);
+    assert_eq!(
+        state.hero_health(PlayerId::One),
+        10,
+        "the attacker's hero is untouched"
+    );
+    assert!(events.contains(&Event::Damaged {
+        player: PlayerId::Two,
+        amount: 3
+    }));
+    assert_eq!(
+        state.board(PlayerId::One),
+        vec![creature],
+        "the creature stays in play"
+    );
+}
+
+#[test]
+fn attacking_costs_the_attack_cost_through_the_time_rule() {
+    // c < b: stays.
+    let (mut state, c) = armed(1, 2, 5, 8, 10);
+    apply(&mut state, hit(c)).unwrap();
+    assert_eq!((state.active(), state.budget()), (PlayerId::One, 3));
+    // c = b: crosses, the opponent gets 1.
+    let (mut state, c) = armed(1, 2, 2, 8, 10);
+    apply(&mut state, hit(c)).unwrap();
+    assert_eq!((state.active(), state.budget()), (PlayerId::Two, 1));
+    // c > b: excess plus one.
+    let (mut state, c) = armed(1, 4, 2, 8, 10);
+    apply(&mut state, hit(c)).unwrap();
+    assert_eq!((state.active(), state.budget()), (PlayerId::Two, 3));
+    // The receiver's max_time caps it, and the cost may exceed the attacker's own max_time.
+    let (mut state, c) = armed(1, 30, 2, 5, 10);
+    apply(&mut state, hit(c)).unwrap();
+    assert_eq!((state.active(), state.budget()), (PlayerId::Two, 5));
+}
+
+#[test]
+fn a_creature_can_attack_right_after_being_summoned_and_as_often_as_the_budget_allows() {
+    // `armed` already attacks without any delay after the summoning; here budget 5, cost 1.
+    let (mut state, c) = armed(2, 1, 5, 8, 100);
+    for n in 1..=4 {
+        let events = apply(&mut state, hit(c)).unwrap();
+        assert_eq!(state.hero_health(PlayerId::Two), 100 - 2 * n);
+        assert_eq!(state.active(), PlayerId::One, "attack {n} keeps the token");
+        assert!(!kinds(&events).contains(&"ActivePlayerChanged"));
+    }
+    assert_eq!(state.budget(), 1);
+    let events = apply(&mut state, hit(c)).unwrap();
+    assert_eq!(state.hero_health(PlayerId::Two), 90);
+    assert_eq!(
+        state.active(),
+        PlayerId::Two,
+        "the fifth attack spends the last unit"
+    );
+    assert!(kinds(&events).contains(&"ActivePlayerChanged"));
+}
+
+#[test]
+fn a_non_lethal_attack_logs_in_order() {
+    let (mut state, c) = armed(3, 2, 5, 8, 10);
+    let events = apply(&mut state, hit(c)).unwrap();
+    assert_eq!(
+        events,
+        vec![
+            Event::Attacked {
+                player: PlayerId::One,
+                attacker: c,
+                cost: 2
+            },
+            Event::Damaged {
+                player: PlayerId::Two,
+                amount: 3
+            },
+            Event::TokenMoved {
+                player: PlayerId::One,
+                budget: 3
+            },
+        ]
+    );
+    let (mut state, c) = armed(3, 2, 2, 8, 10);
+    let events = apply(&mut state, hit(c)).unwrap();
+    assert_eq!(
+        kinds(&events),
+        ["Attacked", "Damaged", "TokenMoved", "ActivePlayerChanged"]
+    );
+    assert_eq!(
+        events.last(),
+        Some(&Event::ActivePlayerChanged {
+            player: PlayerId::Two
+        })
+    );
+}
+
+#[test]
+fn a_lethal_attack_ends_the_game_without_handing_over() {
+    // Overkill (force 5 against 3 health) and an exact kill, with a cost that would cross.
+    for (force, health) in [(5, 3), (4, 4)] {
+        let (mut state, c) = armed(force, 6, 2, 8, health);
+        let events = apply(&mut state, hit(c)).unwrap();
+        assert_eq!(
+            events,
+            vec![
+                Event::Attacked {
+                    player: PlayerId::One,
+                    attacker: c,
+                    cost: 6
+                },
+                Event::Damaged {
+                    player: PlayerId::Two,
+                    amount: force
+                },
+                Event::GameWon {
+                    winner: PlayerId::One,
+                    reason: WinReason::HeroDown
+                },
+            ]
+        );
+        assert_eq!(state.hero_health(PlayerId::Two), 0, "no underflow");
+        assert_eq!(state.winner(), Some((PlayerId::One, WinReason::HeroDown)));
+        assert_eq!(state.active(), PlayerId::One, "no handover");
+        assert_eq!(
+            state.budget(),
+            2,
+            "the budget is untouched: 1 <= budget <= max_time still holds"
+        );
+        assert!(legal_actions(&state).is_empty());
+        let after = state.clone();
+        for action in [hit(c), Action::Concede, Action::Activate { effect: 0 }] {
+            assert_eq!(apply(&mut state, action), Err(RuleError::GameOver));
+            assert_eq!(state, after);
+        }
+    }
+}
+
+/// One and Two each have a creature on the board and One holds the token again.
+fn both_armed() -> (GameState, CardInstanceId, CardInstanceId) {
+    let mut s = setup(
+        hero(2, 1, 8, vec![draw(1, 1)]),
+        hero(1, 1, 8, vec![draw(1, 1)]),
+    );
+    s.one.cards = attackers(1, 1);
+    s.two.cards = attackers(1, 1);
+    let (mut state, _) = new_game(s, 7).unwrap();
+    play_first(&mut state); // One summons and hands over (cost 1 = budget 1)
+    play_first(&mut state); // Two does the same
+    assert_eq!((state.active(), state.budget()), (PlayerId::One, 1));
+    let (mine, theirs) = (state.board(PlayerId::One)[0], state.board(PlayerId::Two)[0]);
+    (state, mine, theirs)
+}
+
+#[test]
+fn an_attacker_that_is_not_on_the_active_board_is_refused_and_changes_nothing() {
+    let (mut state, mine, theirs) = both_armed();
+    let in_hand = state.hand(PlayerId::One)[0];
+    let their_hand = state.hand(PlayerId::Two)[0];
+    let cases = [
+        (theirs, "the opponent's creature"),
+        (in_hand, "a card still in hand"),
+        (their_hand, "a card in the opponent's hand"),
+        (CardInstanceId(9999), "an unknown id"),
+    ];
+    for (attacker, why) in cases {
+        let before = state.clone();
+        assert_eq!(
+            apply(&mut state, hit(attacker)),
+            Err(RuleError::AttackerNotOnBoard),
+            "{why}"
+        );
+        assert_eq!(state, before, "{why}");
+    }
+    assert!(apply(&mut state, hit(mine)).is_ok());
+}
+
+#[test]
+fn legal_actions_list_hand_effects_attacks_then_concede() {
+    let (mut state, mine, theirs) = both_armed();
+    let second = state.hand(PlayerId::One)[0];
+    apply(&mut state, Action::Play { card: second }).unwrap();
+    assert_eq!(
+        state.active(),
+        PlayerId::Two,
+        "cost 1 against budget 1 crosses"
+    );
+    let two_board = state.board(PlayerId::Two);
+    let expected: Vec<Action> = state
+        .hand(PlayerId::Two)
+        .into_iter()
+        .map(|card| Action::Play { card })
+        .chain([Action::Activate { effect: 0 }])
+        .chain(two_board.iter().map(|c| hit(*c)))
+        .chain([Action::Concede])
+        .collect();
+    assert_eq!(legal_actions(&state), expected);
+    assert_eq!(
+        two_board,
+        vec![theirs],
+        "only the active player's creatures attack"
+    );
+    assert!(!legal_actions(&state).contains(&hit(mine)));
+    assert!(!legal_actions(&state).contains(&hit(second)));
+}
+
+#[test]
+fn a_player_without_creatures_is_offered_no_attack() {
+    let state = flat_duel(1, 8);
+    assert!(
+        !legal_actions(&state)
+            .iter()
+            .any(|a| matches!(a, Action::Attack { .. }))
+    );
+}
+
+#[test]
+fn attacks_travel_as_snake_case_json() {
+    let action = hit(CardInstanceId(5));
+    let json = serde_json::to_string(&action).unwrap();
+    assert_eq!(json, r#"{"attack":{"attacker":5,"target":"hero"}}"#);
+    assert_eq!(serde_json::from_str::<Action>(&json).unwrap(), action);
+    assert!(
+        serde_json::from_str::<Action>(r#"{"attack":{"attacker":5,"target":"moon"}}"#).is_err()
+    );
+    assert!(
+        serde_json::from_str::<Action>(r#"{"attack":{"attacker":5,"target":"hero","x":1}}"#)
+            .is_err()
+    );
+}
+
+/// Plays one game by always taking the last action other than `Concede` (an attack as soon as
+/// a creature is in play).
+fn play_to_the_end(seed: u64) -> (GameState, Vec<Event>) {
+    let (mut state, mut log) = new_game(
+        setup(
+            hero(2, 3, 8, vec![draw(1, 1), draw(4, 2)]),
+            hero(1, 2, 6, vec![draw(2, 1)]),
+        ),
+        seed,
+    )
+    .unwrap();
+    while state.winner().is_none() {
+        let action = legal_actions(&state)
+            .into_iter()
+            .rfind(|a| *a != Action::Concede)
+            .unwrap_or(Action::Concede);
+        log.extend(apply(&mut state, action).unwrap());
+    }
+    (state, log)
+}
+
+#[test]
+fn a_full_game_to_a_victory_by_attack_is_deterministic() {
+    let mut victories = 0;
+    for seed in 0..20 {
+        let (state, log) = play_to_the_end(seed);
+        let (again, log_again) = play_to_the_end(seed);
+        assert_eq!(state, again);
+        assert_eq!(log, log_again);
+        if let Some((winner, WinReason::HeroDown)) = state.winner() {
+            victories += 1;
+            assert_eq!(state.hero_health(winner.opponent()), 0);
+            assert_eq!(
+                log.last(),
+                Some(&Event::GameWon {
+                    winner,
+                    reason: WinReason::HeroDown
+                })
+            );
+        }
+    }
+    assert!(victories > 0, "attacking games end by a hero going down");
 }

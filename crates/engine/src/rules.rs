@@ -17,7 +17,19 @@ pub enum Action {
     Activate {
         effect: u32,
     },
+    /// Attacks with a creature of the active player's board (untrusted id, validated).
+    Attack {
+        attacker: CardInstanceId,
+        target: Target,
+    },
     Concede,
+}
+
+/// What an attack aims at. Only the opposing hero for now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Target {
+    Hero,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +52,17 @@ pub enum Event {
         player: PlayerId,
         card: CardInstanceId,
         cost: u32,
+    },
+    /// A creature attacks: `cost` is the time it spent.
+    Attacked {
+        player: PlayerId,
+        attacker: CardInstanceId,
+        cost: u32,
+    },
+    /// The hero of `player` (the one attacked) took `amount` damage.
+    Damaged {
+        player: PlayerId,
+        amount: u32,
     },
     /// After every non-final action: `player` holds the token with `budget`.
     TokenMoved {
@@ -66,6 +89,8 @@ pub enum RuleError {
     UnknownEffect,
     #[error("this effect cannot be activated right now")]
     EffectNotApplicable,
+    #[error("that creature is not on the active player's board")]
+    AttackerNotOnBoard,
 }
 
 impl RuleError {
@@ -76,6 +101,7 @@ impl RuleError {
             Self::CardNotInHand => "card_not_in_hand",
             Self::UnknownEffect => "unknown_effect",
             Self::EffectNotApplicable => "effect_not_applicable",
+            Self::AttackerNotOnBoard => "attacker_not_on_board",
         }
     }
 }
@@ -105,6 +131,7 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
         Action::Play { card } => hand_position(state, *card)
             .map(|_| ())
             .ok_or(RuleError::CardNotInHand),
+        Action::Attack { .. } => Err(RuleError::AttackerNotOnBoard), // TODO(red stub)
         Action::Activate { effect } => {
             let hero_effect = hero_effect(state, *effect).ok_or(RuleError::UnknownEffect)?;
             if effects::applicable(state, state.active, &hero_effect.effect) {
@@ -162,6 +189,7 @@ pub fn apply(state: &mut GameState, action: Action) -> Result<Vec<Event>, RuleEr
                 reason: WinReason::Concede,
             }])
         }
+        Action::Attack { .. } => Err(RuleError::AttackerNotOnBoard), // TODO(red stub)
         Action::Play { card } => {
             let index = hand_position(state, card).ok_or(RuleError::CardNotInHand)?;
             let creature = state.player_mut(player).hand.remove(index);

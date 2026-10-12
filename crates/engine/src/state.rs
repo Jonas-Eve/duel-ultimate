@@ -109,6 +109,11 @@ impl GameState {
         self.player(player).deck.len()
     }
 
+    /// Current health of `player`'s hero.
+    pub fn hero_health(&self, player: PlayerId) -> u32 {
+        self.player(player).health
+    }
+
     /// The cards in `player`'s hand. A client sees only its own hand: filtering is the server's job.
     pub fn hand(&self, player: PlayerId) -> Vec<CardInstanceId> {
         self.player(player).hand.iter().map(|c| c.id).collect()
@@ -163,23 +168,32 @@ mod tests {
     }
 
     #[test]
-    fn exhaustion_after_an_action_that_keeps_the_player_active() {
+    fn a_creature_in_play_keeps_its_owner_alive_after_the_last_card_is_played() {
         let mut state = running(vec![draw(1, 1)]);
-        // One is left with a single card in hand, an empty pile: playing it leaves nothing to do.
+        // One is left with a single card in hand and an empty pile. Once played, the creature
+        // can attack, so One is not exhausted: attacks count as legal actions.
         state.one.deck.clear();
         state.one.hand.truncate(1);
         let card = state.one.hand[0].id;
-        let events = apply(&mut state, Action::Play { card }).unwrap();
-        assert_eq!(state.winner(), Some((PlayerId::Two, WinReason::Exhaustion)));
-        assert_eq!(state.active(), PlayerId::One, "no handover happened");
-        assert_eq!(
-            events.last(),
-            Some(&Event::GameWon {
-                winner: PlayerId::Two,
-                reason: WinReason::Exhaustion
-            })
-        );
-        assert!(legal_actions(&state).is_empty());
+        apply(&mut state, Action::Play { card }).unwrap();
+        assert_eq!(state.winner(), None);
+        assert_eq!(state.active(), PlayerId::One);
+        assert!(legal_actions(&state).contains(&Action::Attack {
+            attacker: card,
+            target: crate::Target::Hero
+        }));
+    }
+
+    #[test]
+    fn a_receiver_with_only_a_creature_in_play_is_not_exhausted() {
+        let mut state = running(vec![draw(8, 1)]);
+        state.two.deck.clear();
+        let creature = state.two.hand.remove(0);
+        state.two.hand.clear();
+        state.two.board.push(creature);
+        apply(&mut state, Action::Activate { effect: 0 }).unwrap();
+        assert_eq!(state.active(), PlayerId::Two);
+        assert_eq!(state.winner(), None);
     }
 
     #[test]
