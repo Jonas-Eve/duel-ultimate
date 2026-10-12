@@ -35,6 +35,8 @@ pub enum WinReason {
 }
 
 /// A card of a game, carrying a copy of its stats: the engine never queries a data store.
+/// `stats.health` is the instance's *current* health (damage lowers it; a creature at 0 is
+/// buried): there is no second field, which would be a second source of truth.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CardInstance {
     pub(crate) id: CardInstanceId,

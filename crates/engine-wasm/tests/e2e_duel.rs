@@ -1007,10 +1007,11 @@ fn a_creature_attack_kills_logs_its_events_and_hostile_or_misdirected_ones_are_r
 
     // Back to One with a creature of its own: nothing but a creature of Two's board is a
     // target, and every refusal is the same error without touching the game.
-    let card = plays(&legal(&game))[0];
-    apply(&mut game, &play(card));
+    let hand = plays(&legal(&game));
+    apply(&mut game, &play(hand[0]));
     let before = game.legal_actions_json().unwrap();
-    for victim in [x, a, card, 9999] {
+    // The dead creature, its own creature, a card still in the opponent's hand, an unknown id.
+    for victim in [x, a, hand[1], 9999] {
         assert_eq!(
             refusal(&mut game, &strike(a, victim)),
             "target_not_on_board",

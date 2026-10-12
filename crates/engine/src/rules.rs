@@ -148,6 +148,15 @@ fn board_position(state: &GameState, card: CardInstanceId) -> Option<usize> {
         .position(|c| c.id == card)
 }
 
+/// Position in the opposing player's board of the creature `card`, if it is there.
+fn opposing_board_position(state: &GameState, card: CardInstanceId) -> Option<usize> {
+    state
+        .player(state.active.opponent())
+        .board
+        .iter()
+        .position(|c| c.id == card)
+}
+
 /// The single legality check, shared by [`apply`] and [`legal_actions`].
 pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleError> {
     if state.winner.is_some() {
@@ -158,11 +167,17 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
         Action::Play { card } => hand_position(state, *card)
             .map(|_| ())
             .ok_or(RuleError::CardNotInHand),
-        Action::Attack { attacker, target } => match target {
-            Target::Hero | Target::Creature(_) => board_position(state, *attacker)
-                .map(|_| ())
-                .ok_or(RuleError::AttackerNotOnBoard),
-        },
+        Action::Attack { attacker, target } => {
+            // Order of the checks: the attacker, then the target. Every refused target
+            // gets the same error, whatever zone (hidden or not) the id is in.
+            board_position(state, *attacker).ok_or(RuleError::AttackerNotOnBoard)?;
+            match target {
+                Target::Hero => Ok(()),
+                Target::Creature(creature) => opposing_board_position(state, *creature)
+                    .map(|_| ())
+                    .ok_or(RuleError::TargetNotOnBoard),
+            }
+        }
         Action::Activate { effect } => {
             let hero_effect = hero_effect(state, *effect).ok_or(RuleError::UnknownEffect)?;
             if effects::applicable(state, state.active, &hero_effect.effect) {
@@ -307,6 +322,9 @@ fn pay(state: &mut GameState, cost: u32, events: &mut Vec<Event>) {
 /// Every action the active player may take: one `Play` per card in hand, hero effects in the
 /// order of the hero's list, one `Attack` (on the hero) per creature of the board in order of
 /// summoning, then `Concede`. Empty once the game is over.
+///
+/// Transitional: [`apply`] already accepts an attack on a creature of the opposing board,
+/// which this list does not offer yet (a later task of the same story adds those attacks).
 pub fn legal_actions(state: &GameState) -> Vec<Action> {
     if state.winner.is_some() {
         return Vec::new();
