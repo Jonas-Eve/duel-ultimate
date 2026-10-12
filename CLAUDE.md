@@ -48,6 +48,7 @@ Règles propres à ce repo :
   `GameState::random_below`.
 - Une nouvelle mécanique ajoute une brique au moteur sans modifier le comportement des decks
   qui ne l'utilisent pas (à vérifier par le simulateur).
+- Format des données : un set = un dossier versionné `data/<set>/<version>/` (`cards.json`, `decks.json`). Une carte a un discriminant `kind` ; un deck embarque son héros et compte exactement 30 cartes ; toute validation passe par `duel-cards` (`parse_cards`, `parse_decks`, `resolve_deck`), stats bornées à `MAX_STAT` = 10000. Exemple : `data/fixture/1.0.0/`.
 - Pas de base de données ni de comptes joueurs tant qu'aucune story ne l'exige.
 <!-- PILOT:ARCHITECTURE:END -->
 
