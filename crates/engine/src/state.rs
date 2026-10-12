@@ -227,7 +227,26 @@ mod tests {
     }
 
     #[test]
-    fn exhaustion_is_checked_right_after_setup() {
+    fn new_game_ends_at_once_when_the_first_player_has_nothing_to_do() {
+        // One starts (initiative 2) with an empty hand and no effect: exhausted at setup.
+        let mut one = hero(2, 3, 8, vec![]);
+        one.starting_hand = 0;
+        let (state, events) = new_game(setup(one, hero(1, 2, 5, vec![draw(1, 1)])), 3).unwrap();
+        assert_eq!(state.active(), PlayerId::One);
+        assert_eq!(state.winner(), Some((PlayerId::Two, WinReason::Exhaustion)));
+        assert!(matches!(events.first(), Some(Event::GameStarted { .. })));
+        assert_eq!(
+            events.last(),
+            Some(&Event::GameWon {
+                winner: PlayerId::Two,
+                reason: WinReason::Exhaustion
+            })
+        );
+        assert!(legal_actions(&state).is_empty());
+    }
+
+    #[test]
+    fn check_exhaustion_ends_a_running_game_whose_active_player_has_nothing_to_do() {
         let mut state = running(vec![draw(1, 1)]);
         state.one.hand.clear();
         state.one.deck.clear();
