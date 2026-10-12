@@ -12,8 +12,18 @@ pub(crate) enum Spend {
 /// Pays `cost` out of `budget`: if `cost < budget` the player stays with `budget - cost`;
 /// otherwise (a cost exactly equal to the budget crosses the boundary) the opponent receives
 /// `min(cost - budget + 1, opp_max)`.
-pub(crate) fn spend(_budget: u32, _cost: u32, _my_max: u32, _opp_max: u32) -> Spend {
-    todo!()
+pub(crate) fn spend(budget: u32, cost: u32, my_max: u32, opp_max: u32) -> Spend {
+    debug_assert!(
+        (1..=my_max).contains(&budget),
+        "budget outside 1..=max_time"
+    );
+    if cost < budget {
+        return Spend::Stay(budget - cost);
+    }
+    // u64: `cost - budget + 1` cannot overflow even for `cost == u32::MAX`.
+    let received = u64::from(cost) - u64::from(budget) + 1;
+    let capped = received.min(u64::from(opp_max));
+    Spend::HandOver(u32::try_from(capped).unwrap_or(opp_max))
 }
 
 #[cfg(test)]

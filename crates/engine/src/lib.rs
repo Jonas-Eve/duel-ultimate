@@ -18,8 +18,6 @@
         clippy::panic
     )
 )]
-// Red-phase skeleton: bodies are `todo!()` until the next commit.
-#![allow(dead_code)]
 
 mod effects;
 mod rules;

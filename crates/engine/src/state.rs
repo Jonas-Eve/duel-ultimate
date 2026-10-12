@@ -1,7 +1,7 @@
 //! The game state: private to the crate, observed through minimal accessors.
 
 use duel_cards::{CreatureStats, Hero};
-use rand::RngExt;
+use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
@@ -65,12 +65,20 @@ pub struct GameState {
 
 impl GameState {
     pub(crate) fn from_parts(
-        _one: PlayerState,
-        _two: PlayerState,
-        _data_versions: Vec<String>,
-        _seed: u64,
+        one: PlayerState,
+        two: PlayerState,
+        data_versions: Vec<String>,
+        seed: u64,
     ) -> Self {
-        todo!()
+        Self {
+            one,
+            two,
+            active: PlayerId::One,
+            budget: 1,
+            winner: None,
+            data_versions,
+            rng: ChaCha8Rng::seed_from_u64(seed),
+        }
     }
 
     pub fn active(&self) -> PlayerId {
