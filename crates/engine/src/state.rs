@@ -49,6 +49,8 @@ pub(crate) struct PlayerState {
     /// Draw pile; the top is the end of the `Vec`.
     pub(crate) deck: Vec<CardInstance>,
     pub(crate) hand: Vec<CardInstance>,
+    /// Summoned creatures, in order of summoning.
+    pub(crate) board: Vec<CardInstance>,
 }
 
 /// Invariant while the game runs: `1 <= budget <= max_time` of the active player's hero.
@@ -105,6 +107,16 @@ impl GameState {
 
     pub fn deck_len(&self, player: PlayerId) -> usize {
         self.player(player).deck.len()
+    }
+
+    /// The cards in `player`'s hand. A client sees only its own hand: filtering is the server's job.
+    pub fn hand(&self, player: PlayerId) -> Vec<CardInstanceId> {
+        self.player(player).hand.iter().map(|c| c.id).collect()
+    }
+
+    /// The creatures `player` has summoned, in order of summoning.
+    pub fn board(&self, player: PlayerId) -> Vec<CardInstanceId> {
+        self.player(player).board.iter().map(|c| c.id).collect()
     }
 
     pub(crate) fn player(&self, player: PlayerId) -> &PlayerState {

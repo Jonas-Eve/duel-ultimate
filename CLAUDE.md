@@ -34,7 +34,7 @@ joueur ou contre IA (l'IA réutilise le moteur côté serveur).
 
 | Composant | Rôle | Stack |
 |---|---|---|
-| `crates/engine` | Règles : un seul tour continu, une règle de temps unique, effets de héros (dont la pioche), `Concede`, épuisement, `legal_actions` ; les mécaniques des decks seront des briques composables, qu'un deck active ou non. Dépend de `duel-cards` (revalide ses entrées) | Rust 2024, `rand_chacha` (graine) |
+| `crates/engine` | Règles : un seul tour continu, une règle de temps unique, invocation (`Action::Play { card }`, la carte passe de la main au plateau), effets de héros (dont la pioche), `Concede`, épuisement, `legal_actions` (ordre : cartes en main, activations d'effets, `Concede`) ; les mécaniques des decks seront des briques composables, qu'un deck active ou non. Dépend de `duel-cards` (revalide ses entrées) | Rust 2024, `rand_chacha` (graine) |
 | `crates/cards` | Cartes, decks et extensions en **données JSON** versionnées, avec validation | Rust, `serde`/`serde_json` |
 | `crates/simulator` | Parties IA contre IA pour mesurer les taux de victoire entre decks (équilibrage) ; pour l'instant, decks de la fixture et politique au hasard | Rust |
 | `crates/server` | Parties en ligne (HTTP + WebSocket) | Rust, `axum` 0.8, `tokio` |
