@@ -3,19 +3,61 @@
 //! simulator's own generator (separate from the game's). The real simulator
 //! (`run_batch`, reports) comes with the simulator story.
 
-// Red-phase skeleton: bodies are `todo!()` until the feat commit.
-#![allow(dead_code)]
+use duel_cards::{parse_cards, parse_decks, resolve_deck};
+use duel_engine::{
+    Action, GameSetup, PlayerId, PlayerSetup, WinReason, apply, legal_actions, new_game,
+};
+use rand::{RngExt, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 
-use duel_engine::{GameSetup, PlayerId, WinReason};
+const FIXTURE_VERSION: &str = "fixture@1.0.0";
+const FIXTURE_CARDS: &str = include_str!("../../../data/fixture/1.0.0/cards.json");
+const FIXTURE_DECKS: &str = include_str!("../../../data/fixture/1.0.0/decks.json");
+
+/// Mixed into the game seed so the policy's generator is not the game's.
+const POLICY_SALT: u64 = 0x5DEE_CE66_D1CE_4E5B;
+/// Defensive cap: every game ends by itself, but a rule bug must not hang the batch.
+const MAX_STEPS: usize = 10_000;
 
 /// The fixture decks as a game setup: the first deck is One's, the second Two's.
 fn fixture_setup() -> GameSetup {
-    todo!()
+    let cards = parse_cards(FIXTURE_CARDS).expect("the embedded fixture cards are valid");
+    let decks = parse_decks(FIXTURE_DECKS).expect("the embedded fixture decks are valid");
+    let side = |index: usize| {
+        let deck = decks.get(index).expect("the fixture has two decks");
+        PlayerSetup {
+            hero: deck.hero.clone(),
+            cards: resolve_deck(deck, &cards).expect("the fixture decks resolve"),
+        }
+    };
+    GameSetup {
+        one: side(0),
+        two: side(1),
+        data_versions: vec![FIXTURE_VERSION.to_owned()],
+    }
 }
 
 /// Plays one game to its end and returns who won and why.
-fn play(_seed: u64) -> (PlayerId, WinReason) {
-    todo!()
+fn play(seed: u64) -> (PlayerId, WinReason) {
+    let (mut state, _) = new_game(fixture_setup(), seed).expect("the fixture is a valid setup");
+    let mut policy = ChaCha8Rng::seed_from_u64(seed ^ POLICY_SALT);
+    for _ in 0..MAX_STEPS {
+        if let Some(outcome) = state.winner() {
+            return outcome;
+        }
+        let playable: Vec<Action> = legal_actions(&state)
+            .into_iter()
+            .filter(|action| *action != Action::Concede)
+            .collect();
+        let action = if playable.is_empty() {
+            Action::Concede
+        } else {
+            playable[policy.random_range(0..playable.len())]
+        };
+        apply(&mut state, action).expect("a legal action applies");
+    }
+    apply(&mut state, Action::Concede).expect("the game is still running");
+    state.winner().expect("a concession ends the game")
 }
 
 fn main() {
