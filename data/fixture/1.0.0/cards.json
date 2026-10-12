@@ -1,0 +1,92 @@
+[
+  {
+    "kind": "creature",
+    "id": "goblin",
+    "name": "Gobelin",
+    "cost": 1,
+    "force": 1,
+    "attack_cost": 1,
+    "health": 2
+  },
+  {
+    "kind": "creature",
+    "id": "archer",
+    "name": "Archère",
+    "cost": 2,
+    "force": 2,
+    "attack_cost": 1,
+    "health": 2
+  },
+  {
+    "kind": "creature",
+    "id": "soldier",
+    "name": "Soldat",
+    "cost": 2,
+    "force": 2,
+    "attack_cost": 2,
+    "health": 3
+  },
+  {
+    "kind": "creature",
+    "id": "knight",
+    "name": "Chevalier",
+    "cost": 3,
+    "force": 3,
+    "attack_cost": 2,
+    "health": 4
+  },
+  {
+    "kind": "creature",
+    "id": "wolf",
+    "name": "Loup",
+    "cost": 2,
+    "force": 3,
+    "attack_cost": 1,
+    "health": 1
+  },
+  {
+    "kind": "creature",
+    "id": "golem",
+    "name": "Golem",
+    "cost": 4,
+    "force": 2,
+    "attack_cost": 3,
+    "health": 6
+  },
+  {
+    "kind": "creature",
+    "id": "mage",
+    "name": "Mage",
+    "cost": 3,
+    "force": 4,
+    "attack_cost": 2,
+    "health": 2
+  },
+  {
+    "kind": "creature",
+    "id": "guard",
+    "name": "Garde",
+    "cost": 3,
+    "force": 1,
+    "attack_cost": 1,
+    "health": 5
+  },
+  {
+    "kind": "creature",
+    "id": "drake",
+    "name": "Draco",
+    "cost": 5,
+    "force": 5,
+    "attack_cost": 3,
+    "health": 5
+  },
+  {
+    "kind": "creature",
+    "id": "rat",
+    "name": "Rat",
+    "cost": 1,
+    "force": 1,
+    "attack_cost": 1,
+    "health": 1
+  }
+]
