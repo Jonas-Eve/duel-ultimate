@@ -7,10 +7,8 @@
 //! [`Duel`] holds the logic and is testable natively; [`Game`] only converts its errors
 //! to `JsError` (which cannot be built off the wasm target).
 
-// Red-phase skeleton: bodies are `todo!()` until the feat commit.
-#![allow(dead_code)]
-
-use duel_engine::GameState;
+use duel_engine::{Action, GameSetup, GameState, apply, legal_actions, new_game};
+use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 /// Inputs larger than this (in bytes) are rejected before any parsing.
@@ -21,19 +19,45 @@ pub struct Duel(GameState);
 
 impl Duel {
     /// Starts a game from a JSON `GameSetup`.
-    pub fn from_json(_setup_json: &str, _seed: u32) -> Result<Self, String> {
-        todo!()
+    pub fn from_json(setup_json: &str, seed: u32) -> Result<Self, String> {
+        let setup: GameSetup = parse(setup_json)?;
+        let (state, _events) =
+            new_game(setup, seed.into()).map_err(|e| error_json(e.code(), &e.to_string()))?;
+        Ok(Self(state))
     }
 
     /// The legal actions of the active player, as a JSON array.
     pub fn legal_actions_json(&self) -> Result<String, String> {
-        todo!()
+        to_json(&legal_actions(&self.0))
     }
 
     /// Applies a JSON action; returns the produced events as a JSON array.
-    pub fn apply_json(&mut self, _action_json: &str) -> Result<String, String> {
-        todo!()
+    pub fn apply_json(&mut self, action_json: &str) -> Result<String, String> {
+        let action: Action = parse(action_json)?;
+        let events =
+            apply(&mut self.0, action).map_err(|e| error_json(e.code(), &e.to_string()))?;
+        to_json(&events)
     }
+}
+
+/// `{"code","message"}`: what every error of this binding looks like.
+fn error_json(code: &str, message: &str) -> String {
+    serde_json::json!({ "code": code, "message": message }).to_string()
+}
+
+/// Parses untrusted JSON, after bounding its size.
+fn parse<T: serde::de::DeserializeOwned>(input: &str) -> Result<T, String> {
+    if input.len() > MAX_INPUT_BYTES {
+        return Err(error_json(
+            "input_too_large",
+            &format!("input is larger than {MAX_INPUT_BYTES} bytes"),
+        ));
+    }
+    serde_json::from_str(input).map_err(|e| error_json("invalid_json", &e.to_string()))
+}
+
+fn to_json<T: Serialize>(value: &T) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|e| error_json("serialization_failed", &e.to_string()))
 }
 
 #[wasm_bindgen]
