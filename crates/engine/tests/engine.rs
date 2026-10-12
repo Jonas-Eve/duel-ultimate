@@ -1136,3 +1136,75 @@ fn a_full_game_to_a_victory_by_attack_is_deterministic() {
     }
     assert!(victories > 0, "attacking games end by a hero going down");
 }
+
+// ---- S1 golden fingerprints -------------------------------------------------------------------
+
+/// FNV-1a (64 bits) of a byte string: a stable, dependency-free fingerprint.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+/// Like `play_to_the_end`, but the policy takes the last action other than `Concede` whose
+/// target is not a creature: a game in which only heroes are ever attacked.
+fn hero_only_game(seed: u64) -> (GameState, Vec<Event>) {
+    let (mut state, mut log) = new_game(
+        setup(
+            hero(2, 3, 8, vec![draw(1, 1), draw(4, 2)]),
+            hero(1, 2, 6, vec![draw(2, 1)]),
+        ),
+        seed,
+    )
+    .unwrap();
+    while state.winner().is_none() {
+        let action = legal_actions(&state)
+            .into_iter()
+            .rfind(|a| {
+                *a != Action::Concede
+                    && !matches!(a, Action::Attack { target, .. } if *target != Target::Hero)
+            })
+            .unwrap_or(Action::Concede);
+        log.extend(apply(&mut state, action).unwrap());
+    }
+    (state, log)
+}
+
+/// `(winner, reason, number of events, FNV-1a of the events as JSON)` per seed 0..20,
+/// recorded on the engine as merged by S1, before creatures became attackable. Attacking a
+/// hero must keep producing exactly these games.
+const S1_GOLDEN: [(PlayerId, WinReason, usize, u64); 20] = [
+    (PlayerId::One, WinReason::HeroDown, 178, 0x3b151a1a9605c44e),
+    (PlayerId::One, WinReason::HeroDown, 177, 0x8b94d569b261925e),
+    (PlayerId::One, WinReason::HeroDown, 198, 0x5f474243cdd2f630),
+    (PlayerId::One, WinReason::HeroDown, 180, 0x199476a8e485a0eb),
+    (PlayerId::Two, WinReason::HeroDown, 206, 0x16af5747217869e1),
+    (PlayerId::One, WinReason::HeroDown, 203, 0xd511655f75711327),
+    (PlayerId::One, WinReason::HeroDown, 198, 0xc15cd7315b72db1c),
+    (PlayerId::Two, WinReason::HeroDown, 201, 0x67813e90fd9a9896),
+    (PlayerId::Two, WinReason::HeroDown, 184, 0xc17a7c24d3d6d626),
+    (PlayerId::One, WinReason::HeroDown, 183, 0xbc8b79f422fe4dc5),
+    (PlayerId::One, WinReason::HeroDown, 203, 0x3a663674ede8f6b5),
+    (PlayerId::One, WinReason::HeroDown, 198, 0x469a02939eafb809),
+    (PlayerId::One, WinReason::HeroDown, 175, 0xeb1c485fe42abedd),
+    (PlayerId::One, WinReason::HeroDown, 183, 0xfe0c281c83eeda31),
+    (PlayerId::One, WinReason::HeroDown, 203, 0xa837e5ede5fb2465),
+    (PlayerId::One, WinReason::HeroDown, 183, 0xd534faec380ec8de),
+    (PlayerId::One, WinReason::HeroDown, 203, 0xab981dd4311f1ec0),
+    (PlayerId::One, WinReason::HeroDown, 198, 0x182570caee0e4d49),
+    (PlayerId::One, WinReason::HeroDown, 175, 0x80ca15486dedadc1),
+    (PlayerId::One, WinReason::HeroDown, 228, 0xed66defe86333441),
+];
+
+#[test]
+fn s1_hero_only_games_keep_their_exact_outcome_and_journal() {
+    let observed: Vec<_> = (0..20)
+        .map(|seed| {
+            let (state, log) = hero_only_game(seed);
+            let (winner, reason) = state.winner().unwrap();
+            let json = serde_json::to_string(&log).unwrap();
+            (winner, reason, log.len(), fnv1a(json.as_bytes()))
+        })
+        .collect();
+    assert_eq!(observed, S1_GOLDEN);
+}
