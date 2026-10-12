@@ -1,11 +1,11 @@
 //! Plays N seeded games between the fixture decks and prints the first-player win rate.
-//! Policy: uniformly random among the legal actions other than `Concede`, drawn from the
-//! simulator's own generator (separate from the game's). The real simulator
-//! (`run_batch`, reports) comes with the simulator story.
+//! Policy: uniformly random among the legal actions other than `Concede` (attacks on heroes
+//! and on creatures alike), drawn from the simulator's own generator (separate from the
+//! game's). The real simulator (`run_batch`, reports) comes with the simulator story.
 
 use duel_cards::{parse_cards, parse_decks, resolve_deck};
 use duel_engine::{
-    Action, GameSetup, PlayerId, PlayerSetup, WinReason, apply, legal_actions, new_game,
+    Action, Event, GameSetup, PlayerId, PlayerSetup, WinReason, apply, legal_actions, new_game,
 };
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -49,12 +49,13 @@ struct Outcome {
 fn play(seed: u64) -> Outcome {
     let (mut state, _) = new_game(fixture_setup(), seed).expect("the fixture is a valid setup");
     let mut policy = ChaCha8Rng::seed_from_u64(seed ^ POLICY_SALT);
+    let mut deaths = 0;
     for _ in 0..MAX_STEPS {
         if let Some((winner, reason)) = state.winner() {
             return Outcome {
                 winner,
                 reason,
-                deaths: 0,
+                deaths,
             };
         }
         let playable: Vec<Action> = legal_actions(&state)
@@ -66,14 +67,18 @@ fn play(seed: u64) -> Outcome {
         } else {
             playable[policy.random_range(0..playable.len())]
         };
-        apply(&mut state, action).expect("a legal action applies");
+        let events = apply(&mut state, action).expect("a legal action applies");
+        deaths += events
+            .iter()
+            .filter(|event| matches!(event, Event::Died { .. }))
+            .count();
     }
     apply(&mut state, Action::Concede).expect("the game is still running");
     let (winner, reason) = state.winner().expect("a concession ends the game");
     Outcome {
         winner,
         reason,
-        deaths: 0,
+        deaths,
     }
 }
 

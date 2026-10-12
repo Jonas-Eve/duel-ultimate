@@ -1075,10 +1075,14 @@ fn legal_actions_offer_the_hero_then_each_opposing_creature_and_forget_the_dead(
 
     let a = plays(&legal(&game))[0];
     apply(&mut game, &play(a));
-    // Two has nothing on its board yet: One's creature can only be pointed at the hero.
+    // Two has no creature yet, so it has no attack to offer (only a play and an effect).
+    assert!(attacks(&legal(&game)).is_empty());
     let x = plays(&legal(&game))[0];
     apply(&mut game, &play(x));
-    assert_eq!(attacks(&legal(&game)), [(a, json!("hero"))]);
+    assert_eq!(
+        attacks(&legal(&game)),
+        [(a, json!("hero")), (a, json!({"creature": x}))]
+    );
 
     // One summons a second creature (the token crosses), Two does the same.
     let b = plays(&legal(&game))[0];

@@ -190,17 +190,24 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
 }
 
 /// Every action worth testing for legality, `Concede` excluded, in the order of
-/// [`legal_actions`]: the hand, then hero effects. Later tasks extend it (attacks), and
-/// exhaustion follows automatically.
+/// [`legal_actions`]: the hand, hero effects, then per attacker (board order) the opposing
+/// hero first and each creature of the opposing board in order. At most
+/// `board x (1 + opposing board)` attacks. Own creatures, hand, pile and discard are never
+/// candidates; `validate` stays the single judge of what is legal.
 fn candidates(state: &GameState) -> Vec<Action> {
     let side = state.player(state.active);
+    let opposing = state.player(state.active.opponent());
     let plays = side.hand.iter().map(|c| Action::Play { card: c.id });
     let effects = (0..side.hero.effects.len())
         .filter_map(|i| u32::try_from(i).ok())
         .map(|effect| Action::Activate { effect });
-    let attacks = side.board.iter().map(|c| Action::Attack {
-        attacker: c.id,
-        target: Target::Hero,
+    let attacks = side.board.iter().flat_map(|attacker| {
+        std::iter::once(Target::Hero)
+            .chain(opposing.board.iter().map(|c| Target::Creature(c.id)))
+            .map(|target| Action::Attack {
+                attacker: attacker.id,
+                target,
+            })
     });
     plays.chain(effects).chain(attacks).collect()
 }
@@ -213,9 +220,14 @@ fn playable(state: &GameState) -> Vec<Action> {
         .collect()
 }
 
-/// Ends the game if the active player has no legal action other than conceding.
+/// Ends the game if the active player has no legal action other than conceding. A living
+/// creature always has one (the opposing hero is always a legal target), so it keeps its
+/// owner in the game.
 pub(crate) fn check_exhaustion(state: &mut GameState, events: &mut Vec<Event>) {
-    if state.winner.is_none() && playable(state).is_empty() {
+    let can_act = candidates(state)
+        .iter()
+        .any(|action| validate(state, action).is_ok());
+    if state.winner.is_none() && !can_act {
         let winner = state.active.opponent();
         state.winner = Some((winner, WinReason::Exhaustion));
         events.push(Event::GameWon {
@@ -320,11 +332,11 @@ fn pay(state: &mut GameState, cost: u32, events: &mut Vec<Event>) {
 }
 
 /// Every action the active player may take: one `Play` per card in hand, hero effects in the
-/// order of the hero's list, one `Attack` (on the hero) per creature of the board in order of
-/// summoning, then `Concede`. Empty once the game is over.
-///
-/// Transitional: [`apply`] already accepts an attack on a creature of the opposing board,
-/// which this list does not offer yet (a later task of the same story adds those attacks).
+/// order of the hero's list, then one `Attack` per (attacker, valid target) pair, attackers in
+/// order of summoning and, for each, the opposing hero first and then every creature of the
+/// opposing board in order (a dead creature is on no board, so it is neither listed as an
+/// attacker nor as a target; own creatures are never targets), then `Concede`. Empty once the
+/// game is over. [`apply`] accepts exactly these actions, and `Concede`.
 pub fn legal_actions(state: &GameState) -> Vec<Action> {
     if state.winner.is_some() {
         return Vec::new();
