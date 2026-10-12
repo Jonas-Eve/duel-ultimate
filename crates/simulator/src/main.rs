@@ -37,13 +37,25 @@ fn fixture_setup() -> GameSetup {
     }
 }
 
-/// Plays one game to its end and returns who won and why.
-fn play(seed: u64) -> (PlayerId, WinReason) {
+/// How a game went: who won, why, and how many creatures died along the way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Outcome {
+    winner: PlayerId,
+    reason: WinReason,
+    deaths: usize,
+}
+
+/// Plays one game to its end.
+fn play(seed: u64) -> Outcome {
     let (mut state, _) = new_game(fixture_setup(), seed).expect("the fixture is a valid setup");
     let mut policy = ChaCha8Rng::seed_from_u64(seed ^ POLICY_SALT);
     for _ in 0..MAX_STEPS {
-        if let Some(outcome) = state.winner() {
-            return outcome;
+        if let Some((winner, reason)) = state.winner() {
+            return Outcome {
+                winner,
+                reason,
+                deaths: 0,
+            };
         }
         let playable: Vec<Action> = legal_actions(&state)
             .into_iter()
@@ -57,7 +69,12 @@ fn play(seed: u64) -> (PlayerId, WinReason) {
         apply(&mut state, action).expect("a legal action applies");
     }
     apply(&mut state, Action::Concede).expect("the game is still running");
-    state.winner().expect("a concession ends the game")
+    let (winner, reason) = state.winner().expect("a concession ends the game");
+    Outcome {
+        winner,
+        reason,
+        deaths: 0,
+    }
 }
 
 fn main() {
@@ -66,7 +83,7 @@ fn main() {
         .and_then(|n| n.parse().ok())
         .unwrap_or(1000);
     let one = (0..games)
-        .filter(|&seed| play(seed).0 == PlayerId::One)
+        .filter(|&seed| play(seed).winner == PlayerId::One)
         .count();
     println!(
         "{games} games: player one wins {:.1}%",
@@ -90,13 +107,19 @@ mod tests {
     fn every_game_ends_by_a_hero_going_down_or_exhaustion_never_by_concession() {
         let mut hero_down = 0;
         for seed in 0..200 {
-            match play(seed).1 {
+            match play(seed).reason {
                 WinReason::HeroDown => hero_down += 1,
                 WinReason::Exhaustion => {}
                 WinReason::Concede => panic!("seed {seed}: the policy never concedes"),
             }
         }
         assert!(hero_down > 0, "the random policy attacks, so heroes fall");
+    }
+
+    #[test]
+    fn creatures_die_during_the_batch() {
+        let deaths: usize = (0..200).map(|seed| play(seed).deaths).sum();
+        assert!(deaths > 0, "the random policy attacks creatures too");
     }
 
     #[test]

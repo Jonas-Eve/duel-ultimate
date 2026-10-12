@@ -169,7 +169,7 @@ impl GameState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{draw, hero, setup};
+    use crate::testing::{draw, hero, potential, setup};
     use crate::{Action, Event, RuleError, apply, legal_actions, new_game};
     use duel_cards::CreatureStats;
     use rand::{Rng, SeedableRng};
@@ -572,25 +572,11 @@ mod tests {
         }
     }
 
-    /// The termination potential of `combat.rs`: heroes' health plus, per card, its current
-    /// health and 2 in a pile, 1 in a hand, 0 more on a board, nothing in a discard.
-    fn potential(state: &GameState) -> u64 {
-        let side = |p: &PlayerState| {
-            let health = |cards: &[CardInstance], extra: u64| {
-                cards
-                    .iter()
-                    .map(|c| u64::from(c.stats.health) + extra)
-                    .sum::<u64>()
-            };
-            u64::from(p.health) + health(&p.deck, 2) + health(&p.hand, 1) + health(&p.board, 0)
-        };
-        side(&state.one) + side(&state.two)
-    }
-
     #[test]
     fn the_potential_strictly_decreases_at_every_action_even_when_creatures_are_attacked() {
-        let mut deaths = 0;
-        for seed in 0..100u64 {
+        // Everything `legal_actions` offers is drawn at random, creature targets included.
+        let (mut games, mut strikes, mut hero_hits, mut deaths) = (0, 0, 0, 0);
+        for seed in 0..250u64 {
             let (mut state, _) = new_game(
                 setup(
                     hero(1 + (seed % 2) as u32, 3, 8, vec![draw(1, 1), draw(4, 3)]),
@@ -602,22 +588,22 @@ mod tests {
             let mut policy = ChaCha8Rng::seed_from_u64(seed ^ 0x5A5A);
             let mut steps = 0;
             while state.winner().is_none() {
-                // Everything `legal_actions` offers, plus every attack on a creature
-                // (which `apply` accepts before `legal_actions` lists it).
-                let mine = state.board(state.active());
-                let theirs = state.board(state.active().opponent());
-                let mut playable: Vec<Action> = legal_actions(&state)
+                let playable: Vec<Action> = legal_actions(&state)
                     .into_iter()
                     .filter(|a| *a != Action::Concede)
                     .collect();
-                playable.extend(
-                    mine.iter()
-                        .flat_map(|a| theirs.iter().map(move |x| strike(*a, *x))),
-                );
                 let pick = playable
                     .get(policy.next_u32() as usize % playable.len().max(1))
                     .copied()
                     .unwrap_or(Action::Concede);
+                match pick {
+                    Action::Attack {
+                        target: crate::Target::Creature(_),
+                        ..
+                    } => strikes += 1,
+                    Action::Attack { .. } => hero_hits += 1,
+                    _ => {}
+                }
                 let before = potential(&state);
                 let events = apply(&mut state, pick).unwrap();
                 deaths += events
@@ -633,7 +619,43 @@ mod tests {
                 steps += 1;
                 assert!(steps < 2000, "seed {seed}: the game does not end");
             }
+            games += 1;
         }
-        assert!(deaths > 100, "the games really kill creatures: {deaths}");
+        // Not vacuous: creatures really are attacked and really die along the way.
+        assert!(games >= 200, "{games} games");
+        assert!(strikes > 200, "attacks on creatures: {strikes}");
+        assert!(hero_hits > 200, "attacks on heroes: {hero_hits}");
+        assert!(deaths > 200, "deaths: {deaths}");
+    }
+
+    #[test]
+    fn a_summoning_that_hands_over_to_an_exhausted_receiver_ends_the_game() {
+        // One's summoning costs 8 against a budget of 8: the token crosses to Two, who has
+        // neither card nor creature to act with.
+        let mut state = running(vec![]);
+        state.two.deck.clear();
+        state.two.hand.clear();
+        state.one.hand[0].stats.cost = 8;
+        let card = state.one.hand[0].id;
+        let events = apply(&mut state, Action::Play { card }).unwrap();
+        assert_eq!(state.winner(), Some((PlayerId::One, WinReason::Exhaustion)));
+        assert_eq!(state.active(), PlayerId::Two);
+        let tail: Vec<_> = events.iter().rev().take(3).rev().cloned().collect();
+        assert_eq!(
+            tail,
+            vec![
+                Event::TokenMoved {
+                    player: PlayerId::Two,
+                    budget: 1
+                },
+                Event::ActivePlayerChanged {
+                    player: PlayerId::Two
+                },
+                Event::GameWon {
+                    winner: PlayerId::One,
+                    reason: WinReason::Exhaustion
+                },
+            ]
+        );
     }
 }

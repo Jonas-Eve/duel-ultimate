@@ -480,6 +480,21 @@ fn legal_actions_agree_with_apply() {
         while state.winner().is_none() {
             let legal = legal_actions(&state);
             assert_eq!(legal.last(), Some(&Action::Concede));
+            // Every creature in play (either side) attacking the hero or any of the 64
+            // first ids, own creatures, hand cards and unknown ids included.
+            let in_play: Vec<CardInstanceId> = [PlayerId::One, PlayerId::Two]
+                .into_iter()
+                .flat_map(|p| state.board(p))
+                .collect();
+            let creature_attacks: Vec<Action> = in_play
+                .iter()
+                .flat_map(|attacker| {
+                    (0..64).map(move |n| Action::Attack {
+                        attacker: *attacker,
+                        target: Target::Creature(CardInstanceId(n)),
+                    })
+                })
+                .collect();
             let universe = (0..12)
                 .map(|effect| Action::Activate { effect })
                 .chain((0..64).map(|n| Action::Play {
@@ -489,6 +504,7 @@ fn legal_actions_agree_with_apply() {
                     attacker: CardInstanceId(n),
                     target: Target::Hero,
                 }))
+                .chain(creature_attacks)
                 .chain([Action::Concede, Action::Activate { effect: u32::MAX }]);
             for action in universe {
                 let mut probe = state.clone();
@@ -1041,6 +1057,32 @@ fn an_attacker_that_is_not_on_the_active_board_is_refused_and_changes_nothing() 
     assert!(apply(&mut state, hit(mine)).is_ok());
 }
 
+/// The attacks the active player is owed: per attacker (board order), the opposing hero
+/// first, then every creature of the opposing board (board order).
+fn expected_attacks(state: &GameState) -> Vec<Action> {
+    let targets: Vec<Target> = std::iter::once(Target::Hero)
+        .chain(
+            state
+                .board(state.active().opponent())
+                .into_iter()
+                .map(Target::Creature),
+        )
+        .collect();
+    state
+        .board(state.active())
+        .into_iter()
+        .flat_map(|attacker| {
+            targets
+                .iter()
+                .map(move |target| Action::Attack {
+                    attacker,
+                    target: *target,
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 #[test]
 fn legal_actions_list_hand_effects_attacks_then_concede() {
     let (mut state, mine, theirs) = both_armed();
@@ -1052,12 +1094,13 @@ fn legal_actions_list_hand_effects_attacks_then_concede() {
         "cost 1 against budget 1 crosses"
     );
     let two_board = state.board(PlayerId::Two);
+    // Two's only creature attacks One's hero, then each of One's two creatures (3 targets).
     let expected: Vec<Action> = state
         .hand(PlayerId::Two)
         .into_iter()
         .map(|card| Action::Play { card })
         .chain([Action::Activate { effect: 0 }])
-        .chain(two_board.iter().map(|c| hit(*c)))
+        .chain([hit(theirs), strike(theirs, mine), strike(theirs, second)])
         .chain([Action::Concede])
         .collect();
     assert_eq!(legal_actions(&state), expected);
@@ -1068,6 +1111,106 @@ fn legal_actions_list_hand_effects_attacks_then_concede() {
     );
     assert!(!legal_actions(&state).contains(&hit(mine)));
     assert!(!legal_actions(&state).contains(&hit(second)));
+}
+
+#[test]
+fn attacks_are_listed_per_attacker_hero_first_then_the_opposing_board_in_order() {
+    // Two creatures on each side.
+    let state = skirmish(stats(1, 1, 1, 3), stats(1, 1, 1, 3), 2, 8);
+    let (ones, twos) = (state.board(PlayerId::One), state.board(PlayerId::Two));
+    assert_eq!((ones.len(), twos.len()), (2, 2));
+    let hand: Vec<Action> = state
+        .hand(PlayerId::One)
+        .into_iter()
+        .map(|card| Action::Play { card })
+        .collect();
+    let expected: Vec<Action> = hand
+        .into_iter()
+        .chain([Action::Activate { effect: 0 }])
+        .chain([
+            hit(ones[0]),
+            strike(ones[0], twos[0]),
+            strike(ones[0], twos[1]),
+            hit(ones[1]),
+            strike(ones[1], twos[0]),
+            strike(ones[1], twos[1]),
+        ])
+        .chain([Action::Concede])
+        .collect();
+    assert_eq!(legal_actions(&state), expected);
+    assert_eq!(expected_attacks(&state).len(), 6, "attackers x (1 + board)");
+}
+
+#[test]
+fn a_creature_never_targets_its_own_side() {
+    let state = skirmish(stats(1, 1, 1, 3), stats(1, 1, 1, 3), 2, 8);
+    let ones = state.board(PlayerId::One);
+    let legal = legal_actions(&state);
+    for attacker in &ones {
+        for own in &ones {
+            assert!(
+                !legal.contains(&strike(*attacker, *own)),
+                "{attacker:?} -> {own:?}"
+            );
+        }
+    }
+    // Nor cards that are not in play.
+    for card in state.hand(PlayerId::Two) {
+        assert!(!legal.contains(&strike(ones[0], card)));
+    }
+}
+
+#[test]
+fn a_dead_creature_is_neither_an_attacker_nor_a_target_in_legal_actions() {
+    // One kills Two's creature (force 3 against 3 health) and keeps the token (cost 1 of 3).
+    let mut state = skirmish(stats(1, 3, 1, 3), stats(3, 1, 1, 3), 1, 8);
+    let (a, x) = duelists(&state);
+    apply(&mut state, strike(a, x)).unwrap();
+    assert_eq!(state.active(), PlayerId::One);
+    assert_eq!(state.discard(PlayerId::Two), vec![x]);
+    let legal = legal_actions(&state);
+    assert_eq!(
+        legal
+            .iter()
+            .filter(|a| matches!(a, Action::Attack { .. }))
+            .count(),
+        1,
+        "only the hero is left to hit"
+    );
+    assert!(legal.contains(&hit(a)));
+    assert!(!legal.contains(&strike(a, x)), "dead: not a target");
+    assert_eq!(
+        legal
+            .iter()
+            .filter(|a| matches!(a, Action::Attack { .. }))
+            .copied()
+            .collect::<Vec<_>>(),
+        expected_attacks(&state)
+    );
+
+    // Now the other way round: Two kills One's creature and the dead one is not an attacker.
+    let mut state = skirmish(stats(1, 1, 1, 1), stats(1, 5, 1, 3), 1, 8);
+    let (a, x) = duelists(&state);
+    play_first(&mut state); // One summons a second creature, the token crosses to Two
+    assert_eq!(state.active(), PlayerId::Two);
+    apply(&mut state, strike(x, a)).unwrap();
+    assert_eq!(state.discard(PlayerId::One), vec![a]);
+    let legal = legal_actions(&state);
+    assert!(
+        !legal.iter().any(|act| matches!(
+            act,
+            Action::Attack { attacker, target } if *attacker == a || *target == Target::Creature(a)
+        )),
+        "{legal:?}"
+    );
+    assert_eq!(
+        legal
+            .iter()
+            .filter(|a| matches!(a, Action::Attack { .. }))
+            .copied()
+            .collect::<Vec<_>>(),
+        expected_attacks(&state)
+    );
 }
 
 #[test]
@@ -1095,8 +1238,9 @@ fn attacks_travel_as_snake_case_json() {
     );
 }
 
-/// Plays one game by always taking the last action other than `Concede` (an attack as soon as
-/// a creature is in play).
+/// Plays one game by always taking the last action other than `Concede` whose target is not
+/// a creature (an attack on the hero as soon as a creature is in play): a game in which only
+/// heroes are ever attacked, like every game of S1.
 fn play_to_the_end(seed: u64) -> (GameState, Vec<Event>) {
     let (mut state, mut log) = new_game(
         setup(
@@ -1109,7 +1253,10 @@ fn play_to_the_end(seed: u64) -> (GameState, Vec<Event>) {
     while state.winner().is_none() {
         let action = legal_actions(&state)
             .into_iter()
-            .rfind(|a| *a != Action::Concede)
+            .rfind(|a| {
+                *a != Action::Concede
+                    && !matches!(a, Action::Attack { target, .. } if *target != Target::Hero)
+            })
             .unwrap_or(Action::Concede);
         log.extend(apply(&mut state, action).unwrap());
     }
@@ -1148,30 +1295,6 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     })
 }
 
-/// Like `play_to_the_end`, but the policy takes the last action other than `Concede` whose
-/// target is not a creature: a game in which only heroes are ever attacked.
-fn hero_only_game(seed: u64) -> (GameState, Vec<Event>) {
-    let (mut state, mut log) = new_game(
-        setup(
-            hero(2, 3, 8, vec![draw(1, 1), draw(4, 2)]),
-            hero(1, 2, 6, vec![draw(2, 1)]),
-        ),
-        seed,
-    )
-    .unwrap();
-    while state.winner().is_none() {
-        let action = legal_actions(&state)
-            .into_iter()
-            .rfind(|a| {
-                *a != Action::Concede
-                    && !matches!(a, Action::Attack { target, .. } if *target != Target::Hero)
-            })
-            .unwrap_or(Action::Concede);
-        log.extend(apply(&mut state, action).unwrap());
-    }
-    (state, log)
-}
-
 /// `(winner, reason, number of events, FNV-1a of the events as JSON)` per seed 0..20,
 /// recorded on the engine as merged by S1, before creatures became attackable. Attacking a
 /// hero must keep producing exactly these games.
@@ -1202,7 +1325,7 @@ const S1_GOLDEN: [(PlayerId, WinReason, usize, u64); 20] = [
 fn s1_hero_only_games_keep_their_exact_outcome_and_journal() {
     let observed: Vec<_> = (0..20)
         .map(|seed| {
-            let (state, log) = hero_only_game(seed);
+            let (state, log) = play_to_the_end(seed);
             let (winner, reason) = state.winner().unwrap();
             let json = serde_json::to_string(&log).unwrap();
             (winner, reason, log.len(), fnv1a(json.as_bytes()))
@@ -1663,4 +1786,134 @@ fn the_new_events_and_error_travel_with_stable_shapes() {
     );
     assert_eq!(RuleError::TargetNotOnBoard.code(), "target_not_on_board");
     assert!(!RuleError::TargetNotOnBoard.to_string().is_empty());
+}
+
+// ---- Targets in legal_actions: exhaustion and termination ------------------------------------
+
+/// Both heroes have no effect and a single card in hand (the rest stays in the pile, out of
+/// reach), every card being `creature`; One (initiative 2, 1 time unit) starts.
+fn lone_card_duel(creature: CreatureStats) -> GameState {
+    let lone = |initiative| {
+        let mut h = hero(initiative, 1, 8, vec![]);
+        h.starting_hand = 1;
+        h
+    };
+    let mut s = setup(lone(2), lone(1));
+    s.one.cards = vec![creature.clone(); 30];
+    s.two.cards = vec![creature; 30];
+    new_game(s, 7).unwrap().0
+}
+
+#[test]
+fn a_player_with_a_living_creature_is_never_exhausted_even_without_hand_or_effect() {
+    let mut state = lone_card_duel(stats(1, 1, 1, 3));
+    // Each side summons its only card, then has nothing but its creature to act with.
+    play_first(&mut state);
+    play_first(&mut state);
+    let mut hits = 0;
+    while state.winner().is_none() {
+        assert!(state.hand(state.active()).is_empty());
+        let actions = legal_actions(&state);
+        assert!(
+            actions.iter().any(|a| matches!(a, Action::Attack { .. })),
+            "a creature in play is always an action"
+        );
+        // The hero is the first target of the first attacker: the creatures all survive.
+        apply(&mut state, actions[0]).unwrap();
+        hits += 1;
+        assert!(hits < 100, "the game does not end");
+    }
+    assert!(hits > 1, "several attacks were needed ({hits})");
+    assert_eq!(state.winner().map(|(_, r)| r), Some(WinReason::HeroDown));
+}
+
+#[test]
+fn a_player_is_exhausted_after_the_death_of_its_last_creature() {
+    // Force 5 against 1 health: any creature dies to any hit. One's attack (1 of 1) crosses
+    // the budget, so the token reaches Two, who then has no card, no effect and no creature.
+    let mut state = lone_card_duel(stats(1, 5, 1, 1));
+    play_first(&mut state);
+    play_first(&mut state);
+    assert_eq!(state.active(), PlayerId::One);
+    let (a, x) = duelists(&state);
+    let events = apply(&mut state, strike(a, x)).unwrap();
+    assert_eq!(state.discard(PlayerId::Two), vec![x]);
+    assert_eq!(state.winner(), Some((PlayerId::One, WinReason::Exhaustion)));
+    assert_eq!(
+        kinds(&events),
+        [
+            "Attacked",
+            "CreatureDamaged",
+            "Died",
+            "TokenMoved",
+            "ActivePlayerChanged",
+            "GameWon"
+        ]
+    );
+    assert!(legal_actions(&state).is_empty());
+    assert_eq!(
+        apply(&mut state, Action::Concede),
+        Err(RuleError::GameOver),
+        "a finished game accepts nothing"
+    );
+}
+
+/// Plays a game choosing uniformly among `legal_actions` other than `Concede` with a policy
+/// generator of its own, and returns (strikes on creatures, deaths, final state).
+fn random_game(seed: u64) -> (usize, usize, GameState) {
+    use rand::{RngExt, SeedableRng};
+    let (mut state, _) = new_game(
+        setup(
+            hero(1 + (seed % 2) as u32, 3, 8, vec![draw(1, 1), draw(4, 3)]),
+            hero(1, 2, 6, vec![draw(2, 2)]),
+        ),
+        seed,
+    )
+    .unwrap();
+    let mut policy = rand_chacha::ChaCha8Rng::seed_from_u64(seed ^ 0xC0FFEE);
+    let (mut strikes, mut deaths, mut steps) = (0, 0, 0);
+    while state.winner().is_none() {
+        let playable: Vec<Action> = legal_actions(&state)
+            .into_iter()
+            .filter(|a| *a != Action::Concede)
+            .collect();
+        let action = if playable.is_empty() {
+            Action::Concede
+        } else {
+            playable[policy.random_range(0..playable.len())]
+        };
+        if matches!(
+            action,
+            Action::Attack {
+                target: Target::Creature(_),
+                ..
+            }
+        ) {
+            strikes += 1;
+        }
+        let events = apply(&mut state, action).unwrap();
+        deaths += events
+            .iter()
+            .filter(|e| matches!(e, Event::Died { .. }))
+            .count();
+        steps += 1;
+        assert!(steps < 2000, "seed {seed}: the game does not end");
+    }
+    (strikes, deaths, state)
+}
+
+#[test]
+fn random_games_with_creature_targets_end_without_a_concession_and_are_reproducible() {
+    let (mut strikes, mut deaths) = (0, 0);
+    for seed in 0..200 {
+        let (s, d, state) = random_game(seed);
+        let (again_s, again_d, again) = random_game(seed);
+        assert_eq!((s, d, &state), (again_s, again_d, &again), "seed {seed}");
+        let (_, reason) = state.winner().unwrap();
+        assert_ne!(reason, WinReason::Concede, "seed {seed}");
+        strikes += s;
+        deaths += d;
+    }
+    assert!(strikes > 200, "creatures are really attacked: {strikes}");
+    assert!(deaths > 200, "creatures really die: {deaths}");
 }
