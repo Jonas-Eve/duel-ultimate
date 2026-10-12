@@ -126,6 +126,17 @@ mod tests {
     }
 
     #[test]
+    fn legal_actions_start_with_a_play_per_card_in_hand_and_play_applies() {
+        let mut game = duel();
+        let actions: Value = serde_json::from_str(&game.legal_actions_json().unwrap()).unwrap();
+        let first = actions[0].clone();
+        assert!(first.get("play").is_some(), "{actions}");
+        let events: Value =
+            serde_json::from_str(&game.apply_json(&first.to_string()).unwrap()).unwrap();
+        assert!(events[0].get("played").is_some(), "{events}");
+    }
+
+    #[test]
     fn applying_an_action_returns_the_events() {
         let mut game = duel();
         let events: Value =

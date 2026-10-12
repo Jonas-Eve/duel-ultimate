@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    /// Summons a creature of the active player's hand (untrusted id, validated by the engine).
+    Play {
+        card: CardInstanceId,
+    },
     /// Activates the active hero's effect at this index of its list (untrusted input).
     Activate {
         effect: u32,
@@ -32,6 +36,11 @@ pub enum Event {
         player: PlayerId,
         card: CardInstanceId,
     },
+    Played {
+        player: PlayerId,
+        card: CardInstanceId,
+        cost: u32,
+    },
     /// After every non-final action: `player` holds the token with `budget`.
     TokenMoved {
         player: PlayerId,
@@ -51,6 +60,8 @@ pub enum Event {
 pub enum RuleError {
     #[error("the game is already over")]
     GameOver,
+    #[error("that card is not in the active player's hand")]
+    CardNotInHand,
     #[error("the active hero has no such effect")]
     UnknownEffect,
     #[error("this effect cannot be activated right now")]
@@ -62,6 +73,7 @@ impl RuleError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::GameOver => "game_over",
+            Self::CardNotInHand => "card_not_in_hand",
             Self::UnknownEffect => "unknown_effect",
             Self::EffectNotApplicable => "effect_not_applicable",
         }
@@ -74,6 +86,15 @@ fn hero_effect(state: &GameState, effect: u32) -> Option<&HeroEffect> {
     state.player(state.active).hero.effects.get(index)
 }
 
+/// Position in the active player's hand of the card `card`, if it is there.
+fn hand_position(state: &GameState, card: CardInstanceId) -> Option<usize> {
+    state
+        .player(state.active)
+        .hand
+        .iter()
+        .position(|c| c.id == card)
+}
+
 /// The single legality check, shared by [`apply`] and [`legal_actions`].
 pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleError> {
     if state.winner.is_some() {
@@ -81,6 +102,9 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
     }
     match action {
         Action::Concede => Ok(()),
+        Action::Play { card } => hand_position(state, *card)
+            .map(|_| ())
+            .ok_or(RuleError::CardNotInHand),
         Action::Activate { effect } => {
             let hero_effect = hero_effect(state, *effect).ok_or(RuleError::UnknownEffect)?;
             if effects::applicable(state, state.active, &hero_effect.effect) {
@@ -92,14 +116,16 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
     }
 }
 
-/// Every action worth testing for legality, `Concede` excluded. Later tasks extend it
-/// (cards in hand, attacks), and exhaustion follows automatically.
+/// Every action worth testing for legality, `Concede` excluded, in the order of
+/// [`legal_actions`]: the hand, then hero effects. Later tasks extend it (attacks), and
+/// exhaustion follows automatically.
 fn candidates(state: &GameState) -> Vec<Action> {
-    let effects = state.player(state.active).hero.effects.len();
-    (0..effects)
+    let side = state.player(state.active);
+    let plays = side.hand.iter().map(|c| Action::Play { card: c.id });
+    let effects = (0..side.hero.effects.len())
         .filter_map(|i| u32::try_from(i).ok())
-        .map(|effect| Action::Activate { effect })
-        .collect()
+        .map(|effect| Action::Activate { effect });
+    plays.chain(effects).collect()
 }
 
 /// The legal actions other than `Concede`.
@@ -135,6 +161,16 @@ pub fn apply(state: &mut GameState, action: Action) -> Result<Vec<Event>, RuleEr
                 winner,
                 reason: WinReason::Concede,
             }])
+        }
+        Action::Play { card } => {
+            let index = hand_position(state, card).ok_or(RuleError::CardNotInHand)?;
+            let creature = state.player_mut(player).hand.remove(index);
+            let cost = creature.stats.cost;
+            state.player_mut(player).board.push(creature);
+            let mut events = vec![Event::Played { player, card, cost }];
+            pay(state, cost, &mut events);
+            check_exhaustion(state, &mut events);
+            Ok(events)
         }
         Action::Activate { effect } => {
             let hero_effect = hero_effect(state, effect)
@@ -176,8 +212,8 @@ fn pay(state: &mut GameState, cost: u32, events: &mut Vec<Event>) {
     }
 }
 
-/// Every action the active player may take: hero effects in the order of the hero's list,
-/// then `Concede`. Empty once the game is over.
+/// Every action the active player may take: one `Play` per card in hand, hero effects in the
+/// order of the hero's list, then `Concede`. Empty once the game is over.
 pub fn legal_actions(state: &GameState) -> Vec<Action> {
     if state.winner.is_some() {
         return Vec::new();

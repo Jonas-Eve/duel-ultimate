@@ -63,6 +63,7 @@ fn build_side(side: PlayerSetup, next_id: &mut u32) -> PlayerState {
         hero: side.hero,
         deck,
         hand: Vec::new(),
+        board: Vec::new(),
     }
 }
 

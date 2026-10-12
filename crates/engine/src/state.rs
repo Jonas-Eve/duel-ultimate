@@ -49,6 +49,8 @@ pub(crate) struct PlayerState {
     /// Draw pile; the top is the end of the `Vec`.
     pub(crate) deck: Vec<CardInstance>,
     pub(crate) hand: Vec<CardInstance>,
+    /// Summoned creatures, in order of summoning.
+    pub(crate) board: Vec<CardInstance>,
 }
 
 /// Invariant while the game runs: `1 <= budget <= max_time` of the active player's hero.
@@ -107,6 +109,16 @@ impl GameState {
         self.player(player).deck.len()
     }
 
+    /// The cards in `player`'s hand. A client sees only its own hand: filtering is the server's job.
+    pub fn hand(&self, player: PlayerId) -> Vec<CardInstanceId> {
+        self.player(player).hand.iter().map(|c| c.id).collect()
+    }
+
+    /// The creatures `player` has summoned, in order of summoning.
+    pub fn board(&self, player: PlayerId) -> Vec<CardInstanceId> {
+        self.player(player).board.iter().map(|c| c.id).collect()
+    }
+
     pub(crate) fn player(&self, player: PlayerId) -> &PlayerState {
         match player {
             PlayerId::One => &self.one,
@@ -153,8 +165,11 @@ mod tests {
     #[test]
     fn exhaustion_after_an_action_that_keeps_the_player_active() {
         let mut state = running(vec![draw(1, 1)]);
-        state.one.deck.truncate(1);
-        let events = apply(&mut state, Action::Activate { effect: 0 }).unwrap();
+        // One is left with a single card in hand, an empty pile: playing it leaves nothing to do.
+        state.one.deck.clear();
+        state.one.hand.truncate(1);
+        let card = state.one.hand[0].id;
+        let events = apply(&mut state, Action::Play { card }).unwrap();
         assert_eq!(state.winner(), Some((PlayerId::Two, WinReason::Exhaustion)));
         assert_eq!(state.active(), PlayerId::One, "no handover happened");
         assert_eq!(
@@ -168,9 +183,10 @@ mod tests {
     }
 
     #[test]
-    fn exhaustion_of_a_receiver_with_an_empty_pile() {
+    fn exhaustion_of_a_receiver_with_an_empty_hand_and_pile() {
         let mut state = running(vec![draw(8, 1)]);
         state.two.deck.clear();
+        state.two.hand.clear();
         let events = apply(&mut state, Action::Activate { effect: 0 }).unwrap();
         assert_eq!(state.winner(), Some((PlayerId::One, WinReason::Exhaustion)));
         assert_eq!(state.active(), PlayerId::Two);
@@ -194,21 +210,51 @@ mod tests {
     }
 
     #[test]
-    fn exhaustion_is_checked_right_after_setup() {
-        let mut one = hero(2, 3, 8, vec![draw(1, 1)]);
-        one.starting_hand = 30;
-        let (state, events) = new_game(setup(one, hero(1, 2, 5, vec![draw(1, 1)])), 1).unwrap();
-        assert_eq!(state.winner(), Some((PlayerId::Two, WinReason::Exhaustion)));
-        assert!(matches!(events.first(), Some(Event::GameStarted { .. })));
-        assert!(matches!(events.last(), Some(Event::GameWon { .. })));
-        assert!(legal_actions(&state).is_empty());
-        // A hero without any effect has nothing to do either.
+    fn a_non_empty_hand_is_never_exhausted() {
+        // Empty pile and no effect at all, but cards in hand: playing is still possible.
         let (state, _) = new_game(
             setup(hero(2, 3, 8, vec![]), hero(1, 2, 5, vec![draw(1, 1)])),
             1,
         )
         .unwrap();
+        assert_eq!(state.winner(), None);
+        let mut one = hero(2, 3, 8, vec![draw(1, 1)]);
+        one.starting_hand = 30;
+        let (state, _) = new_game(setup(one, hero(1, 2, 5, vec![draw(1, 1)])), 1).unwrap();
+        assert_eq!(state.deck_len(PlayerId::One), 0);
+        assert_eq!(state.winner(), None);
+        assert!(!legal_actions(&state).is_empty());
+    }
+
+    #[test]
+    fn new_game_ends_at_once_when_the_first_player_has_nothing_to_do() {
+        // One starts (initiative 2) with an empty hand and no effect: exhausted at setup.
+        let mut one = hero(2, 3, 8, vec![]);
+        one.starting_hand = 0;
+        let (state, events) = new_game(setup(one, hero(1, 2, 5, vec![draw(1, 1)])), 3).unwrap();
+        assert_eq!(state.active(), PlayerId::One);
         assert_eq!(state.winner(), Some((PlayerId::Two, WinReason::Exhaustion)));
+        assert!(matches!(events.first(), Some(Event::GameStarted { .. })));
+        assert_eq!(
+            events.last(),
+            Some(&Event::GameWon {
+                winner: PlayerId::Two,
+                reason: WinReason::Exhaustion
+            })
+        );
+        assert!(legal_actions(&state).is_empty());
+    }
+
+    #[test]
+    fn check_exhaustion_ends_a_running_game_whose_active_player_has_nothing_to_do() {
+        let mut state = running(vec![draw(1, 1)]);
+        state.one.hand.clear();
+        state.one.deck.clear();
+        let mut events = Vec::new();
+        crate::rules::check_exhaustion(&mut state, &mut events);
+        assert_eq!(state.winner(), Some((PlayerId::Two, WinReason::Exhaustion)));
+        assert!(matches!(events.last(), Some(Event::GameWon { .. })));
+        assert!(legal_actions(&state).is_empty());
     }
 
     #[test]
@@ -221,7 +267,7 @@ mod tests {
             Err(RuleError::EffectNotApplicable)
         );
         assert_eq!(state, before);
-        assert_eq!(legal_actions(&state), vec![Action::Concede]);
+        assert!(!legal_actions(&state).contains(&Action::Activate { effect: 0 }));
     }
 
     #[test]
