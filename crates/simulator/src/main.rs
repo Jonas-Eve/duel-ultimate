@@ -87,11 +87,16 @@ mod tests {
     }
 
     #[test]
-    fn every_game_ends() {
+    fn every_game_ends_by_a_hero_going_down_or_exhaustion_never_by_concession() {
+        let mut hero_down = 0;
         for seed in 0..200 {
-            let (_, reason) = play(seed);
-            assert_ne!(reason, WinReason::HeroDown, "no attack exists yet");
+            match play(seed).1 {
+                WinReason::HeroDown => hero_down += 1,
+                WinReason::Exhaustion => {}
+                WinReason::Concede => panic!("seed {seed}: the policy never concedes"),
+            }
         }
+        assert!(hero_down > 0, "the random policy attacks, so heroes fall");
     }
 
     #[test]
@@ -99,13 +104,5 @@ mod tests {
         for seed in 0..20 {
             assert_eq!(play(seed), play(seed));
         }
-    }
-
-    #[test]
-    fn games_end_by_exhaustion_with_the_random_policy() {
-        let exhausted = (0..50)
-            .filter(|&s| play(s).1 == WinReason::Exhaustion)
-            .count();
-        assert_eq!(exhausted, 50, "nobody concedes, the piles run dry");
     }
 }

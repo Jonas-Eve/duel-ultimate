@@ -109,6 +109,11 @@ impl GameState {
         self.player(player).deck.len()
     }
 
+    /// Current health of `player`'s hero.
+    pub fn hero_health(&self, player: PlayerId) -> u32 {
+        self.player(player).health
+    }
+
     /// The cards in `player`'s hand. A client sees only its own hand: filtering is the server's job.
     pub fn hand(&self, player: PlayerId) -> Vec<CardInstanceId> {
         self.player(player).hand.iter().map(|c| c.id).collect()
@@ -163,23 +168,32 @@ mod tests {
     }
 
     #[test]
-    fn exhaustion_after_an_action_that_keeps_the_player_active() {
+    fn a_creature_in_play_keeps_its_owner_alive_after_the_last_card_is_played() {
         let mut state = running(vec![draw(1, 1)]);
-        // One is left with a single card in hand, an empty pile: playing it leaves nothing to do.
+        // One is left with a single card in hand and an empty pile. Once played, the creature
+        // can attack, so One is not exhausted: attacks count as legal actions.
         state.one.deck.clear();
         state.one.hand.truncate(1);
         let card = state.one.hand[0].id;
-        let events = apply(&mut state, Action::Play { card }).unwrap();
-        assert_eq!(state.winner(), Some((PlayerId::Two, WinReason::Exhaustion)));
-        assert_eq!(state.active(), PlayerId::One, "no handover happened");
-        assert_eq!(
-            events.last(),
-            Some(&Event::GameWon {
-                winner: PlayerId::Two,
-                reason: WinReason::Exhaustion
-            })
-        );
-        assert!(legal_actions(&state).is_empty());
+        apply(&mut state, Action::Play { card }).unwrap();
+        assert_eq!(state.winner(), None);
+        assert_eq!(state.active(), PlayerId::One);
+        assert!(legal_actions(&state).contains(&Action::Attack {
+            attacker: card,
+            target: crate::Target::Hero
+        }));
+    }
+
+    #[test]
+    fn a_receiver_with_only_a_creature_in_play_is_not_exhausted() {
+        let mut state = running(vec![draw(8, 1)]);
+        state.two.deck.clear();
+        let creature = state.two.hand.remove(0);
+        state.two.hand.clear();
+        state.two.board.push(creature);
+        apply(&mut state, Action::Activate { effect: 0 }).unwrap();
+        assert_eq!(state.active(), PlayerId::Two);
+        assert_eq!(state.winner(), None);
     }
 
     #[test]
@@ -207,6 +221,69 @@ mod tests {
                 },
             ]
         );
+    }
+
+    /// `running` (One active, budget 8) with a creature of `attack_cost` already on One's
+    /// board, and Two stripped of hand, pile and board. Returns its id.
+    fn armed_against_an_empty_two(attack_cost: u32) -> (GameState, crate::CardInstanceId) {
+        let mut state = running(vec![draw(1, 1)]);
+        let mut creature = state.one.hand.remove(0);
+        creature.stats.force = 1;
+        creature.stats.attack_cost = attack_cost;
+        let id = creature.id;
+        state.one.board.push(creature);
+        state.two.hand.clear();
+        state.two.deck.clear();
+        state.two.board.clear();
+        (state, id)
+    }
+
+    fn hit(attacker: crate::CardInstanceId) -> Action {
+        Action::Attack {
+            attacker,
+            target: crate::Target::Hero,
+        }
+    }
+
+    #[test]
+    fn a_non_lethal_attack_that_hands_over_to_an_exhausted_receiver_ends_the_game() {
+        // c >= b (8 >= 8): the token crosses to Two, who has nothing left to do.
+        let (mut state, id) = armed_against_an_empty_two(8);
+        let events = apply(&mut state, hit(id)).unwrap();
+        assert_eq!(
+            state.hero_health(PlayerId::Two),
+            9,
+            "the attack is not lethal"
+        );
+        assert_eq!(state.winner(), Some((PlayerId::One, WinReason::Exhaustion)));
+        assert_eq!(state.active(), PlayerId::Two);
+        let tail: Vec<_> = events.iter().rev().take(3).rev().cloned().collect();
+        assert_eq!(
+            tail,
+            vec![
+                Event::TokenMoved {
+                    player: PlayerId::Two,
+                    budget: 1
+                },
+                Event::ActivePlayerChanged {
+                    player: PlayerId::Two
+                },
+                Event::GameWon {
+                    winner: PlayerId::One,
+                    reason: WinReason::Exhaustion
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_non_lethal_attack_that_keeps_the_token_does_not_exhaust_anyone() {
+        // c < b (2 < 8): One stays active with its creature on the board.
+        let (mut state, id) = armed_against_an_empty_two(2);
+        let events = apply(&mut state, hit(id)).unwrap();
+        assert_eq!(state.winner(), None);
+        assert_eq!((state.active(), state.budget()), (PlayerId::One, 6));
+        assert!(!events.iter().any(|e| matches!(e, Event::GameWon { .. })));
     }
 
     #[test]

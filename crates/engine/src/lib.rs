@@ -19,6 +19,7 @@
     )
 )]
 
+mod combat;
 mod effects;
 mod rules;
 mod setup;
@@ -27,6 +28,6 @@ mod state;
 mod testing;
 mod time;
 
-pub use rules::{Action, Event, RuleError, apply, legal_actions};
+pub use rules::{Action, Event, RuleError, Target, apply, legal_actions};
 pub use setup::{GameSetup, PlayerSetup, SetupError, new_game};
 pub use state::{CardInstanceId, GameState, PlayerId, WinReason};
