@@ -2,7 +2,7 @@
 //! the seeded generator held in [`GameState`], so a game is replayable from `seed + actions`.
 //!
 //! One continuous turn: whoever holds the token acts while they have budget. Every action
-//! costs time through the single rule in [`time`]; crossing the boundary hands the token over.
+//! costs time through a single time rule; crossing the boundary hands the token over.
 //! The engine consumes data already resolved by `duel-cards` and re-validates it in
 //! [`new_game`], because the setup may come from an untrusted client (WASM).
 //!

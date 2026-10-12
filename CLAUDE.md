@@ -34,11 +34,11 @@ joueur ou contre IA (l'IA réutilise le moteur côté serveur).
 
 | Composant | Rôle | Stack |
 |---|---|---|
-| `crates/engine` | Règles de base minimales ; les mécaniques des decks seront des briques composables, qu'un deck active ou non | Rust 2024, `rand_chacha` (graine) |
+| `crates/engine` | Règles : un seul tour continu, une règle de temps unique, effets de héros (dont la pioche), `Concede`, épuisement, `legal_actions` ; les mécaniques des decks seront des briques composables, qu'un deck active ou non. Dépend de `duel-cards` (revalide ses entrées) | Rust 2024, `rand_chacha` (graine) |
 | `crates/cards` | Cartes, decks et extensions en **données JSON** versionnées, avec validation | Rust, `serde`/`serde_json` |
-| `crates/simulator` | Parties IA contre IA pour mesurer les taux de victoire entre decks (équilibrage) | Rust |
+| `crates/simulator` | Parties IA contre IA pour mesurer les taux de victoire entre decks (équilibrage) ; pour l'instant, decks de la fixture et politique au hasard | Rust |
 | `crates/server` | Parties en ligne (HTTP + WebSocket) | Rust, `axum` 0.8, `tokio` |
-| `crates/engine-wasm` | Binding WASM du moteur pour le client (mêmes règles que le serveur) | Rust, `wasm-bindgen` |
+| `crates/engine-wasm` | Binding WASM du moteur pour le client (mêmes règles que le serveur) : constructeur depuis un JSON de setup, `legal_actions()` et `apply(action)` en JSON, erreurs `{"code","message"}`, entrée limitée à 1 MiB, aucun accesseur d'état complet | Rust, `wasm-bindgen` |
 | `apps/web` | Client **mobile-first et responsive** (PWA ensuite, appli native Capacitor plus tard) | React 19, TypeScript, Vite |
 
 Règles propres à ce repo :
@@ -49,6 +49,8 @@ Règles propres à ce repo :
 - Une nouvelle mécanique ajoute une brique au moteur sans modifier le comportement des decks
   qui ne l'utilisent pas (à vérifier par le simulateur).
 - Format des données : un set = un dossier versionné `data/<set>/<version>/` (`cards.json`, `decks.json`). Une carte a un discriminant `kind` ; un deck embarque son héros et compte exactement 30 cartes ; toute validation passe par `duel-cards` (`parse_cards`, `parse_decks`, `resolve_deck`), stats bornées à `MAX_STAT` = 10000. Exemple : `data/fixture/1.0.0/`.
+- **Héros** : `max_time`, `starting_hand`, `initiative`, `start_budget`, `health` et une liste `effects` (au plus `MAX_HERO_EFFECTS` = 8) de `{ name, cost, effect }` ; `effect` a un discriminant `kind`, une seule variante pour l'instant, `draw { count }`. Piocher n'est pas une action du moteur : c'est un effet de héros, activé par `Action::Activate { effect }` (indice dans la liste, non fiable, validé par le moteur). `CreatureStats` est aussi (dé)sérialisable : c'est le format du setup JSON d'`engine-wasm`.
+- **Règle de temps** (`crates/engine/src/time.rs`, la seule) : budget `b`, coût `c` ; si `c < b` le joueur reste actif avec `b − c`, sinon la main passe et l'adversaire reçoit `min(c − b + 1, max_time adverse)`. Aucune pioche automatique, aucune action « passer ». Le hasard n'est consommé qu'au setup (mélange de One, mélange de Two, puis départage d'une égalité d'initiative) ; `apply` ne l'utilise jamais. `new_game` revalide toutes ses données via `duel-cards`.
 - Pas de base de données ni de comptes joueurs tant qu'aucune story ne l'exige.
 <!-- PILOT:ARCHITECTURE:END -->
 
