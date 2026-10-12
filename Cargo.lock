@@ -164,9 +164,11 @@ dependencies = [
 name = "duel-engine"
 version = "0.1.0"
 dependencies = [
+ "duel-cards",
  "rand 0.10.3",
  "rand_chacha 0.10.0",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -174,7 +176,10 @@ dependencies = [
 name = "duel-engine-wasm"
 version = "0.1.0"
 dependencies = [
+ "duel-cards",
  "duel-engine",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
 ]
 
@@ -191,7 +196,10 @@ dependencies = [
 name = "duel-simulator"
 version = "0.1.0"
 dependencies = [
+ "duel-cards",
  "duel-engine",
+ "rand 0.10.3",
+ "rand_chacha 0.10.0",
 ]
 
 [[package]]

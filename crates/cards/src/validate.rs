@@ -1,10 +1,12 @@
-use crate::{Card, CreatureStats, Deck, Hero};
+use crate::{Card, CreatureStats, Deck, Effect, Hero};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Exact number of cards in a deck.
 pub const DECK_SIZE: usize = 30;
 /// Upper bound of every numeric stat (keeps hostile data from producing endless games).
 pub const MAX_STAT: u32 = 10_000;
+/// Maximum number of effects a hero can have (bounds hostile data, like [`MAX_STAT`]).
+pub const MAX_HERO_EFFECTS: usize = 8;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum CardsError {
@@ -30,6 +32,19 @@ pub enum CardsError {
     WrongDeckSize { found: usize, expected: usize },
     #[error("`{field}` is {value}, above the maximum of {max}")]
     StatTooHigh {
+        field: &'static str,
+        value: u32,
+        max: u32,
+    },
+    #[error("a hero has at most {max} effects, found {found}")]
+    TooManyEffects { found: usize, max: usize },
+    #[error("effect #{effect}: `cost` must be at least 1 (a cost of 0 would be free)")]
+    EffectCostBelowOne { effect: usize },
+    #[error("effect #{effect}: `count` must be at least 1")]
+    EffectCountBelowOne { effect: usize },
+    #[error("effect #{effect}: `{field}` is {value}, above the maximum of {max}")]
+    EffectStatTooHigh {
+        effect: usize,
         field: &'static str,
         value: u32,
         max: u32,
@@ -120,7 +135,6 @@ pub fn validate_creature(stats: &CreatureStats) -> Result<(), CardsError> {
 }
 
 pub fn validate_hero(hero: &Hero) -> Result<(), CardsError> {
-    cost_in_range("draw_cost", hero.draw_cost)?;
     if hero.max_time < 1 {
         return Err(CardsError::MaxTimeBelowOne);
     }
@@ -131,7 +145,44 @@ pub fn validate_hero(hero: &Hero) -> Result<(), CardsError> {
             max_time: hero.max_time,
         });
     }
-    positive_in_range("health", hero.health)
+    positive_in_range("health", hero.health)?;
+    validate_effects(hero)
+}
+
+fn validate_effects(hero: &Hero) -> Result<(), CardsError> {
+    if hero.effects.len() > MAX_HERO_EFFECTS {
+        return Err(CardsError::TooManyEffects {
+            found: hero.effects.len(),
+            max: MAX_HERO_EFFECTS,
+        });
+    }
+    for (effect, hero_effect) in hero.effects.iter().enumerate() {
+        if hero_effect.cost < 1 {
+            return Err(CardsError::EffectCostBelowOne { effect });
+        }
+        too_high(effect, "cost", hero_effect.cost)?;
+        match hero_effect.effect {
+            Effect::Draw { count } => {
+                if count < 1 {
+                    return Err(CardsError::EffectCountBelowOne { effect });
+                }
+                too_high(effect, "count", count)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn too_high(effect: usize, field: &'static str, value: u32) -> Result<(), CardsError> {
+    if value > MAX_STAT {
+        return Err(CardsError::EffectStatTooHigh {
+            effect,
+            field,
+            value,
+            max: MAX_STAT,
+        });
+    }
+    Ok(())
 }
 
 /// Checks what depends on the deck length: exactly [`DECK_SIZE`] cards, and a starting

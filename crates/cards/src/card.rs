@@ -41,7 +41,8 @@ impl Card {
 }
 
 /// Resolved numeric stats of a creature card (what the engine copies into a game).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreatureStats {
     pub cost: u32,
     pub force: u32,

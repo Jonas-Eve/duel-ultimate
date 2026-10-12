@@ -7,3 +7,6 @@ publish.workspace = true
 
 [dependencies]
 duel-engine.workspace = true
+duel-cards.workspace = true
+rand.workspace = true
+rand_chacha.workspace = true

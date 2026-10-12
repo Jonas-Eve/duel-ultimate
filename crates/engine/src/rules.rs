@@ -1,0 +1,188 @@
+//! Actions, events and the rules that apply them.
+
+use crate::effects;
+use crate::state::{CardInstanceId, GameState, PlayerId, WinReason};
+use crate::time::{self, Spend};
+use duel_cards::HeroEffect;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum Action {
+    /// Activates the active hero's effect at this index of its list (untrusted input).
+    Activate {
+        effect: u32,
+    },
+    Concede,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Event {
+    GameStarted {
+        first: PlayerId,
+        budget: u32,
+    },
+    EffectActivated {
+        player: PlayerId,
+        effect: u32,
+        cost: u32,
+    },
+    Drew {
+        player: PlayerId,
+        card: CardInstanceId,
+    },
+    /// After every non-final action: `player` holds the token with `budget`.
+    TokenMoved {
+        player: PlayerId,
+        budget: u32,
+    },
+    /// Only when the token crossed the boundary.
+    ActivePlayerChanged {
+        player: PlayerId,
+    },
+    GameWon {
+        winner: PlayerId,
+        reason: WinReason,
+    },
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum RuleError {
+    #[error("the game is already over")]
+    GameOver,
+    #[error("the active hero has no such effect")]
+    UnknownEffect,
+    #[error("this effect cannot be activated right now")]
+    EffectNotApplicable,
+}
+
+impl RuleError {
+    /// Stable machine-readable code.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::GameOver => "game_over",
+            Self::UnknownEffect => "unknown_effect",
+            Self::EffectNotApplicable => "effect_not_applicable",
+        }
+    }
+}
+
+/// The effect of the active hero at the untrusted index `effect`, if there is one.
+fn hero_effect(state: &GameState, effect: u32) -> Option<&HeroEffect> {
+    let index = usize::try_from(effect).ok()?;
+    state.player(state.active).hero.effects.get(index)
+}
+
+/// The single legality check, shared by [`apply`] and [`legal_actions`].
+pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleError> {
+    if state.winner.is_some() {
+        return Err(RuleError::GameOver);
+    }
+    match action {
+        Action::Concede => Ok(()),
+        Action::Activate { effect } => {
+            let hero_effect = hero_effect(state, *effect).ok_or(RuleError::UnknownEffect)?;
+            if effects::applicable(state, state.active, &hero_effect.effect) {
+                Ok(())
+            } else {
+                Err(RuleError::EffectNotApplicable)
+            }
+        }
+    }
+}
+
+/// Every action worth testing for legality, `Concede` excluded. Later tasks extend it
+/// (cards in hand, attacks), and exhaustion follows automatically.
+fn candidates(state: &GameState) -> Vec<Action> {
+    let effects = state.player(state.active).hero.effects.len();
+    (0..effects)
+        .filter_map(|i| u32::try_from(i).ok())
+        .map(|effect| Action::Activate { effect })
+        .collect()
+}
+
+/// The legal actions other than `Concede`.
+fn playable(state: &GameState) -> Vec<Action> {
+    candidates(state)
+        .into_iter()
+        .filter(|action| validate(state, action).is_ok())
+        .collect()
+}
+
+/// Ends the game if the active player has no legal action other than conceding.
+pub(crate) fn check_exhaustion(state: &mut GameState, events: &mut Vec<Event>) {
+    if state.winner.is_none() && playable(state).is_empty() {
+        let winner = state.active.opponent();
+        state.winner = Some((winner, WinReason::Exhaustion));
+        events.push(Event::GameWon {
+            winner,
+            reason: WinReason::Exhaustion,
+        });
+    }
+}
+
+/// Applies `action` for the active player. A refusal leaves the state (and its generator)
+/// untouched: everything is validated before anything is mutated. Never consumes randomness.
+pub fn apply(state: &mut GameState, action: Action) -> Result<Vec<Event>, RuleError> {
+    validate(state, &action)?;
+    let player = state.active;
+    match action {
+        Action::Concede => {
+            let winner = player.opponent();
+            state.winner = Some((winner, WinReason::Concede));
+            Ok(vec![Event::GameWon {
+                winner,
+                reason: WinReason::Concede,
+            }])
+        }
+        Action::Activate { effect } => {
+            let hero_effect = hero_effect(state, effect)
+                .cloned()
+                .ok_or(RuleError::UnknownEffect)?;
+            let mut events = vec![Event::EffectActivated {
+                player,
+                effect,
+                cost: hero_effect.cost,
+            }];
+            effects::resolve(state, player, &hero_effect.effect, &mut events);
+            pay(state, hero_effect.cost, &mut events);
+            check_exhaustion(state, &mut events);
+            Ok(events)
+        }
+    }
+}
+
+/// Charges `cost` to the active player and moves the token accordingly.
+fn pay(state: &mut GameState, cost: u32, events: &mut Vec<Event>) {
+    let player = state.active;
+    let my_max = state.player(player).hero.max_time;
+    let opp_max = state.player(player.opponent()).hero.max_time;
+    match time::spend(state.budget, cost, my_max, opp_max) {
+        Spend::Stay(budget) => state.budget = budget,
+        Spend::HandOver(budget) => {
+            state.active = player.opponent();
+            state.budget = budget;
+        }
+    }
+    events.push(Event::TokenMoved {
+        player: state.active,
+        budget: state.budget,
+    });
+    if state.active != player {
+        events.push(Event::ActivePlayerChanged {
+            player: state.active,
+        });
+    }
+}
+
+/// Every action the active player may take: hero effects in the order of the hero's list,
+/// then `Concede`. Empty once the game is over.
+pub fn legal_actions(state: &GameState) -> Vec<Action> {
+    if state.winner.is_some() {
+        return Vec::new();
+    }
+    let mut actions = playable(state);
+    actions.push(Action::Concede);
+    actions
+}

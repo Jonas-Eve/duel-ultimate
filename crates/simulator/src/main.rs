@@ -1,21 +1,63 @@
-//! Plays N seeded games and prints the first-player win rate. Placeholder policy for now
-//! (the player on turn 10 concedes); real decks and AIs come with the first mechanics.
+//! Plays N seeded games between the fixture decks and prints the first-player win rate.
+//! Policy: uniformly random among the legal actions other than `Concede`, drawn from the
+//! simulator's own generator (separate from the game's). The real simulator
+//! (`run_batch`, reports) comes with the simulator story.
 
-use duel_engine::{Action, GameState, PlayerId, apply};
+use duel_cards::{parse_cards, parse_decks, resolve_deck};
+use duel_engine::{
+    Action, GameSetup, PlayerId, PlayerSetup, WinReason, apply, legal_actions, new_game,
+};
+use rand::{RngExt, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 
-fn play(seed: u64) -> PlayerId {
-    let mut state = GameState::new(seed);
-    loop {
-        let action = if state.turn >= 10 {
+const FIXTURE_VERSION: &str = "fixture@1.0.0";
+const FIXTURE_CARDS: &str = include_str!("../../../data/fixture/1.0.0/cards.json");
+const FIXTURE_DECKS: &str = include_str!("../../../data/fixture/1.0.0/decks.json");
+
+/// Mixed into the game seed so the policy's generator is not the game's.
+const POLICY_SALT: u64 = 0x5DEE_CE66_D1CE_4E5B;
+/// Defensive cap: every game ends by itself, but a rule bug must not hang the batch.
+const MAX_STEPS: usize = 10_000;
+
+/// The fixture decks as a game setup: the first deck is One's, the second Two's.
+fn fixture_setup() -> GameSetup {
+    let cards = parse_cards(FIXTURE_CARDS).expect("the embedded fixture cards are valid");
+    let decks = parse_decks(FIXTURE_DECKS).expect("the embedded fixture decks are valid");
+    let side = |index: usize| {
+        let deck = decks.get(index).expect("the fixture has two decks");
+        PlayerSetup {
+            hero: deck.hero.clone(),
+            cards: resolve_deck(deck, &cards).expect("the fixture decks resolve"),
+        }
+    };
+    GameSetup {
+        one: side(0),
+        two: side(1),
+        data_versions: vec![FIXTURE_VERSION.to_owned()],
+    }
+}
+
+/// Plays one game to its end and returns who won and why.
+fn play(seed: u64) -> (PlayerId, WinReason) {
+    let (mut state, _) = new_game(fixture_setup(), seed).expect("the fixture is a valid setup");
+    let mut policy = ChaCha8Rng::seed_from_u64(seed ^ POLICY_SALT);
+    for _ in 0..MAX_STEPS {
+        if let Some(outcome) = state.winner() {
+            return outcome;
+        }
+        let playable: Vec<Action> = legal_actions(&state)
+            .into_iter()
+            .filter(|action| *action != Action::Concede)
+            .collect();
+        let action = if playable.is_empty() {
             Action::Concede
         } else {
-            Action::EndTurn
+            playable[policy.random_range(0..playable.len())]
         };
-        apply(&mut state, action).expect("game is running");
-        if let Some(winner) = state.winner {
-            return winner;
-        }
+        apply(&mut state, action).expect("a legal action applies");
     }
+    apply(&mut state, Action::Concede).expect("the game is still running");
+    state.winner().expect("a concession ends the game")
 }
 
 fn main() {
@@ -24,10 +66,46 @@ fn main() {
         .and_then(|n| n.parse().ok())
         .unwrap_or(1000);
     let one = (0..games)
-        .filter(|&seed| play(seed) == PlayerId::One)
+        .filter(|&seed| play(seed).0 == PlayerId::One)
         .count();
     println!(
         "{games} games: player one wins {:.1}%",
         100.0 * one as f64 / games as f64
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_fixture_setup_is_valid() {
+        let setup = fixture_setup();
+        assert_eq!(setup.one.cards.len(), 30);
+        assert_eq!(setup.two.cards.len(), 30);
+        assert!(duel_engine::new_game(setup, 0).is_ok());
+    }
+
+    #[test]
+    fn every_game_ends() {
+        for seed in 0..200 {
+            let (_, reason) = play(seed);
+            assert_ne!(reason, WinReason::HeroDown, "no attack exists yet");
+        }
+    }
+
+    #[test]
+    fn a_seed_always_gives_the_same_game() {
+        for seed in 0..20 {
+            assert_eq!(play(seed), play(seed));
+        }
+    }
+
+    #[test]
+    fn games_end_by_exhaustion_with_the_random_policy() {
+        let exhausted = (0..50)
+            .filter(|&s| play(s).1 == WinReason::Exhaustion)
+            .count();
+        assert_eq!(exhausted, 50, "nobody concedes, the piles run dry");
+    }
 }
