@@ -8,9 +8,9 @@
 //! `Duel`s of the same seed fed the same actions, the refused action going to one only.
 //!
 //! Defeat by exhaustion cannot happen in play between the real fixture decks (every hero
-//! keeps a draw effect and a pile, and no creature dies before S2a), but it is reachable
-//! through the JSON boundary by mutating the setup (a hero with no effect and no hand): it
-//! is exercised both at setup and as the consequence of a handover.
+//! keeps a draw effect and a pile), but it is reachable through the JSON boundary by
+//! mutating the setup (a hero with no effect and no hand): it is exercised both at setup and
+//! as the consequence of a handover.
 
 use duel_cards::{CardsError, parse_cards, parse_decks, resolve_deck};
 use duel_engine::{GameSetup, PlayerSetup};
