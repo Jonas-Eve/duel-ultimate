@@ -1,16 +1,26 @@
-//! End-to-end test of story S1 ("a duel playable to victory"), driven exclusively through
-//! the JSON boundary of `engine-wasm` (`Duel::from_json` / `legal_actions_json` /
-//! `apply_json`), the same one the future web client uses, on the `fixture` data set.
+//! End-to-end tests of stories S1 ("a duel playable to victory") and S2a ("targets, death and
+//! discard of creatures"), driven exclusively through the JSON boundary of `engine-wasm`
+//! (`Duel::from_json` / `legal_actions_json` / `apply_json`), the same one the future web
+//! client uses, on the `fixture` data set.
 //!
 //! There is no state accessor on this boundary, so nothing here peeks at the engine:
 //! card ids, the active player and the budget are read from what the JSON exposes (legal
 //! actions and events). "State identical after a refusal" is checked with twins: two
 //! `Duel`s of the same seed fed the same actions, the refused action going to one only.
 //!
-//! Defeat by exhaustion cannot happen in play between the real fixture decks (every hero
-//! keeps a draw effect and a pile), but it is reachable through the JSON boundary by
-//! mutating the setup (a hero with no effect and no hand): it is exercised both at setup and
-//! as the consequence of a handover.
+//! S1 (cases 1 to 11): setup validation, who starts, the time rule, summoning, attacking the
+//! enemy hero, a duel to victory, concession, journal order, defeat by exhaustion (not
+//! reachable in play between the real fixture decks, since every hero keeps a draw effect and
+//! a pile, but reachable through the JSON boundary by mutating the setup: a hero with no
+//! effect and no hand, at setup and as the consequence of a handover).
+//!
+//! S2a (cases 12 to 20, at the end of the file): an attack aims at the hero or at an opposing
+//! creature, a creature at 0 health dies and leaves the board (it is then neither a target nor
+//! an attacker), excess damage is lost, hostile targets are all refused alike, the time rule
+//! applies to creature attacks, a kill can exhaust the receiver of the token, and whole duels
+//! fought creatures first end by themselves. The discard pile is not observable in JSON (its
+//! order is covered by the engine's unit tests): the order of the successive `died` events and
+//! the absence of the creature from every later action stand for it.
 
 use duel_cards::{CardsError, parse_cards, parse_decks, resolve_deck};
 use duel_engine::{GameSetup, PlayerSetup};
@@ -46,10 +56,27 @@ fn start(setup: &Value, seed: u32) -> Duel {
 
 /// Every card of both decks gets the same stats, so costs are known whatever the shuffle.
 fn uniform_cards(setup: &mut Value, cost: u32, attack_cost: u32) {
-    let stats = json!({"cost": cost, "force": 1, "attack_cost": attack_cost, "health": 1});
+    uniform_stats(setup, cost, 1, attack_cost, 1);
+}
+
+/// Every card of both decks gets the same four stats.
+fn uniform_stats(setup: &mut Value, cost: u32, force: u32, attack_cost: u32, health: u32) {
     for side in ["one", "two"] {
-        setup[side]["cards"] = Value::Array(vec![stats.clone(); 30]);
+        set_side_stats(setup, side, cost, force, attack_cost, health);
     }
+}
+
+/// Every card of one deck (`"one"` or `"two"`) gets the same four stats.
+fn set_side_stats(
+    setup: &mut Value,
+    side: &str,
+    cost: u32,
+    force: u32,
+    attack_cost: u32,
+    health: u32,
+) {
+    let stats = json!({"cost": cost, "force": force, "attack_cost": attack_cost, "health": health});
+    setup[side]["cards"] = Value::Array(vec![stats; 30]);
 }
 
 fn draw_effect(cost: u32, count: u32) -> Value {
@@ -1122,4 +1149,807 @@ fn legal_actions_offer_the_hero_then_each_opposing_creature_and_forget_the_dead(
         assert_ne!(target, json!({"creature": x}));
     }
     assert!(!attacks(&after).is_empty());
+}
+
+// =======================================================================================
+// S2a: targets, death and discard of creatures (cases 12 to 20)
+// =======================================================================================
+
+fn strike_hero(attacker: u64) -> Value {
+    json!({"attack": {"attacker": attacker, "target": "hero"}})
+}
+
+/// The creature ids `attacker` is offered as targets, in order.
+fn creature_targets(actions: &[Value], attacker: u64) -> Vec<u64> {
+    attacks(actions)
+        .into_iter()
+        .filter(|(a, _)| *a == attacker)
+        .filter_map(|(_, target)| target.get("creature").and_then(Value::as_u64))
+        .collect()
+}
+
+/// Both heroes always hand the token over: every play, effect or attack costs 1 and every
+/// budget is 1, so the players alternate action after action. One (the higher initiative)
+/// starts. Cards: cost 1, force 1, attack cost 1, health 1. Both heroes have a "draw 1 for 1"
+/// effect (the idle move of a player with nothing to do), 8 cards in hand and 100 health.
+fn crossing_setup() -> Value {
+    let mut setup = fixture();
+    uniform_stats(&mut setup, 1, 1, 1, 1);
+    for (side, initiative) in [("one", 9), ("two", 1)] {
+        let hero = &mut setup[side]["hero"];
+        hero["effects"] = json!([draw_effect(1, 1)]);
+        hero["initiative"] = initiative.into();
+        hero["max_time"] = 10.into();
+        hero["start_budget"] = 1.into();
+        hero["starting_hand"] = 8.into();
+        hero["health"] = 100.into();
+    }
+    setup
+}
+
+const SIDES: [&str; 2] = ["One", "Two"];
+
+/// Index (0 = One, 1 = Two) of the player named by a JSON event field.
+fn side_of(player: &Value) -> usize {
+    player
+        .as_str()
+        .and_then(|name| SIDES.iter().position(|s| *s == name))
+        .expect("a player")
+}
+
+/// A duel plus what a client can know about it from the JSON alone: who holds the token, the
+/// boards (from `played` and `died`), the hands (from the legal `play` actions of each player
+/// at its last move, and `drew`) and the dead creatures. Nothing here reads the engine.
+/// One must start.
+struct Table {
+    game: Duel,
+    setup: Value,
+    seed: u32,
+    log: Vec<Value>,
+    active: usize,
+    boards: [Vec<u64>; 2],
+    hands: [Vec<u64>; 2],
+    discards: [Vec<u64>; 2],
+}
+
+impl Table {
+    fn new(setup: &Value, seed: u32) -> Self {
+        let initiative = |side: &str| setup[side]["hero"]["initiative"].as_u64().unwrap();
+        assert!(initiative("one") > initiative("two"), "One must start");
+        Table {
+            game: start(setup, seed),
+            setup: setup.clone(),
+            seed,
+            log: Vec::new(),
+            active: 0,
+            boards: Default::default(),
+            hands: Default::default(),
+            discards: Default::default(),
+        }
+    }
+
+    /// Applies `action` for the active player and follows its events.
+    fn act(&mut self, action: &Value) -> Vec<Value> {
+        let me = self.active;
+        self.hands[me] = plays(&legal(&self.game));
+        let events = apply(&mut self.game, action);
+        self.log.push(action.clone());
+        for event in &events {
+            match kind(event).as_str() {
+                "played" => {
+                    let card = event["played"]["card"].as_u64().unwrap();
+                    self.hands[me].retain(|c| *c != card);
+                    self.boards[me].push(card);
+                }
+                "drew" => {
+                    let side = side_of(&event["drew"]["player"]);
+                    self.hands[side].push(event["drew"]["card"].as_u64().unwrap());
+                }
+                "died" => {
+                    let side = side_of(&event["died"]["player"]);
+                    let card = event["died"]["creature"].as_u64().unwrap();
+                    self.boards[side].retain(|c| *c != card);
+                    self.discards[side].push(card);
+                }
+                "token_moved" => self.active = side_of(&event["token_moved"]["player"]),
+                _ => {}
+            }
+        }
+        events
+    }
+
+    /// The active player summons the first card of its hand.
+    fn summon(&mut self) -> u64 {
+        let card = plays(&legal(&self.game))[0];
+        self.act(&play(card));
+        card
+    }
+
+    /// The active player activates its first effect, to give the token away.
+    fn idle(&mut self) -> Vec<Value> {
+        self.act(&activate(0))
+    }
+
+    /// A twin: a new duel of the same setup and seed fed the same actions so far.
+    fn fork(&self) -> Table {
+        let mut twin = Table::new(&self.setup, self.seed);
+        for action in &self.log {
+            twin.act(action);
+        }
+        twin
+    }
+}
+
+/// A `crossing`-style table where, in the end, One is active with `one` creatures on its board
+/// and Two has `two`.
+fn deploy(setup: &Value, seed: u32, one: usize, two: usize) -> Table {
+    let mut table = Table::new(setup, seed);
+    while table.boards[0].len() < one || table.boards[1].len() < two {
+        let me = table.active;
+        if table.boards[me].len() < [one, two][me] {
+            table.summon();
+        } else {
+            table.idle();
+        }
+    }
+    while table.active != 0 {
+        table.idle();
+    }
+    assert_eq!((table.boards[0].len(), table.boards[1].len()), (one, two));
+    table
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 12: the targets offered by legal_actions
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn each_attacker_is_offered_the_hero_then_every_opposing_creature_and_never_its_own_side() {
+    // One holds three creatures, Two one.
+    let mut t = deploy(&crossing_setup(), 1, 3, 1);
+    let (ones, twos) = (t.boards[0].clone(), t.boards[1].clone());
+    let actions = legal(&t.game);
+    let expected: Vec<(u64, Value)> = ones
+        .iter()
+        .flat_map(|a| {
+            std::iter::once((*a, json!("hero")))
+                .chain(twos.iter().map(|x| (*a, json!({"creature": *x}))))
+        })
+        .collect();
+    assert_eq!(expected.len(), 3 * (1 + 1));
+    assert_eq!(attacks(&actions), expected);
+
+    // The kinds come in the documented order, with Concede last and alone.
+    let rank = |a: &Value| match kind(a).as_str() {
+        "play" => 0,
+        "activate" => 1,
+        "attack" => 2,
+        "concede" => 3,
+        other => panic!("unexpected action {other}"),
+    };
+    let ranks: Vec<i32> = actions.iter().map(rank).collect();
+    assert!(ranks.windows(2).all(|w| w[0] <= w[1]), "{ranks:?}");
+    assert_eq!(ranks.iter().filter(|r| **r == 3).count(), 1);
+    assert_eq!(actions.last(), Some(&json!("concede")));
+
+    // Every attack offered is accepted, on a twin each (offered means legal).
+    for action in actions.iter().filter(|a| kind(a) == "attack") {
+        let mut twin = t.fork();
+        let events = twin.act(action);
+        assert_eq!(kind(&events[0]), "attacked", "{action}");
+    }
+
+    // Two's turn: its single creature sees the hero then One's three, in One's board order.
+    t.idle();
+    assert_eq!(t.active, 1);
+    let mut want = vec![(twos[0], json!("hero"))];
+    want.extend(ones.iter().map(|a| (twos[0], json!({"creature": *a}))));
+    assert_eq!(attacks(&legal(&t.game)), want);
+
+    // An opposing board that is empty leaves the hero as the only target.
+    let alone = deploy(&crossing_setup(), 1, 1, 0);
+    assert_eq!(
+        attacks(&legal(&alone.game)),
+        [(alone.boards[0][0], json!("hero"))]
+    );
+    // And no creature, no attack at all (a play and an effect, then Concede).
+    let fresh = Table::new(&crossing_setup(), 1);
+    assert!(attacks(&legal(&fresh.game)).is_empty());
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 13: a kill, its journal, and what the dead creature can no longer do
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn a_killed_creature_is_journaled_then_is_neither_a_target_nor_an_attacker() {
+    let mut t = deploy(&crossing_setup(), 3, 2, 2);
+    let (a, b) = (t.boards[0][0], t.boards[0][1]);
+    let (x, y) = (t.boards[1][0], t.boards[1][1]);
+    let mut twin = t.fork();
+
+    // The kill: the attack, the damage, the death, then the time and the handover.
+    let events = t.act(&strike(a, x));
+    twin.act(&strike(a, x));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "creature_damaged",
+            "died",
+            "token_moved",
+            "active_player_changed"
+        ]
+    );
+    assert_eq!(
+        events[0],
+        json!({"attacked": {"player": "One", "attacker": a, "cost": 1}})
+    );
+    assert_eq!(
+        events[1],
+        json!({"creature_damaged": {"player": "Two", "creature": x, "amount": 1}})
+    );
+    assert_eq!(events[2], json!({"died": {"player": "Two", "creature": x}}));
+    assert_eq!(
+        events[3],
+        json!({"token_moved": {"player": "Two", "budget": 1}})
+    );
+    assert_eq!(
+        events[4],
+        json!({"active_player_changed": {"player": "Two"}})
+    );
+    assert_eq!(t.boards[1], [y]);
+
+    // Two's turn: the dead creature is no longer an attacker (offered or accepted)...
+    assert_eq!(
+        attacks(&legal(&t.game)),
+        [
+            (y, json!("hero")),
+            (y, json!({"creature": a})),
+            (y, json!({"creature": b}))
+        ]
+    );
+    assert_eq!(refusal(&mut t.game, &strike(x, a)), "attacker_not_on_board");
+    assert_eq!(
+        refusal(&mut t.game, &strike_hero(x)),
+        "attacker_not_on_board"
+    );
+
+    // ...and not a target either, once the token is back with One.
+    t.idle();
+    twin.idle();
+    assert_eq!(
+        attacks(&legal(&t.game)),
+        [
+            (a, json!("hero")),
+            (a, json!({"creature": y})),
+            (b, json!("hero")),
+            (b, json!({"creature": y}))
+        ]
+    );
+    assert_eq!(refusal(&mut t.game, &strike(a, x)), "target_not_on_board");
+    assert_eq!(refusal(&mut t.game, &strike(b, x)), "target_not_on_board");
+    assert_eq!(refusal(&mut t.game, &strike(x, y)), "attacker_not_on_board");
+
+    // A second kill: deaths come in the order of the attacks, each announced exactly once.
+    let events = t.act(&strike(b, y));
+    twin.act(&strike(b, y));
+    assert_eq!(
+        find(&events, "died"),
+        Some(&json!({"player": "Two", "creature": y}))
+    );
+    assert_eq!(t.discards[1], [x, y], "x died first, then y");
+    assert!(t.boards[1].is_empty());
+    assert!(
+        attacks(&legal(&t.game)).is_empty(),
+        "Two has no creature left to attack with"
+    );
+    t.idle();
+    twin.idle();
+    assert_eq!(
+        attacks(&legal(&t.game)),
+        [(a, json!("hero")), (b, json!("hero"))]
+    );
+    for dead in [x, y] {
+        assert_eq!(
+            refusal(&mut t.game, &strike(a, dead)),
+            "target_not_on_board"
+        );
+    }
+
+    // None of these refusals changed anything: the twin that never received them agrees.
+    assert_twins_agree(&mut t.game, &mut twin.game, 8);
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 14: a non-lethal hit
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn a_non_lethal_hit_wounds_without_killing_and_the_target_dies_on_a_later_hit() {
+    let mut setup = crossing_setup();
+    set_side_stats(&mut setup, "two", 1, 1, 1, 3); // Two's creatures hold three hits
+    let mut t = deploy(&setup, 4, 1, 1);
+    let (a, x) = (t.boards[0][0], t.boards[1][0]);
+
+    for (hit, lethal) in [(1, false), (2, false), (3, true)] {
+        let events = t.act(&strike(a, x));
+        let mut expected = vec!["attacked", "creature_damaged"];
+        if lethal {
+            expected.push("died");
+        }
+        expected.extend(["token_moved", "active_player_changed"]);
+        assert_eq!(kinds(&events), expected, "hit {hit}");
+        assert_eq!(
+            find(&events, "creature_damaged"),
+            Some(&json!({"player": "Two", "creature": x, "amount": 1})),
+            "hit {hit}"
+        );
+        assert_eq!(count(&events, "damaged"), 0, "the hero is not touched");
+        assert_eq!(count(&events, "game_won"), 0);
+        if lethal {
+            assert_eq!(
+                find(&events, "died"),
+                Some(&json!({"player": "Two", "creature": x}))
+            );
+            break;
+        }
+        // The wounded creature stays in the game: it can attack, and it is still a target.
+        assert_eq!(t.boards[1], [x], "hit {hit}");
+        assert!(attacks(&legal(&t.game)).contains(&(x, json!("hero"))));
+        t.idle();
+        assert!(attacks(&legal(&t.game)).contains(&(a, json!({"creature": x}))));
+    }
+
+    // Dead, it is offered no more.
+    assert!(t.boards[1].is_empty());
+    t.idle();
+    assert_eq!(attacks(&legal(&t.game)), [(a, json!("hero"))]);
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 15: the excess damage is lost
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn excess_damage_on_a_creature_is_lost_and_never_reaches_the_hero() {
+    // One's creatures hit for 5, Two's have 1 health, and Two's hero has 1 health too.
+    let mut setup = crossing_setup();
+    set_side_stats(&mut setup, "one", 1, 5, 1, 1);
+    setup["two"]["hero"]["health"] = 1.into();
+    let mut t = deploy(&setup, 6, 1, 1);
+    let (a, x) = (t.boards[0][0], t.boards[1][0]);
+    let mut control = t.fork();
+
+    let events = t.act(&strike(a, x));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "creature_damaged",
+            "died",
+            "token_moved",
+            "active_player_changed"
+        ]
+    );
+    // The log carries the nominal force; the hero takes nothing of the excess.
+    assert_eq!(
+        find(&events, "creature_damaged"),
+        Some(&json!({"player": "Two", "creature": x, "amount": 5}))
+    );
+    assert_eq!(count(&events, "damaged"), 0);
+    assert_eq!(count(&events, "game_won"), 0);
+    assert!(!legal(&t.game).is_empty(), "the game goes on");
+
+    // The hero is intact at 1 health: the next hit on it ends the game, and only that hit.
+    t.idle();
+    let events = t.act(&strike_hero(a));
+    assert_eq!(kinds(&events), ["attacked", "damaged", "game_won"]);
+    assert_eq!(
+        events[2],
+        json!({"game_won": {"winner": "One", "reason": "hero_down"}})
+    );
+
+    // Control: this very position is lethal for the hero when it is the target.
+    let events = control.act(&strike_hero(a));
+    assert_eq!(kinds(&events), ["attacked", "damaged", "game_won"]);
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 16: hostile targets
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn every_hostile_target_gets_one_identical_refusal_and_malformed_ones_never_reach_the_rules() {
+    let mut t = deploy(&crossing_setup(), 5, 2, 2);
+    let (a, b) = (t.boards[0][0], t.boards[0][1]);
+    let (x, y) = (t.boards[1][0], t.boards[1][1]);
+    t.act(&strike(a, y)); // y dies, Two is active
+    t.idle(); // Two draws a card, One is active again
+    assert_eq!(t.active, 0);
+    let two_hand = t.hands[1][0];
+    let drawn_by_two = *t.hands[1].last().unwrap();
+    let own_hand = plays(&legal(&t.game))[0];
+    assert_eq!(creature_targets(&legal(&t.game), a), [x]);
+    let mut twin = t.fork();
+
+    // Every kind of id a client could aim at: all of them are refused with the same code.
+    let hostile = [
+        ("its own other creature", b),
+        ("itself", a),
+        ("a card of its own hand", own_hand),
+        ("a card of the opponent's hand", two_hand),
+        ("the card the opponent just drew", drawn_by_two),
+        ("a dead creature", y),
+        ("an unknown id", 9999),
+        ("u32::MAX", u64::from(u32::MAX)),
+    ];
+    let mut errors = Vec::new();
+    for (what, id) in hostile {
+        let err = t.game.apply_json(&strike(a, id).to_string()).unwrap_err();
+        assert_eq!(error_code(&err), "target_not_on_board", "{what}");
+        errors.push(err);
+    }
+    // Sweep: every id that is not the one live opposing creature, whichever zone it is in
+    // (hands, piles, boards, discards of both players: the 60 cards have ids below 200).
+    let mut swept = 0;
+    for id in (0..200u64).filter(|id| *id != x) {
+        let err = t.game.apply_json(&strike(a, id).to_string()).unwrap_err();
+        assert_eq!(error_code(&err), "target_not_on_board", "id {id}");
+        errors.push(err);
+        swept += 1;
+    }
+    assert_eq!(swept, 199);
+    // Byte for byte the same answer whatever the zone: no oracle on hidden cards.
+    assert!(
+        errors.windows(2).all(|w| w[0] == w[1]),
+        "refusals differ by zone"
+    );
+
+    // Malformed shapes are refused at the boundary, before the rules.
+    for target in [
+        r#"{"creature":-1}"#,
+        r#"{"creature":"7"}"#,
+        r#"{"creature":4294967296}"#,
+        r#"{"creature":7,"extra":1}"#,
+        r#"{"creature":null}"#,
+        r#"{"creature":1.5}"#,
+        r#"{"Creature":7}"#,
+        r#""7""#,
+        "4294967296",
+        "-1",
+        "{}",
+        "[]",
+        "null",
+    ] {
+        let action = format!(r#"{{"attack":{{"attacker":{a},"target":{target}}}}}"#);
+        assert_eq!(
+            error_code(&t.game.apply_json(&action).unwrap_err()),
+            "invalid_json",
+            "{target}"
+        );
+    }
+    for action in [
+        format!(r#"{{"attack":{{"attacker":{a}}}}}"#),
+        format!(r#"{{"attack":{{"target":{{"creature":{x}}}}}}}"#),
+        r#"{"attack":{"attacker":-1,"target":"hero"}}"#.to_owned(),
+        r#"{"attack":{"attacker":4294967296,"target":"hero"}}"#.to_owned(),
+        format!(r#"{{"attack":{{"attacker":{a},"target":"hero","extra":1}}}}"#),
+    ] {
+        assert_eq!(
+            error_code(&t.game.apply_json(&action).unwrap_err()),
+            "invalid_json",
+            "{action}"
+        );
+    }
+
+    // After all of this, nothing moved: the twin that saw none of it agrees.
+    assert_twins_agree(&mut t.game, &mut twin.game, 8);
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 17: the time rule on a creature attack
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn a_creature_attack_follows_the_time_rule_whether_it_kills_or_not() {
+    // Every card costs 3. One starts with 3 time units; Two caps at 5. One's summoning
+    // crosses (3 = 3) and gives Two 1 unit; Two's costs 3 > 1 and gives One 3 again.
+    // The attack of One's creature then costs `attack_cost`.
+    for health in [1u32, 9] {
+        for (attack_cost, (receiver, budget)) in [
+            (1u32, ("One", 2u64)), // c < b: One keeps the token with 3 - 1
+            (3, ("Two", 1)),       // c = b: the token crosses, 1 unit
+            (5, ("Two", 3)),       // c > b: 5 - 3 + 1
+            (9, ("Two", 5)),       // c > b: 9 - 3 + 1 = 7, capped by Two's max_time
+        ] {
+            let what = format!("health {health}, attack cost {attack_cost}");
+            let mut setup = timing_setup(3, vec![draw_effect(1, 1)]);
+            uniform_stats(&mut setup, 3, 1, attack_cost, 1);
+            set_side_stats(&mut setup, "two", 3, 1, attack_cost, health);
+            setup["two"]["hero"]["health"] = 100.into();
+            let mut t = Table::new(&setup, 8);
+            t.summon();
+            let x = plays(&legal(&t.game))[0];
+            let events = t.act(&play(x));
+            assert_eq!(token(&events), ("One".into(), 3), "{what}");
+            let a = t.boards[0][0];
+            let mut hero_twin = t.fork();
+
+            let events = t.act(&strike(a, x));
+            let mut expected = vec!["attacked", "creature_damaged"];
+            if health == 1 {
+                expected.push("died");
+            }
+            expected.push("token_moved");
+            if receiver == "Two" {
+                expected.push("active_player_changed");
+            }
+            assert_eq!(kinds(&events), expected, "{what}");
+            assert_eq!(find(&events, "attacked").unwrap()["cost"], attack_cost);
+            assert_eq!(token(&events), (receiver.to_owned(), budget), "{what}");
+            assert_eq!(SIDES[t.active], receiver, "{what}");
+
+            // The very same time rule as an attack on the hero (S1).
+            let hero_events = hero_twin.act(&strike_hero(a));
+            assert_eq!(token(&hero_events), token(&events), "{what}");
+            assert_eq!(
+                count(&hero_events, "active_player_changed"),
+                count(&events, "active_player_changed"),
+                "{what}"
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 18: defeat by exhaustion when a kill hands the token over
+// ---------------------------------------------------------------------------------------
+
+/// One summons, Two summons `x` (leaving it `two_hand - 1` cards), then One kills `x`. Two has
+/// the draw effect only if `two_effect`. Returns the events of the kill.
+fn kill_the_only_creature_of_two(two_hand: u32, two_effect: bool) -> (Table, Vec<Value>) {
+    let mut setup = crossing_setup();
+    setup["two"]["hero"]["starting_hand"] = two_hand.into();
+    if !two_effect {
+        setup["two"]["hero"]["effects"] = json!([]);
+    }
+    let mut t = Table::new(&setup, 3);
+    let a = t.summon();
+    let x = t.summon();
+    assert_eq!(t.active, 0);
+    let events = t.act(&strike(a, x));
+    (t, events)
+}
+
+#[test]
+fn killing_the_last_creature_of_a_stripped_receiver_ends_the_game_by_exhaustion() {
+    // Two: a single card in hand, no effect. Once x is dead and the token crosses to Two, it has
+    // nothing left to do: the game ends on the spot, the very last event of the kill.
+    let (mut t, events) = kill_the_only_creature_of_two(1, false);
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "creature_damaged",
+            "died",
+            "token_moved",
+            "active_player_changed",
+            "game_won"
+        ]
+    );
+    assert_eq!(
+        events.last(),
+        Some(&json!({"game_won": {"winner": "One", "reason": "exhaustion"}}))
+    );
+    every_action_is_refused_as_game_over(&mut t.game);
+
+    // Control 1: the same position without the kill. x is alive, so it keeps Two in the game
+    // (a living creature can always hit the hero).
+    let mut setup = crossing_setup();
+    setup["two"]["hero"]["starting_hand"] = 1.into();
+    setup["two"]["hero"]["effects"] = json!([]);
+    let mut alive = Table::new(&setup, 3);
+    alive.summon();
+    alive.summon();
+    let events = alive.idle();
+    assert_eq!(count(&events, "game_won"), 0);
+    assert_eq!(alive.active, 1);
+    assert!(
+        attacks(&legal(&alive.game))
+            .iter()
+            .any(|(att, _)| *att == alive.boards[1][0])
+    );
+
+    // Control 2: with a draw effect, the same kill leaves Two something to do.
+    let (t, events) = kill_the_only_creature_of_two(1, true);
+    assert_eq!(count(&events, "died"), 1);
+    assert_eq!(count(&events, "game_won"), 0);
+    assert!(has(&legal(&t.game), "activate"));
+
+    // Control 3: with a second card in hand and no effect, it can still summon.
+    let (t, events) = kill_the_only_creature_of_two(2, false);
+    assert_eq!(count(&events, "died"), 1);
+    assert_eq!(count(&events, "game_won"), 0);
+    assert_eq!(plays(&legal(&t.game)).len(), 1);
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 19: whole duels fought creatures first
+// ---------------------------------------------------------------------------------------
+
+/// Attack a creature if one can be attacked, else the S1 policy (hero, summon, effect).
+/// Never concedes.
+fn creature_first(actions: &[Value]) -> Value {
+    actions
+        .iter()
+        .find(|a| kind(a) == "attack" && a["attack"]["target"].get("creature").is_some())
+        .cloned()
+        .unwrap_or_else(|| pick(actions))
+}
+
+/// A deterministic pseudo-random choice among the non-concede actions (a generator of the
+/// test, unrelated to the engine's seed).
+fn pseudo_random(seed: u32) -> impl FnMut(&[Value]) -> Value {
+    let mut state = u64::from(seed).wrapping_mul(2_862_933_555_777_941_757);
+    move |actions| {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        let playable: Vec<&Value> = actions.iter().filter(|a| kind(a) != "concede").collect();
+        playable[(state >> 33) as usize % playable.len()].clone()
+    }
+}
+
+/// Plays a whole duel from `setup` with `choose`, until no action is legal.
+fn run_policy(setup: &Value, seed: u32, mut choose: impl FnMut(&[Value]) -> Value) -> Vec<Step> {
+    let mut game = start(setup, seed);
+    let mut journal = Vec::new();
+    loop {
+        let offered = game.legal_actions_json().unwrap();
+        let actions: Vec<Value> = serde_json::from_str(&offered).unwrap();
+        if actions.is_empty() {
+            assert_eq!(offered, "[]");
+            return journal;
+        }
+        let action = choose(&actions);
+        let events = apply(&mut game, &action);
+        journal.push((offered, action, events));
+        assert!(journal.len() < 1000, "seed {seed}: the duel does not end");
+    }
+}
+
+/// What every finished duel of S2a must look like, whoever played it.
+/// Returns how many creatures died.
+fn assert_a_creature_duel_is_sound(what: &str, journal: &[Step]) -> usize {
+    let (mut summoned, mut dead): (Vec<u64>, Vec<u64>) = (Vec::new(), Vec::new());
+    for (i, (offered, action, events)) in journal.iter().enumerate() {
+        let actions: Vec<Value> = serde_json::from_str(offered).unwrap();
+        assert!(actions.contains(action), "{what} step {i}: not offered");
+        assert_ne!(action, &json!("concede"), "{what} step {i}: no concession");
+        // A dead creature is never offered again, as an attacker, a target or a card to play.
+        for offered_action in &actions {
+            let ids: Vec<u64> = match kind(offered_action).as_str() {
+                "play" => vec![offered_action["play"]["card"].as_u64().unwrap()],
+                "attack" => {
+                    let attack = &offered_action["attack"];
+                    let mut ids = vec![attack["attacker"].as_u64().unwrap()];
+                    ids.extend(attack["target"].get("creature").and_then(Value::as_u64));
+                    ids
+                }
+                _ => vec![],
+            };
+            assert!(
+                ids.iter().all(|id| !dead.contains(id)),
+                "{what} step {i}: a dead creature is offered in {offered_action}"
+            );
+        }
+        // A death follows the damage that caused it, and a game never ends before its last step.
+        let names = kinds(events);
+        for (at, event) in events.iter().enumerate() {
+            match kind(event).as_str() {
+                "played" => summoned.push(event["played"]["card"].as_u64().unwrap()),
+                "died" => {
+                    let creature = event["died"]["creature"].as_u64().unwrap();
+                    assert!(summoned.contains(&creature), "{what}: died before summoned");
+                    assert!(!dead.contains(&creature), "{what}: died twice");
+                    dead.push(creature);
+                    let wound = events[..at].iter().position(|e| {
+                        kind(e) == "creature_damaged"
+                            && e["creature_damaged"]["creature"] == event["died"]["creature"]
+                    });
+                    assert!(wound.is_some(), "{what} step {i}: died without a wound");
+                    assert!(!names[..at].contains(&"token_moved".to_owned()));
+                }
+                "creature_damaged" => {
+                    assert!(event["creature_damaged"]["amount"].as_u64().unwrap() >= 1);
+                }
+                _ => {}
+            }
+        }
+        if i + 1 < journal.len() {
+            assert_eq!(count(events, "game_won"), 0, "{what} step {i}: ended early");
+        }
+    }
+    let (_, _, last) = journal.last().expect("a duel has moves");
+    let won = last.last().unwrap();
+    assert_eq!(kind(won), "game_won", "{what}");
+    let reason = won["game_won"]["reason"].as_str().unwrap();
+    assert!(
+        ["hero_down", "exhaustion"].contains(&reason),
+        "{what}: {reason}"
+    );
+    dead.len()
+}
+
+/// The fixture with the initiatives swapped, so that Two starts.
+fn swapped_fixture() -> Value {
+    let mut setup = fixture();
+    setup["one"]["hero"]["initiative"] = 1.into();
+    setup["two"]["hero"]["initiative"] = 2.into();
+    setup
+}
+
+#[test]
+fn creature_first_duels_are_deterministic_end_by_themselves_and_never_reoffer_the_dead() {
+    for (name, setup) in [("fixture", fixture()), ("swapped", swapped_fixture())] {
+        for seed in 0..25 {
+            let what = format!("{name} seed {seed}");
+            let journal = run_policy(&setup, seed, creature_first);
+            assert_eq!(
+                journal,
+                run_policy(&setup, seed, creature_first),
+                "{what}: not deterministic"
+            );
+            // The policy goes for creatures first: every duel sees at least one death.
+            let deaths = assert_a_creature_duel_is_sound(&what, &journal);
+            assert!(deaths > 0, "{what}: no creature ever died");
+        }
+    }
+}
+
+#[test]
+fn pseudo_random_duels_always_end_and_never_reoffer_the_dead() {
+    let mut deaths = 0;
+    for (name, setup) in [("fixture", fixture()), ("swapped", swapped_fixture())] {
+        for seed in 0..25 {
+            let what = format!("{name} seed {seed}");
+            let journal = run_policy(&setup, seed, pseudo_random(seed));
+            assert_eq!(
+                journal,
+                run_policy(&setup, seed, pseudo_random(seed)),
+                "{what}: not deterministic"
+            );
+            deaths += assert_a_creature_duel_is_sound(&what, &journal);
+        }
+    }
+    // A random duel may end on the hero before any creature dies, but not all of them.
+    assert!(deaths > 0);
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 20: S1 still holds while the attacker aims at the hero
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn a_hero_only_duel_never_touches_a_creature() {
+    // The S1 policy (`run_duel`: attack, else summon, else activate) always takes the hero,
+    // offered first, as its target: no creature is ever wounded, killed or discarded, and
+    // the duel ends the S1 way. (Cases 1 to 11 above run unchanged.)
+    for seed in 0..20 {
+        let journal = run_duel(seed);
+        for (_, action, events) in &journal {
+            if kind(action) == "attack" {
+                assert_eq!(action["attack"]["target"], "hero", "seed {seed}");
+            }
+            assert_eq!(count(events, "creature_damaged"), 0, "seed {seed}");
+            assert_eq!(count(events, "died"), 0, "seed {seed}");
+        }
+        let last = &journal.last().unwrap().2;
+        assert_eq!(
+            kinds(last),
+            ["attacked", "damaged", "game_won"],
+            "seed {seed}"
+        );
+    }
 }
