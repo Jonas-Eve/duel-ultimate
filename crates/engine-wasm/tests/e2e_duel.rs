@@ -7,8 +7,10 @@
 //! actions and events). "State identical after a refusal" is checked with twins: two
 //! `Duel`s of the same seed fed the same actions, the refused action going to one only.
 //!
-//! Defeat by exhaustion is not reachable with the S1 data (no creature dies before S2a);
-//! it is covered at unit level in the engine and is not exercised here.
+//! Defeat by exhaustion cannot happen in play between the real fixture decks (every hero
+//! keeps a draw effect and a pile, and no creature dies before S2a), but it is reachable
+//! through the JSON boundary by mutating the setup (a hero with no effect and no hand): it
+//! is exercised both at setup and as the consequence of a handover.
 
 use duel_cards::{CardsError, parse_cards, parse_decks, resolve_deck};
 use duel_engine::{GameSetup, PlayerSetup};
@@ -764,4 +766,188 @@ fn a_handover_is_announced_after_the_time_it_causes() {
         events[2],
         json!({"active_player_changed": {"player": "Two"}})
     );
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 11: defeat by exhaustion (reached through setup mutations)
+// ---------------------------------------------------------------------------------------
+
+/// A hero left with nothing to do: no effect and an empty hand (its pile is never used).
+fn strip(setup: &mut Value, side: &str) {
+    setup[side]["hero"]["effects"] = json!([]);
+    setup[side]["hero"]["starting_hand"] = 0.into();
+}
+
+fn every_action_is_refused_as_game_over(game: &mut Duel) {
+    for action in [
+        json!("concede"),
+        activate(0),
+        play(0),
+        json!({"attack": {"attacker": 0, "target": "hero"}}),
+    ] {
+        assert_eq!(refusal(game, &action), "game_over", "{action}");
+    }
+    assert_eq!(game.legal_actions_json().unwrap(), "[]");
+}
+
+#[test]
+fn a_starter_with_nothing_to_do_is_defeated_by_exhaustion_at_setup() {
+    // One starts (initiative 2) with no effect and an empty hand: nothing but Concede would
+    // be legal, so the game is over before the first action, and Two wins.
+    let mut setup = fixture();
+    strip(&mut setup, "one");
+    let mut game = start(&setup, 1);
+    assert_eq!(game.legal_actions_json().unwrap(), "[]");
+    every_action_is_refused_as_game_over(&mut game);
+
+    // Same when Two starts (swapped initiative).
+    let mut setup = fixture();
+    setup["one"]["hero"]["initiative"] = 1.into();
+    setup["two"]["hero"]["initiative"] = 2.into();
+    strip(&mut setup, "two");
+    let mut game = start(&setup, 1);
+    assert_eq!(game.legal_actions_json().unwrap(), "[]");
+    every_action_is_refused_as_game_over(&mut game);
+
+    // Control: the non-starter being stripped changes nothing, the game is on.
+    let mut setup = fixture();
+    strip(&mut setup, "two");
+    assert!(!legal(&start(&setup, 1)).is_empty());
+}
+
+#[test]
+fn a_handover_to_a_receiver_with_nothing_to_do_ends_the_game_by_exhaustion() {
+    // Two has no effect and an empty hand; One's summoning costs 10 > 3 and crosses the token.
+    let mut setup = timing_setup(10, vec![draw_effect(1, 1)]);
+    strip(&mut setup, "two");
+    let mut game = start(&setup, 5);
+    let card = plays(&legal(&game))[0];
+    let events = apply(&mut game, &play(card));
+    assert_eq!(
+        kinds(&events),
+        ["played", "token_moved", "active_player_changed", "game_won"]
+    );
+    assert_eq!(
+        events[3],
+        json!({"game_won": {"winner": "One", "reason": "exhaustion"}})
+    );
+    every_action_is_refused_as_game_over(&mut game);
+
+    // A non-crossing action leaves the token with One: nobody is exhausted.
+    let mut setup = timing_setup(1, vec![draw_effect(1, 1)]);
+    strip(&mut setup, "two");
+    let mut game = start(&setup, 5);
+    let card = plays(&legal(&game))[0];
+    let events = apply(&mut game, &play(card));
+    assert_eq!(count(&events, "game_won"), 0);
+    assert!(!legal(&game).is_empty());
+}
+
+// ---------------------------------------------------------------------------------------
+// Opening hands, no automatic draw, no "pass" action
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn opening_hands_budgets_and_the_absence_of_auto_draw_or_pass() {
+    for (one_starts, starter, other) in [(true, "one", "two"), (false, "two", "one")] {
+        let mut setup = fixture();
+        if !one_starts {
+            setup["one"]["hero"]["initiative"] = 1.into();
+            setup["two"]["hero"]["initiative"] = 2.into();
+        }
+        let hand = |side: &str| setup[side]["hero"]["starting_hand"].as_u64().unwrap() as usize;
+        let mut game = start(&setup, 9);
+
+        // Opening hand and starting budget of the starter.
+        let actions = legal(&game);
+        assert_eq!(plays(&actions).len(), hand(starter), "{starter} hand");
+        let budget = setup[starter]["hero"]["start_budget"].as_u64().unwrap();
+        let cost = setup[starter]["hero"]["effects"][0]["cost"]
+            .as_u64()
+            .unwrap();
+        let events = apply(&mut game, &activate(0));
+        let (who, left) = token(&events);
+        if cost < budget {
+            assert_eq!(
+                (who.to_lowercase().as_str(), left),
+                (starter, budget - cost)
+            );
+        } else {
+            let cap = setup[other]["hero"]["max_time"].as_u64().unwrap();
+            assert_eq!(
+                (who.to_lowercase().as_str(), left),
+                (other, (cost - budget + 1).min(cap))
+            );
+        }
+
+        // Whatever the position, only play / activate / attack / concede are ever offered.
+        let allowed = ["play", "activate", "attack", "concede"];
+        let mut handover = count(&events, "active_player_changed") == 1;
+        let mut last_events = events;
+        for _ in 0..60 {
+            if handover {
+                break;
+            }
+            let actions = legal(&game);
+            assert!(actions.iter().all(|a| allowed.contains(&kind(a).as_str())));
+            last_events = apply(&mut game, &pick(&actions));
+            handover = count(&last_events, "active_player_changed") == 1;
+        }
+        // The receiver's hand is untouched by the handover: no automatic draw.
+        assert!(handover, "a handover happens");
+        // (Any `drew` of the handing-over action belongs to the giver, before the handover.)
+        let tail = kinds(&last_events);
+        assert_eq!(
+            &tail[tail.len() - 2..],
+            ["token_moved", "active_player_changed"]
+        );
+        let actions = legal(&game);
+        assert!(actions.iter().all(|a| allowed.contains(&kind(a).as_str())));
+        assert_eq!(
+            plays(&actions).len(),
+            hand(other),
+            "{other} starts with exactly its opening hand"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Non-lethal attack crossing the budget, several attackers
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn a_non_lethal_attack_can_cross_the_budget_and_each_creature_can_attack() {
+    // Every card costs 1 to play, 2 to attack with; One has 10 time units, hero health is
+    // large enough for non-lethal hits.
+    let mut setup = fixture();
+    uniform_cards(&mut setup, 1, 2);
+    setup["one"]["hero"]["effects"] = json!([draw_effect(1, 1)]);
+    setup["one"]["hero"]["max_time"] = 10.into();
+    setup["one"]["hero"]["start_budget"] = 5.into();
+    setup["two"]["hero"]["max_time"] = 10.into();
+    setup["two"]["hero"]["health"] = 100.into();
+    let mut game = start(&setup, 5);
+
+    // Summon three creatures (3 time units), 2 left.
+    for _ in 0..3 {
+        let card = plays(&legal(&game))[0];
+        apply(&mut game, &play(card));
+    }
+    let actions = legal(&game);
+    let attacks: Vec<&Value> = actions.iter().filter(|a| kind(a) == "attack").collect();
+    assert_eq!(attacks.len(), 3, "one attack action per creature on board");
+
+    // First attack: 2 - 2 = 0, the budget is spent, the token crosses (non-lethal).
+    let events = apply(&mut game, attacks[0]);
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "damaged",
+            "token_moved",
+            "active_player_changed"
+        ]
+    );
+    assert_eq!(count(&events, "game_won"), 0);
+    assert_eq!(token(&events).0, "Two");
 }
