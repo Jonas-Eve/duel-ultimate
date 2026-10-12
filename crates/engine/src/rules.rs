@@ -26,11 +26,13 @@ pub enum Action {
     Concede,
 }
 
-/// What an attack aims at. Only the opposing hero for now.
+/// What an attack aims at: the opposing hero or a creature of the opposing board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Target {
     Hero,
+    /// An opposing creature in play (untrusted id, validated by the engine).
+    Creature(CardInstanceId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +67,18 @@ pub enum Event {
         player: PlayerId,
         amount: u32,
     },
+    /// The creature `creature` of `player` (its owner) took `amount` damage (the attacker's
+    /// nominal force: the excess over its remaining health is lost).
+    CreatureDamaged {
+        player: PlayerId,
+        creature: CardInstanceId,
+        amount: u32,
+    },
+    /// The creature left `player`'s board for their discard pile.
+    Died {
+        player: PlayerId,
+        creature: CardInstanceId,
+    },
     /// After every non-final action: `player` holds the token with `budget`.
     TokenMoved {
         player: PlayerId,
@@ -92,6 +106,8 @@ pub enum RuleError {
     EffectNotApplicable,
     #[error("that creature is not on the active player's board")]
     AttackerNotOnBoard,
+    #[error("that target is not a creature of the opposing board")]
+    TargetNotOnBoard,
 }
 
 impl RuleError {
@@ -103,6 +119,7 @@ impl RuleError {
             Self::UnknownEffect => "unknown_effect",
             Self::EffectNotApplicable => "effect_not_applicable",
             Self::AttackerNotOnBoard => "attacker_not_on_board",
+            Self::TargetNotOnBoard => "target_not_on_board",
         }
     }
 }
@@ -142,7 +159,7 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
             .map(|_| ())
             .ok_or(RuleError::CardNotInHand),
         Action::Attack { attacker, target } => match target {
-            Target::Hero => board_position(state, *attacker)
+            Target::Hero | Target::Creature(_) => board_position(state, *attacker)
                 .map(|_| ())
                 .ok_or(RuleError::AttackerNotOnBoard),
         },
@@ -221,6 +238,7 @@ pub fn apply(state: &mut GameState, action: Action) -> Result<Vec<Event>, RuleEr
                 cost,
             }];
             combat::resolve_damage(state, player, attacker, target, &mut events);
+            combat::bury_dead(state, &mut events);
             let victim = player.opponent();
             if state.player(victim).health == 0 {
                 // The game stops here: no time is spent, the token does not move and the

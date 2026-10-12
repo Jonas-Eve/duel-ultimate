@@ -75,6 +75,8 @@ fn kinds(events: &[Event]) -> Vec<&'static str> {
             Event::Played { .. } => "Played",
             Event::Attacked { .. } => "Attacked",
             Event::Damaged { .. } => "Damaged",
+            Event::CreatureDamaged { .. } => "CreatureDamaged",
+            Event::Died { .. } => "Died",
             Event::TokenMoved { .. } => "TokenMoved",
             Event::ActivePlayerChanged { .. } => "ActivePlayerChanged",
             Event::GameWon { .. } => "GameWon",
@@ -1207,4 +1209,458 @@ fn s1_hero_only_games_keep_their_exact_outcome_and_journal() {
         })
         .collect();
     assert_eq!(observed, S1_GOLDEN);
+}
+
+// ---- Attacking creatures -------------------------------------------------------------------
+
+fn stats(cost: u32, force: u32, attack_cost: u32, health: u32) -> CreatureStats {
+    CreatureStats {
+        cost,
+        force,
+        attack_cost,
+        health,
+    }
+}
+
+fn strike(attacker: CardInstanceId, victim: CardInstanceId) -> Action {
+    Action::Attack {
+        attacker,
+        target: Target::Creature(victim),
+    }
+}
+
+/// Both sides summon `rounds` creatures, alternating, One first; every card of One is `one`
+/// and every card of Two is `two` (cards are plain copies, so any can be played). One's
+/// cost must be 1 (with its start budget of 1, each summoning hands the token over). One
+/// ends active, holding `min(two.cost, 8)` time (1 beyond the first round: `two.cost` must
+/// then be 1), with `rounds` creatures facing `rounds` creatures.
+fn skirmish(one: CreatureStats, two: CreatureStats, rounds: usize, two_max: u32) -> GameState {
+    assert_eq!(one.cost, 1);
+    let two_cost = two.cost;
+    assert!(rounds == 1 || two_cost == 1);
+    let mut s = setup(
+        hero(2, 1, 8, vec![draw(1, 1)]),
+        hero(1, 1, two_max, vec![draw(1, 1)]),
+    );
+    s.one.cards = vec![one; 30];
+    s.two.cards = vec![two; 30];
+    let (mut state, _) = new_game(s, 7).unwrap();
+    for _ in 0..rounds {
+        play_first(&mut state);
+        play_first(&mut state);
+    }
+    assert_eq!(state.active(), PlayerId::One);
+    assert_eq!(state.budget(), two_cost.min(8));
+    assert_eq!(state.board(PlayerId::One).len(), rounds);
+    assert_eq!(state.board(PlayerId::Two).len(), rounds);
+    state
+}
+
+/// One's first creature and Two's first creature of a one-round skirmish.
+fn duelists(state: &GameState) -> (CardInstanceId, CardInstanceId) {
+    (state.board(PlayerId::One)[0], state.board(PlayerId::Two)[0])
+}
+
+#[test]
+fn an_attack_on_a_creature_deals_the_force_and_a_survivor_stays_a_target() {
+    // Force 2 against 5 health, 6 time units at 1 per attack.
+    let mut state = skirmish(stats(1, 2, 1, 5), stats(6, 1, 1, 5), 1, 8);
+    let (a, x) = duelists(&state);
+    assert_eq!(state.creature_health(x), Some(5));
+    apply(&mut state, strike(a, x)).unwrap();
+    assert_eq!(state.creature_health(x), Some(3));
+    assert_eq!(state.creature_health(a), Some(5), "no riposte");
+    assert_eq!(state.board(PlayerId::Two), vec![x], "the survivor stays");
+    assert!(state.discard(PlayerId::Two).is_empty());
+    assert_eq!(state.hero_health(PlayerId::Two), 10, "heroes are untouched");
+    assert_eq!(state.hero_health(PlayerId::One), 10);
+    assert_eq!(state.winner(), None);
+    apply(&mut state, strike(a, x)).unwrap();
+    assert_eq!(
+        state.creature_health(x),
+        Some(1),
+        "still targetable, and damage accumulates"
+    );
+}
+
+#[test]
+fn a_creature_attacked_to_death_goes_to_its_owners_discard_and_cannot_act_or_be_hit() {
+    // One's attack costs its whole budget: the token crosses and Two is active.
+    let mut state = skirmish(stats(1, 3, 1, 3), stats(1, 1, 1, 3), 1, 8);
+    let (a, x) = duelists(&state);
+    let hand_two = state.hand(PlayerId::Two);
+    apply(&mut state, strike(a, x)).unwrap();
+    assert!(state.board(PlayerId::Two).is_empty());
+    assert_eq!(state.discard(PlayerId::Two), vec![x]);
+    assert!(state.discard(PlayerId::One).is_empty());
+    assert_eq!(state.creature_health(x), None, "no longer in play");
+    assert_eq!(state.hand(PlayerId::Two), hand_two, "nothing else moved");
+    assert_eq!(state.board(PlayerId::One), vec![a]);
+    assert_eq!(state.active(), PlayerId::Two);
+    // The dead creature cannot attack...
+    let before = state.clone();
+    assert_eq!(
+        apply(&mut state, strike(x, a)),
+        Err(RuleError::AttackerNotOnBoard)
+    );
+    assert_eq!(
+        apply(&mut state, hit(x)),
+        Err(RuleError::AttackerNotOnBoard)
+    );
+    assert_eq!(state, before);
+    // ... nor be attacked (Two summons another card, then it is One's turn again).
+    play_first(&mut state);
+    assert_eq!(state.active(), PlayerId::One);
+    let before = state.clone();
+    assert_eq!(
+        apply(&mut state, strike(a, x)),
+        Err(RuleError::TargetNotOnBoard)
+    );
+    assert_eq!(state, before);
+}
+
+#[test]
+fn successive_kills_reach_the_discard_in_the_order_of_death_not_of_id() {
+    let mut state = skirmish(stats(1, 3, 1, 3), stats(1, 1, 1, 3), 2, 8);
+    let ones = state.board(PlayerId::One);
+    let twos = state.board(PlayerId::Two);
+    // Kill the creature of the higher id first.
+    let (first, second) = (twos[0].max(twos[1]), twos[0].min(twos[1]));
+    apply(&mut state, strike(ones[0], first)).unwrap();
+    assert_eq!(state.active(), PlayerId::Two);
+    play_first(&mut state);
+    assert_eq!(state.active(), PlayerId::One);
+    let events = apply(&mut state, strike(ones[1], second)).unwrap();
+    assert!(events.contains(&Event::Died {
+        player: PlayerId::Two,
+        creature: second
+    }));
+    assert_eq!(state.discard(PlayerId::Two), vec![first, second]);
+    assert!(first > second, "the order of death is not the order of ids");
+    assert!(
+        !state.board(PlayerId::Two).contains(&first)
+            && !state.board(PlayerId::Two).contains(&second)
+    );
+}
+
+#[test]
+fn excess_damage_is_lost_and_never_reaches_the_hero() {
+    // Force 5 against 1 health.
+    let mut state = skirmish(stats(1, 5, 1, 3), stats(1, 1, 1, 1), 1, 8);
+    let (a, x) = duelists(&state);
+    let events = apply(&mut state, strike(a, x)).unwrap();
+    assert_eq!(state.hero_health(PlayerId::Two), 10);
+    assert_eq!(state.winner(), None);
+    assert_eq!(state.discard(PlayerId::Two), vec![x]);
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, Event::Damaged { .. } | Event::GameWon { .. })),
+        "{events:?}"
+    );
+    assert!(events.contains(&Event::CreatureDamaged {
+        player: PlayerId::Two,
+        creature: x,
+        amount: 5
+    }));
+}
+
+#[test]
+fn a_creature_attack_never_ends_the_game_by_hero_down() {
+    // Even against a hero at 1 health: only a hero-targeted attack can bring it down.
+    let mut s = setup(
+        hero(2, 1, 8, vec![draw(1, 1)]),
+        hero(1, 1, 8, vec![draw(1, 1)]),
+    );
+    s.one.cards = vec![stats(1, 9, 1, 3); 30];
+    s.two.cards = vec![stats(1, 1, 1, 1); 30];
+    s.two.hero.health = 1;
+    let (mut state, _) = new_game(s, 7).unwrap();
+    play_first(&mut state);
+    play_first(&mut state);
+    let (a, x) = duelists(&state);
+    apply(&mut state, strike(a, x)).unwrap();
+    assert_eq!(state.hero_health(PlayerId::Two), 1);
+    assert_eq!(state.winner(), None);
+}
+
+#[test]
+fn a_non_lethal_creature_attack_logs_in_order_with_and_without_handover() {
+    // 4 time units, force 2 against 5 health: attack cost 2 stays, attack cost 4 crosses.
+    let log = |cost: u32| {
+        let mut state = skirmish(stats(1, 2, cost, 3), stats(4, 1, 1, 5), 1, 8);
+        let (a, x) = duelists(&state);
+        (apply(&mut state, strike(a, x)).unwrap(), a, x)
+    };
+    let (events, a, x) = log(2);
+    assert_eq!(
+        events,
+        vec![
+            Event::Attacked {
+                player: PlayerId::One,
+                attacker: a,
+                cost: 2
+            },
+            Event::CreatureDamaged {
+                player: PlayerId::Two,
+                creature: x,
+                amount: 2
+            },
+            Event::TokenMoved {
+                player: PlayerId::One,
+                budget: 2
+            },
+        ]
+    );
+    let (events, a, x) = log(4);
+    assert_eq!(
+        events,
+        vec![
+            Event::Attacked {
+                player: PlayerId::One,
+                attacker: a,
+                cost: 4
+            },
+            Event::CreatureDamaged {
+                player: PlayerId::Two,
+                creature: x,
+                amount: 2
+            },
+            Event::TokenMoved {
+                player: PlayerId::Two,
+                budget: 1
+            },
+            Event::ActivePlayerChanged {
+                player: PlayerId::Two
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_lethal_creature_attack_logs_the_death_before_the_token_with_and_without_handover() {
+    let log = |cost: u32| {
+        let mut state = skirmish(stats(1, 5, cost, 3), stats(4, 1, 1, 3), 1, 8);
+        let (a, x) = duelists(&state);
+        (apply(&mut state, strike(a, x)).unwrap(), a, x)
+    };
+    let (events, a, x) = log(2);
+    assert_eq!(
+        events,
+        vec![
+            Event::Attacked {
+                player: PlayerId::One,
+                attacker: a,
+                cost: 2
+            },
+            Event::CreatureDamaged {
+                player: PlayerId::Two,
+                creature: x,
+                amount: 5
+            },
+            Event::Died {
+                player: PlayerId::Two,
+                creature: x
+            },
+            Event::TokenMoved {
+                player: PlayerId::One,
+                budget: 2
+            },
+        ]
+    );
+    let (events, a, x) = log(4);
+    assert_eq!(
+        kinds(&events),
+        [
+            "Attacked",
+            "CreatureDamaged",
+            "Died",
+            "TokenMoved",
+            "ActivePlayerChanged"
+        ]
+    );
+    assert_eq!(
+        events[2],
+        Event::Died {
+            player: PlayerId::Two,
+            creature: x
+        }
+    );
+    assert_eq!(
+        events[0],
+        Event::Attacked {
+            player: PlayerId::One,
+            attacker: a,
+            cost: 4
+        }
+    );
+}
+
+#[test]
+fn a_creature_attack_follows_the_same_time_rule_as_a_hero_attack() {
+    // One holds 5 time units. For each cost: (active player, budget) after the attack.
+    let cases = [
+        (2, PlayerId::One, 3),
+        (5, PlayerId::Two, 1),
+        (7, PlayerId::Two, 3),
+    ];
+    for (cost, active, budget) in cases {
+        for on_hero in [true, false] {
+            let mut state = skirmish(stats(1, 1, cost, 3), stats(5, 1, 1, 100), 1, 8);
+            let (a, x) = duelists(&state);
+            let target = if on_hero {
+                Target::Hero
+            } else {
+                Target::Creature(x)
+            };
+            apply(
+                &mut state,
+                Action::Attack {
+                    attacker: a,
+                    target,
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                (state.active(), state.budget()),
+                (active, budget),
+                "cost {cost}, on the hero: {on_hero}"
+            );
+        }
+    }
+    // The receiver's max_time caps the budget, and a cost above the attacker's own max_time
+    // is legal.
+    let mut state = skirmish(stats(1, 1, 30, 3), stats(5, 1, 1, 100), 1, 5);
+    let (a, x) = duelists(&state);
+    apply(&mut state, strike(a, x)).unwrap();
+    assert_eq!((state.active(), state.budget()), (PlayerId::Two, 5));
+}
+
+#[test]
+fn a_target_that_is_not_an_opposing_creature_in_play_is_refused_atomically() {
+    // 4 time units at 1 per attack: One kills one creature and stays active.
+    let mut state = skirmish(stats(1, 3, 1, 3), stats(4, 1, 1, 3), 1, 8);
+    let (a, x) = duelists(&state);
+    apply(&mut state, strike(a, x)).unwrap();
+    assert_eq!(state.active(), PlayerId::One);
+    assert_eq!(state.discard(PlayerId::Two), vec![x]);
+    let in_pile = (30..60)
+        .map(CardInstanceId)
+        .find(|c| {
+            !state.hand(PlayerId::Two).contains(c)
+                && !state.board(PlayerId::Two).contains(c)
+                && !state.discard(PlayerId::Two).contains(c)
+        })
+        .unwrap();
+    let cases = [
+        (a, "one's own creature"),
+        (state.hand(PlayerId::One)[0], "a card in one's own hand"),
+        (
+            state.hand(PlayerId::Two)[0],
+            "a card in the opponent's hand",
+        ),
+        (in_pile, "a card in the opponent's pile"),
+        (x, "a card in the opponent's discard"),
+        (CardInstanceId(9999), "an unknown id"),
+    ];
+    for (target, why) in cases {
+        let before = state.clone();
+        assert_eq!(
+            apply(&mut state, strike(a, target)),
+            Err(RuleError::TargetNotOnBoard),
+            "{why}"
+        );
+        assert_eq!(state, before, "{why}");
+    }
+}
+
+#[test]
+fn the_attacker_is_checked_before_the_target_and_game_over_before_both() {
+    let mut state = skirmish(stats(1, 3, 1, 3), stats(4, 1, 1, 3), 1, 8);
+    let (a, x) = duelists(&state);
+    let absent = CardInstanceId(9999);
+    let their_hand = state.hand(PlayerId::Two)[0];
+    for (attacker, target, why) in [
+        (absent, absent, "both unknown"),
+        (x, absent, "the opponent's creature as attacker"),
+        (their_hand, a, "a card of the opponent's hand as attacker"),
+    ] {
+        let before = state.clone();
+        assert_eq!(
+            apply(&mut state, strike(attacker, target)),
+            Err(RuleError::AttackerNotOnBoard),
+            "{why}"
+        );
+        assert_eq!(state, before, "{why}");
+    }
+    let before = state.clone();
+    assert_eq!(
+        apply(&mut state, strike(a, absent)),
+        Err(RuleError::TargetNotOnBoard),
+        "a valid attacker reaches the target check"
+    );
+    assert_eq!(state, before);
+    apply(&mut state, Action::Concede).unwrap();
+    let after = state.clone();
+    assert_eq!(
+        apply(&mut state, strike(absent, absent)),
+        Err(RuleError::GameOver)
+    );
+    assert_eq!(state, after);
+}
+
+#[test]
+fn creature_targets_travel_as_json_and_hostile_forms_are_rejected() {
+    let action = strike(CardInstanceId(3), CardInstanceId(7));
+    let json = serde_json::to_string(&action).unwrap();
+    assert_eq!(json, r#"{"attack":{"attacker":3,"target":{"creature":7}}}"#);
+    assert_eq!(serde_json::from_str::<Action>(&json).unwrap(), action);
+    assert_eq!(
+        serde_json::from_str::<Action>(r#"{"attack":{"attacker":3,"target":"hero"}}"#).unwrap(),
+        hit(CardInstanceId(3))
+    );
+    for hostile in [
+        r#"{"creature":-1}"#,
+        "4294967296",
+        r#""7""#,
+        "1.5",
+        "null",
+        r#"{"creature":7,"x":1}"#,
+        r#"{"Creature":7}"#,
+        r#"{"creature":"7"}"#,
+        r#"{"creature":null}"#,
+        r#"{"creature":7.5}"#,
+        r#"{"creature":4294967296}"#,
+        r#"{"creature":{"id":7}}"#,
+        "{}",
+    ] {
+        let action = format!(r#"{{"attack":{{"attacker":3,"target":{hostile}}}}}"#);
+        assert!(
+            serde_json::from_str::<Action>(&action).is_err(),
+            "{hostile} must be rejected"
+        );
+    }
+}
+
+#[test]
+fn the_new_events_and_error_travel_with_stable_shapes() {
+    assert_eq!(
+        serde_json::to_string(&Event::CreatureDamaged {
+            player: PlayerId::Two,
+            creature: CardInstanceId(7),
+            amount: 3
+        })
+        .unwrap(),
+        r#"{"creature_damaged":{"player":"Two","creature":7,"amount":3}}"#
+    );
+    assert_eq!(
+        serde_json::to_string(&Event::Died {
+            player: PlayerId::Two,
+            creature: CardInstanceId(7)
+        })
+        .unwrap(),
+        r#"{"died":{"player":"Two","creature":7}}"#
+    );
+    assert_eq!(RuleError::TargetNotOnBoard.code(), "target_not_on_board");
+    assert!(!RuleError::TargetNotOnBoard.to_string().is_empty());
 }

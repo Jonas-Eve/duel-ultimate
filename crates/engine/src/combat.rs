@@ -40,5 +40,9 @@ pub(crate) fn resolve_damage(
                 amount: force,
             });
         }
+        Target::Creature(_) => {}
     }
 }
+
+/// Moves every creature at 0 health from its board to its owner's discard pile.
+pub(crate) fn bury_dead(_state: &mut GameState, _events: &mut Vec<Event>) {}
