@@ -19,6 +19,7 @@
     )
 )]
 
+mod combat;
 mod effects;
 mod rules;
 mod setup;
