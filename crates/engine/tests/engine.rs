@@ -1334,6 +1334,94 @@ fn s1_hero_only_games_keep_their_exact_outcome_and_journal() {
     assert_eq!(observed, S1_GOLDEN);
 }
 
+// ---- S2a golden fingerprints ------------------------------------------------------------------
+
+/// Plays one game with the S1 setup, picking at each step a pseudo-random action among
+/// `legal_actions` other than `Concede` (creature targets included), from a generator owned
+/// by the test (a 64-bit LCG), so that the policy does not depend on the engine's own seed.
+/// Returns the final state and the journal.
+fn play_scripted_s2a(seed: u64) -> (GameState, Vec<Event>) {
+    let (mut state, mut log) = new_game(
+        setup(
+            hero(2, 3, 8, vec![draw(1, 1), draw(4, 2)]),
+            hero(1, 2, 6, vec![draw(2, 1)]),
+        ),
+        seed,
+    )
+    .unwrap();
+    let mut rng = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xdead_beef;
+    while state.winner().is_none() {
+        let actions: Vec<_> = legal_actions(&state)
+            .into_iter()
+            .filter(|a| *a != Action::Concede)
+            .collect();
+        if actions.is_empty() {
+            log.extend(apply(&mut state, Action::Concede).unwrap());
+            continue;
+        }
+        rng = rng
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        let pick = usize::try_from((rng >> 33) % actions.len() as u64).unwrap();
+        log.extend(apply(&mut state, actions[pick].clone()).unwrap());
+    }
+    (state, log)
+}
+
+/// `(winner, reason, number of events, FNV-1a of the events as JSON)` per seed 0..20,
+/// recorded on the engine as merged by S2a, before `provocation` and `riposte` existed.
+/// A deck without either must keep producing exactly these games (S2b-T2 and T3 replay it).
+const S2A_GOLDEN: [(PlayerId, WinReason, usize, u64); 20] = [
+    (PlayerId::Two, WinReason::HeroDown, 86, 0x80c1381779ea79a7),
+    (PlayerId::Two, WinReason::HeroDown, 98, 0x908d721b91e5d893),
+    (PlayerId::Two, WinReason::HeroDown, 77, 0x54de9d8b184fabea),
+    (PlayerId::Two, WinReason::HeroDown, 134, 0x23bd68595d38a5cc),
+    (PlayerId::One, WinReason::HeroDown, 169, 0x7e66ce1c77ff57b1),
+    (PlayerId::Two, WinReason::HeroDown, 278, 0x98bbc6c56698d62d),
+    (PlayerId::Two, WinReason::HeroDown, 147, 0x465ec0422879479c),
+    (PlayerId::One, WinReason::HeroDown, 185, 0x1804dec2bf7ece73),
+    (PlayerId::One, WinReason::HeroDown, 287, 0x79ae1cfe65efdb37),
+    (PlayerId::Two, WinReason::HeroDown, 97, 0x66768c08e59e417e),
+    (PlayerId::One, WinReason::HeroDown, 71, 0x8e0890bcf9c88878),
+    (PlayerId::Two, WinReason::HeroDown, 126, 0x815c922de826a087),
+    (PlayerId::Two, WinReason::HeroDown, 157, 0x843a3979c5094ce7),
+    (PlayerId::One, WinReason::HeroDown, 215, 0xecb4ef78cee5f4fe),
+    (PlayerId::One, WinReason::HeroDown, 76, 0xa6c716fc0f1dbad9),
+    (PlayerId::Two, WinReason::HeroDown, 133, 0x0452da6eb21a6562),
+    (PlayerId::One, WinReason::HeroDown, 146, 0xf25f28d39f5724e5),
+    (PlayerId::Two, WinReason::HeroDown, 231, 0x6cf53186683b1074),
+    (PlayerId::Two, WinReason::HeroDown, 89, 0x1ed1ba46e872c1ac),
+    (PlayerId::Two, WinReason::HeroDown, 152, 0x92909ca938ebc409),
+];
+
+#[test]
+fn s2a_scripted_games_keep_their_exact_outcome_and_journal() {
+    let mut deaths = 0;
+    let mut creature_attacks = 0;
+    let observed: Vec<_> = (0..20)
+        .map(|seed| {
+            let (state, log) = play_scripted_s2a(seed);
+            deaths += log
+                .iter()
+                .filter(|e| matches!(e, Event::Died { .. }))
+                .count();
+            creature_attacks += log
+                .iter()
+                .filter(|e| matches!(e, Event::CreatureDamaged { .. }))
+                .count();
+            let (winner, reason) = state.winner().unwrap();
+            let json = serde_json::to_string(&log).unwrap();
+            (winner, reason, log.len(), fnv1a(json.as_bytes()))
+        })
+        .collect();
+    assert!(deaths > 0, "the golden games must include a death");
+    assert!(
+        creature_attacks > 0,
+        "the golden games must include an attack on a creature"
+    );
+    assert_eq!(observed, S2A_GOLDEN);
+}
+
 // ---- Attacking creatures -------------------------------------------------------------------
 
 fn stats(cost: u32, force: u32, attack_cost: u32, health: u32) -> CreatureStats {
