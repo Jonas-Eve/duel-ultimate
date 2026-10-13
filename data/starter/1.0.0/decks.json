@@ -1,0 +1,126 @@
+[
+  {
+    "id": "rush",
+    "name": "Ruée",
+    "hero": {
+      "name": "Capitaine d'avant-garde",
+      "max_time": 6,
+      "starting_hand": 5,
+      "initiative": 3,
+      "start_budget": 3,
+      "health": 12,
+      "effects": [
+        {
+          "name": "Rappel",
+          "cost": 2,
+          "effect": {
+            "kind": "draw",
+            "count": 1
+          }
+        },
+        {
+          "name": "Renforts",
+          "cost": 4,
+          "effect": {
+            "kind": "draw",
+            "count": 3
+          }
+        }
+      ]
+    },
+    "cards": [
+      "skirmisher",
+      "skirmisher",
+      "skirmisher",
+      "skirmisher",
+      "skirmisher",
+      "skirmisher",
+      "skirmisher",
+      "skirmisher",
+      "raider",
+      "raider",
+      "raider",
+      "raider",
+      "raider",
+      "raider",
+      "raider",
+      "raider",
+      "spiked_wolf",
+      "spiked_wolf",
+      "spiked_wolf",
+      "spiked_wolf",
+      "spiked_wolf",
+      "spiked_wolf",
+      "lancer",
+      "lancer",
+      "lancer",
+      "lancer",
+      "lancer",
+      "rider",
+      "rider",
+      "rider"
+    ]
+  },
+  {
+    "id": "bulwark",
+    "name": "Rempart",
+    "hero": {
+      "name": "Gardienne du rempart",
+      "max_time": 10,
+      "starting_hand": 4,
+      "initiative": 2,
+      "start_budget": 5,
+      "health": 16,
+      "effects": [
+        {
+          "name": "Garnison",
+          "cost": 3,
+          "effect": {
+            "kind": "draw",
+            "count": 1
+          }
+        },
+        {
+          "name": "Réquisition",
+          "cost": 6,
+          "effect": {
+            "kind": "draw",
+            "count": 2
+          }
+        }
+      ]
+    },
+    "cards": [
+      "warden",
+      "warden",
+      "warden",
+      "warden",
+      "warden",
+      "pikeman",
+      "pikeman",
+      "pikeman",
+      "pikeman",
+      "pikeman",
+      "pikeman",
+      "pikeman",
+      "pikeman",
+      "knight",
+      "knight",
+      "knight",
+      "knight",
+      "knight",
+      "knight",
+      "knight",
+      "ogre",
+      "ogre",
+      "ogre",
+      "ogre",
+      "ogre",
+      "ogre",
+      "colossus",
+      "colossus",
+      "colossus",
+      "colossus"
+    ]
+  }
+]
