@@ -246,4 +246,95 @@ mod tests {
             "game_over"
         );
     }
+
+    // ---- S3-T1: the start events and the recorded data versions ---------------------------
+
+    fn start_events(game: &Duel) -> Value {
+        serde_json::from_str(&game.start_events_json().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn start_events_hold_game_started_with_the_versions_of_the_setup() {
+        let game = duel();
+        let events = start_events(&game);
+        let started = &events[0]["game_started"];
+        assert_eq!(
+            started["data_versions"],
+            serde_json::json!(["fixture@1.0.0"])
+        );
+        // `first` and `budget` are the ones the engine produced for this setup and seed.
+        let setup: GameSetup = serde_json::from_value(setup_value()).unwrap();
+        let (_, expected) = new_game(setup, 1).unwrap();
+        assert_eq!(
+            game.start_events_json().unwrap(),
+            serde_json::to_string(&expected).unwrap()
+        );
+        assert_eq!(
+            started["first"],
+            serde_json::to_value(match &expected[0] {
+                duel_engine::Event::GameStarted { first, .. } => first,
+                other => panic!("{other:?}"),
+            })
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn start_events_are_the_same_at_every_call_and_after_later_actions() {
+        let mut game = duel();
+        let first = game.start_events_json().unwrap();
+        assert_eq!(game.start_events_json().unwrap(), first);
+        game.apply_json(r#"{"activate":{"effect":0}}"#).unwrap();
+        let actions: Value = serde_json::from_str(&game.legal_actions_json().unwrap()).unwrap();
+        game.apply_json(&actions[0].to_string()).unwrap();
+        assert_eq!(game.start_events_json().unwrap(), first);
+        game.apply_json(r#""concede""#).unwrap();
+        assert_eq!(game.start_events_json().unwrap(), first);
+        assert!(!start_events(&game).as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_empty_version_list_leaves_the_key_out_of_game_started() {
+        let mut v = setup_value();
+        v["data_versions"] = serde_json::json!([]);
+        let game = Duel::from_json(&v.to_string(), 1).unwrap();
+        let json = game.start_events_json().unwrap();
+        assert!(!json.contains("data_versions"), "{json}");
+        assert!(json.starts_with(r#"[{"game_started":{"first":""#), "{json}");
+    }
+
+    #[test]
+    fn a_game_lost_by_exhaustion_at_setup_shows_game_won_among_the_start_events() {
+        let mut v = setup_value();
+        v["one"]["hero"]["effects"] = serde_json::json!([]);
+        v["one"]["hero"]["starting_hand"] = 0.into();
+        v["one"]["hero"]["initiative"] = 99.into();
+        let game = Duel::from_json(&v.to_string(), 1).unwrap();
+        let events = start_events(&game);
+        assert!(events[0].get("game_started").is_some(), "{events}");
+        assert!(events[1].get("game_won").is_some(), "{events}");
+        assert_eq!(
+            events[0]["game_started"]["data_versions"],
+            serde_json::json!(["fixture@1.0.0"])
+        );
+    }
+
+    #[test]
+    fn the_data_versions_key_stays_mandatory_in_a_setup() {
+        let mut v = setup_value();
+        v.as_object_mut().unwrap().remove("data_versions");
+        assert_eq!(
+            code(&Duel::from_json(&v.to_string(), 1).err().unwrap()),
+            "invalid_json"
+        );
+    }
+
+    #[test]
+    fn start_events_never_expose_hidden_information() {
+        let events = start_events(&duel());
+        let text = events.to_string();
+        for hidden in ["hand", "deck", "card", "drew"] {
+            assert!(!text.contains(hidden), "{text}");
+        }
+    }
 }

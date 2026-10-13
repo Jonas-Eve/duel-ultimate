@@ -6,6 +6,7 @@ use duel_engine::{
     Action, CardInstanceId, Event, GameSetup, GameState, PlayerId, PlayerSetup, RuleError,
     SetupError, Target, WinReason, apply, legal_actions, new_game,
 };
+use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
 fn draw(cost: u32, count: u32) -> HeroEffect {
@@ -1233,14 +1234,26 @@ fn attacks_travel_as_snake_case_json() {
 /// a creature (an attack on the hero as soon as a creature is in play): a game in which only
 /// heroes are ever attacked, like every game of S1.
 fn play_to_the_end(seed: u64) -> (GameState, Vec<Event>) {
-    let (mut state, mut log) = new_game(
-        setup(
-            hero(2, 3, 8, vec![draw(1, 1), draw(4, 2)]),
-            hero(1, 2, 6, vec![draw(2, 1)]),
-        ),
-        seed,
+    play_to_the_end_from(s1_setup(), seed)
+}
+
+/// The setup of the S1 and S2a games (its `data_versions` is `["fixture@1.0.0"]`).
+fn s1_setup() -> GameSetup {
+    setup(
+        hero(2, 3, 8, vec![draw(1, 1), draw(4, 2)]),
+        hero(1, 2, 6, vec![draw(2, 1)]),
     )
-    .unwrap();
+}
+
+/// The same setup with no recorded data version: `GameStarted` then serializes exactly as it
+/// did before `data_versions` existed, which is what the golden journals were recorded with.
+fn without_versions(mut setup: GameSetup) -> GameSetup {
+    setup.data_versions = vec![];
+    setup
+}
+
+fn play_to_the_end_from(setup: GameSetup, seed: u64) -> (GameState, Vec<Event>) {
+    let (mut state, mut log) = new_game(setup, seed).unwrap();
     while state.winner().is_none() {
         let action = legal_actions(&state)
             .into_iter()
@@ -1316,7 +1329,7 @@ const S1_GOLDEN: [(PlayerId, WinReason, usize, u64); 20] = [
 fn s1_hero_only_games_keep_their_exact_outcome_and_journal() {
     let observed: Vec<_> = (0..20)
         .map(|seed| {
-            let (state, log) = play_to_the_end(seed);
+            let (state, log) = play_to_the_end_from(without_versions(s1_setup()), seed);
             let (winner, reason) = state.winner().unwrap();
             let json = serde_json::to_string(&log).unwrap();
             (winner, reason, log.len(), fnv1a(json.as_bytes()))
@@ -1332,14 +1345,11 @@ fn s1_hero_only_games_keep_their_exact_outcome_and_journal() {
 /// by the test (a 64-bit LCG), so that the policy does not depend on the engine's own seed.
 /// Returns the final state and the journal.
 fn play_scripted_s2a(seed: u64) -> (GameState, Vec<Event>) {
-    let (mut state, mut log) = new_game(
-        setup(
-            hero(2, 3, 8, vec![draw(1, 1), draw(4, 2)]),
-            hero(1, 2, 6, vec![draw(2, 1)]),
-        ),
-        seed,
-    )
-    .unwrap();
+    play_scripted_s2a_from(s1_setup(), seed)
+}
+
+fn play_scripted_s2a_from(setup: GameSetup, seed: u64) -> (GameState, Vec<Event>) {
+    let (mut state, mut log) = new_game(setup, seed).unwrap();
     let mut rng = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xdead_beef;
     while state.winner().is_none() {
         let actions: Vec<_> = legal_actions(&state)
@@ -1391,7 +1401,7 @@ fn s2a_scripted_games_keep_their_exact_outcome_and_journal() {
     let mut creature_attacks = 0;
     let observed: Vec<_> = (0..20)
         .map(|seed| {
-            let (state, log) = play_scripted_s2a(seed);
+            let (state, log) = play_scripted_s2a_from(without_versions(s1_setup()), seed);
             deaths += log
                 .iter()
                 .filter(|e| matches!(e, Event::Died { .. }))
@@ -1411,6 +1421,49 @@ fn s2a_scripted_games_keep_their_exact_outcome_and_journal() {
         "the golden games must include an attack on a creature"
     );
     assert_eq!(observed, S2A_GOLDEN);
+}
+
+// ---- Data versions do not change the journals ---------------------------------------------------
+
+/// Removes the `data_versions` key from the first event (`GameStarted`) of a journal as JSON
+/// and returns it, with the rest of the journal.
+fn split_versions(log: &[Event]) -> (Value, Value, Vec<Value>) {
+    let mut events: Vec<Value> = log
+        .iter()
+        .map(|e| serde_json::to_value(e).unwrap())
+        .collect();
+    let mut first = events.remove(0);
+    let versions = first["game_started"]
+        .as_object_mut()
+        .unwrap()
+        .remove("data_versions")
+        .unwrap_or(Value::Null);
+    (first, versions, events)
+}
+
+#[test]
+fn non_empty_versions_only_add_the_key_to_the_s1_and_s2a_journals() {
+    type Play = fn(GameSetup, u64) -> (GameState, Vec<Event>);
+    let games: [(&str, Play); 2] = [
+        ("S1", play_to_the_end_from),
+        ("S2a", play_scripted_s2a_from),
+    ];
+    for (name, play) in games {
+        for seed in 0..20 {
+            let (plain, plain_log) = play(without_versions(s1_setup()), seed);
+            let versioned = s1_setup();
+            assert_eq!(versioned.data_versions, ["fixture@1.0.0"]);
+            let (state, log) = play(versioned, seed);
+            assert_eq!(state.winner(), plain.winner(), "{name} seed {seed}");
+            assert_eq!(log.len(), plain_log.len(), "{name} seed {seed}");
+            let (head, versions, rest) = split_versions(&log);
+            let (plain_head, plain_versions, plain_rest) = split_versions(&plain_log);
+            assert_eq!(head, plain_head, "{name} seed {seed}");
+            assert_eq!(plain_versions, Value::Null, "{name} seed {seed}");
+            assert_eq!(versions, json!(["fixture@1.0.0"]), "{name} seed {seed}");
+            assert_eq!(rest, plain_rest, "{name} seed {seed}");
+        }
+    }
 }
 
 // ---- Attacking creatures -------------------------------------------------------------------
