@@ -34,8 +34,8 @@ const SETS: [Set; 2] = [
     Set {
         name: "starter",
         version: "1.0.0",
-        cards: include_str!("../../../data/fixture/1.0.0/cards.json"),
-        decks: include_str!("../../../data/fixture/1.0.0/decks.json"),
+        cards: include_str!("../../../data/starter/1.0.0/cards.json"),
+        decks: include_str!("../../../data/starter/1.0.0/decks.json"),
     },
 ];
 
@@ -48,13 +48,59 @@ struct Config {
     set: &'static Set,
 }
 
-fn parse_args(_args: &[String]) -> Result<Config, String> {
-    Err("not implemented".to_owned())
+/// The names `--set` accepts, for messages.
+fn available_sets() -> String {
+    SETS.map(|set| set.name).join(", ")
 }
 
-/// The line printed for `one_wins` victories of player one.
-fn report(_config: &Config, _one_wins: u64) -> String {
-    String::new()
+/// Reads `[games] [--set <name>]`, in any order. Pure: the caller prints the error and exits.
+fn parse_args(args: &[String]) -> Result<Config, String> {
+    let mut games = None;
+    let mut set = None;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        if arg == "--set" {
+            let name = rest
+                .next()
+                .ok_or_else(|| format!("--set needs a value (available: {})", available_sets()))?;
+            let found = SETS.iter().find(|set| set.name == name).ok_or_else(|| {
+                format!("unknown set \"{name}\" (available: {})", available_sets())
+            })?;
+            if set.replace(found).is_some() {
+                return Err("--set given twice".to_owned());
+            }
+        } else if arg.starts_with('-') {
+            return Err(format!(
+                "unknown flag \"{arg}\" (usage: [games] [--set <name>])"
+            ));
+        } else {
+            let count: u64 = arg
+                .parse()
+                .map_err(|_| format!("invalid number of games \"{arg}\""))?;
+            if games.replace(count).is_some() {
+                return Err(format!(
+                    "the number of games is given twice (again: \"{arg}\")"
+                ));
+            }
+        }
+    }
+    Ok(Config {
+        games: games.unwrap_or(DEFAULT_GAMES),
+        set: set.unwrap_or(&SETS[0]),
+    })
+}
+
+/// The line printed for `one_wins` victories of player one. The fixture keeps the historical
+/// form; any other set names itself and its version (provisional form, to revisit with S4).
+fn report(config: &Config, one_wins: u64) -> String {
+    let games = config.games;
+    let rate = 100.0 * one_wins as f64 / games as f64;
+    if config.set.name == "fixture" {
+        format!("{games} games: player one wins {rate:.1}%")
+    } else {
+        let Set { name, version, .. } = config.set;
+        format!("{games} games [{name}@{version}]: player one wins {rate:.1}%")
+    }
 }
 
 /// The decks of `set` as a game setup, recording `<name>@<version>` as its data version.
@@ -76,6 +122,7 @@ fn setup_of(set: &Set) -> GameSetup {
 }
 
 /// The fixture decks as a game setup.
+#[cfg(test)]
 fn fixture_setup() -> GameSetup {
     setup_of(&SETS[0])
 }
@@ -94,6 +141,7 @@ struct Outcome {
 }
 
 /// Plays one game of the fixture decks to its end.
+#[cfg(test)]
 fn play(seed: u64) -> Outcome {
     play_with(fixture_setup(), seed)
 }
@@ -147,13 +195,13 @@ fn play_inspected(
 }
 
 fn main() {
-    let games: u64 = std::env::args()
-        .nth(1)
-        .and_then(|n| n.parse().ok())
-        .unwrap_or(DEFAULT_GAMES);
-    let config = Config {
-        games,
-        set: &SETS[0],
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let config = match parse_args(&args) {
+        Ok(config) => config,
+        Err(message) => {
+            eprintln!("duel-simulator: {message}");
+            std::process::exit(2);
+        }
     };
     let one = (0..config.games)
         .filter(|&seed| play_with(setup_of(config.set), seed).winner == PlayerId::One)
@@ -417,7 +465,7 @@ mod tests {
             .into_iter()
             .filter(|action| *action != Action::Concede)
             .collect();
-        let first = |wanted: fn(&Action) -> bool| actions.iter().copied().find(|a| wanted(a));
+        let first = |wanted: fn(&Action) -> bool| actions.iter().copied().find(&wanted);
         first(|a| matches!(a, Action::Play { .. }))
             .or_else(|| first(|a| matches!(a, Action::Attack { .. })))
             .or_else(|| first(|a| matches!(a, Action::Activate { .. })))
