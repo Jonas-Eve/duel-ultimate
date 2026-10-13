@@ -6,6 +6,12 @@
 //! This library never reads the disk or the network: the data comes in as strings
 //! ([`setup_from`]). Only the `duel-simulator` binary embeds data files.
 
+pub mod report;
+pub mod stats;
+
+pub use report::{Kind, MatchupReport, Report};
+pub use stats::{fmt_mean, fmt_share, percent, wilson_95};
+
 use duel_cards::{parse_cards, parse_decks, resolve_deck};
 use duel_engine::{
     Action, Event, GameSetup, PlayerId, PlayerSetup, WinReason, apply, legal_actions, new_game,
