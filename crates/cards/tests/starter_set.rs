@@ -100,7 +100,7 @@ fn decks_share_no_card() {
 }
 
 #[test]
-fn starter_cards_do_not_reuse_fixture_ids_with_other_content() {
+fn starter_data_is_distinct_from_the_fixture() {
     // The starter set is distinct from the fixture: the two files are not the same data.
     assert_ne!(CARDS, FIXTURE_CARDS);
 }
