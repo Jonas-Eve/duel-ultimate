@@ -6,26 +6,50 @@
 /// Wilson 95% interval (`z = 1.96`) of `successes` out of `games`, as fractions in `[0, 1]`.
 /// `None` when `games == 0` or `successes > games`.
 pub fn wilson_95(successes: u64, games: u64) -> Option<(f64, f64)> {
-    let _ = (successes, games);
-    todo!()
+    if games == 0 || successes > games {
+        return None;
+    }
+    const Z: f64 = 1.96;
+    let n = games as f64;
+    let p = successes as f64 / n;
+    let z2 = Z * Z;
+    let denom = 1.0 + z2 / n;
+    let centre = (p + z2 / (2.0 * n)) / denom;
+    let half = Z * (p * (1.0 - p) / n + z2 / (4.0 * n * n)).sqrt() / denom;
+    // The interval is exact at the edges (nothing below 0 successes, nothing above `games`) but
+    // the float result can be off by an ulp there (`-0.0`, `0.9999999999999999`): those bounds are
+    // snapped to 0 and 1. Strictly inside, Wilson's bounds are strictly inside `(0, 1)`, so no
+    // further clamp can ever change a value.
+    let low = if successes == 0 { 0.0 } else { centre - half };
+    let high = if successes == games {
+        1.0
+    } else {
+        centre + half
+    };
+    Some((low, high))
 }
 
 /// `100 * successes / games`, `None` when `games == 0`.
 pub fn percent(successes: u64, games: u64) -> Option<f64> {
-    let _ = (successes, games);
-    todo!()
+    (games != 0).then(|| 100.0 * successes as f64 / games as f64)
 }
 
 /// `"51.2% [48.1-54.3]"` (share and its Wilson 95% interval, one decimal), or `"n/a"`.
 pub fn fmt_share(successes: u64, games: u64) -> String {
-    let _ = (successes, games);
-    todo!()
+    match (percent(successes, games), wilson_95(successes, games)) {
+        (Some(share), Some((low, high))) => {
+            format!("{share:.1}% [{:.1}-{:.1}]", 100.0 * low, 100.0 * high)
+        }
+        _ => "n/a".to_string(),
+    }
 }
 
 /// `total / games` to one decimal, or `"n/a"` when `games == 0`.
 pub fn fmt_mean(total: u64, games: u64) -> String {
-    let _ = (total, games);
-    todo!()
+    if games == 0 {
+        return "n/a".to_string();
+    }
+    format!("{:.1}", total as f64 / games as f64)
 }
 
 #[cfg(test)]

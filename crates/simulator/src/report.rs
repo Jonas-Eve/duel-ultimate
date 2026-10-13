@@ -1,5 +1,7 @@
 //! The balance report: integer counters per matchup and its deterministic text rendering.
 
+use crate::stats::{fmt_mean, fmt_share};
+
 /// Kind of matchup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -41,15 +43,117 @@ pub struct Report {
     pub matchups: Vec<MatchupReport>,
 }
 
+const HEADERS: [&str; 10] = [
+    "matchup",
+    "games",
+    "wins A",
+    "wins B",
+    "first player",
+    "mean actions",
+    "hero down",
+    "exhaustion",
+    "concede",
+    "interrupted",
+];
+
+impl MatchupReport {
+    fn name(&self) -> String {
+        match self.kind {
+            Kind::Cross => format!("{} vs {}", self.deck_a, self.deck_b),
+            Kind::Mirror => format!("{} (mirror)", self.deck_a),
+        }
+    }
+
+    /// Games that ran to their end; `None` when more were interrupted than started.
+    fn finished(&self) -> Option<u64> {
+        self.games.checked_sub(self.interrupted)
+    }
+
+    fn row(&self) -> [String; 10] {
+        let finished = self.finished().unwrap_or(0);
+        // A mirror has no per-deck wins: both decks are the same.
+        let per_deck = |wins: u64| match self.kind {
+            Kind::Cross => fmt_share(wins, finished),
+            Kind::Mirror => "-".to_string(),
+        };
+        [
+            self.name(),
+            self.games.to_string(),
+            per_deck(self.wins_a),
+            per_deck(self.wins_b),
+            fmt_share(self.first_player_wins, finished),
+            fmt_mean(self.total_actions, finished),
+            self.hero_down.to_string(),
+            self.exhaustion.to_string(),
+            self.concede.to_string(),
+            self.interrupted.to_string(),
+        ]
+    }
+
+    fn check(&self) -> Result<(), String> {
+        let name = self.name();
+        let finished = self.finished().ok_or_else(|| {
+            format!(
+                "{name}: {} interrupted games out of {} started",
+                self.interrupted, self.games
+            )
+        })?;
+        let wins = self.wins_a + self.wins_b;
+        if finished != wins {
+            return Err(format!("{name}: {finished} finished games but {wins} wins"));
+        }
+        let causes = self.hero_down + self.exhaustion + self.concede;
+        if finished != causes {
+            return Err(format!(
+                "{name}: {finished} finished games but {causes} end causes"
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl Report {
     /// Deterministic plain-text rendering, every line ending with `\n`.
     pub fn render(&self) -> String {
-        todo!()
+        let mut rows = vec![HEADERS.map(String::from)];
+        rows.extend(self.matchups.iter().map(MatchupReport::row));
+        let widths: [usize; 10] = std::array::from_fn(|column| {
+            rows.iter()
+                .map(|row| row[column].chars().count())
+                .max()
+                .unwrap_or(0)
+        });
+        let line = |row: &[String; 10]| {
+            let cells: Vec<String> = row
+                .iter()
+                .zip(widths)
+                .enumerate()
+                .map(|(column, (cell, width))| {
+                    if column == 0 {
+                        format!("{cell:<width$}")
+                    } else {
+                        format!("{cell:>width$}")
+                    }
+                })
+                .collect();
+            cells.join("  ") + "\n"
+        };
+        let mut text = format!(
+            "set: {} | seed: {} | games per matchup: {} | action cap: {}\n",
+            self.set, self.seed, self.games_per_matchup, self.max_actions
+        );
+        text += &line(&rows[0]);
+        let rule: Vec<String> = widths.iter().map(|&width| "-".repeat(width)).collect();
+        text += &(rule.join("  ") + "\n");
+        for row in &rows[1..] {
+            text += &line(row);
+        }
+        text
     }
 
     /// Checks the counter invariants of every matchup.
     pub fn check(&self) -> Result<(), String> {
-        todo!()
+        self.matchups.iter().try_for_each(MatchupReport::check)
     }
 }
 

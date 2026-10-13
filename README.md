@@ -38,6 +38,15 @@ Règles propres à ce repo :
 - Pas de base de données ni de comptes joueurs tant qu'aucune story ne l'exige.
 <!-- PILOT:ARCHITECTURE:END -->
 
+## Format du rapport du simulateur
+
+La bibliothèque `duel_simulator` sait construire et afficher un rapport d'équilibrage (`Report`, `MatchupReport`, `Report::render`, `Report::check`) ; le CLI ne s'en sert pas encore.
+
+- Un rapport est fait d'entiers (aucun flottant stocké) : le set (`nom@version`), la graine, le nombre de parties par matchup, le plafond d'actions et, par matchup, parties lancées / interrompues, victoires A et B, victoires du premier joueur, fins par PV du héros / épuisement / abandon et total d'actions des parties terminées. Invariants : terminées = lancées - interrompues = victoires A + B = somme des trois fins.
+- Un matchup est `Cross` (deck A contre deck B) ou `Mirror` (un deck contre lui-même ; ses victoires A / B sont celles des sièges One / Two, et le tableau affiche `-` à la place des victoires par deck : seule la part du premier joueur a un sens).
+- Le rendu est du texte brut, déterministe (aucune date ni chemin, ordre des matchups conservé, lignes terminées par `\n`) : une ligne d'en-tête, puis un tableau à colonnes fixes. Chaque pourcentage est calculé sur les parties terminées et suivi de son intervalle de Wilson à 95 %, par exemple `51.2% [48.1-54.3]` ; `n/a` quand aucune partie n'est terminée.
+- Les calculs n'utilisent que `+ - * /` et `sqrt` sur des f64 (aucun libm) afin que le texte soit identique sur toute plateforme.
+
 ## Getting started
 <!-- PILOT:COMMANDS:START -->
 - **Rust (workspace) :** `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`,
