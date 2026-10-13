@@ -108,6 +108,8 @@ pub enum RuleError {
     AttackerNotOnBoard,
     #[error("that target is not a creature of the opposing board")]
     TargetNotOnBoard,
+    #[error("an opposing creature with provocation must be attacked first")]
+    TargetForbiddenByProvocation,
 }
 
 impl RuleError {
@@ -120,6 +122,7 @@ impl RuleError {
             Self::EffectNotApplicable => "effect_not_applicable",
             Self::AttackerNotOnBoard => "attacker_not_on_board",
             Self::TargetNotOnBoard => "target_not_on_board",
+            Self::TargetForbiddenByProvocation => "target_forbidden_by_provocation",
         }
     }
 }
@@ -344,4 +347,132 @@ pub fn legal_actions(state: &GameState) -> Vec<Action> {
     let mut actions = playable(state);
     actions.push(Action::Concede);
     actions
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{draw, hero, potential, setup, stats_with};
+    use crate::{CardInstanceId, new_game};
+    use rand::{RngExt, SeedableRng};
+    use rand_chacha::ChaCha8Rng;
+
+    /// A random game where about a third of the cards (by deck position, shuffled at setup)
+    /// have provocation, on both sides.
+    fn provocative_game(seed: u64) -> GameState {
+        let mut s = setup(
+            hero(1 + (seed % 2) as u32, 3, 8, vec![draw(1, 1), draw(4, 3)]),
+            hero(1, 2, 6, vec![draw(2, 2)]),
+        );
+        let cards = |offset: u32| {
+            (0..30u32)
+                .map(|n| {
+                    let n = n + offset;
+                    stats_with(1 + n % 3, 1 + n % 3, 1 + n % 2, 1 + n % 4, n.is_multiple_of(3), 0)
+                })
+                .collect::<Vec<_>>()
+        };
+        s.one.cards = cards(0);
+        s.two.cards = cards(1);
+        new_game(s, seed).unwrap().0
+    }
+
+    /// Every attacker of the active player against the hero, every id of the game (60 cards,
+    /// on any zone or none) and an unknown id.
+    fn every_attack(state: &GameState) -> Vec<Action> {
+        let ids = (0..61).chain([10_000]).map(CardInstanceId);
+        state
+            .player(state.active)
+            .board
+            .iter()
+            .flat_map(|attacker| {
+                std::iter::once(Target::Hero)
+                    .chain(ids.clone().map(Target::Creature))
+                    .map(|target| Action::Attack {
+                        attacker: attacker.id,
+                        target,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn legal_actions_and_apply_agree_on_provocative_games_and_phi_always_falls() {
+        let (mut attacks_on_provocateurs, mut forbidden_hero_attacks) = (0, 0);
+        for seed in 0..120 {
+            let mut state = provocative_game(seed);
+            let mut policy = ChaCha8Rng::seed_from_u64(seed ^ 0xFACE);
+            let mut steps = 0;
+            while state.winner.is_none() {
+                let legal = legal_actions(&state);
+                for action in every_attack(&state) {
+                    let mut clone = state.clone();
+                    match apply(&mut clone, action) {
+                        Ok(_) => assert!(
+                            legal.contains(&action),
+                            "seed {seed}: {action:?} applies but is not listed"
+                        ),
+                        Err(error) => {
+                            assert!(
+                                !legal.contains(&action),
+                                "seed {seed}: {action:?} is listed but refused with {error:?}"
+                            );
+                            assert_eq!(clone, state, "seed {seed}: a refusal changed the state");
+                            if error == RuleError::TargetForbiddenByProvocation
+                                && matches!(
+                                    action,
+                                    Action::Attack {
+                                        target: Target::Hero,
+                                        ..
+                                    }
+                                )
+                            {
+                                forbidden_hero_attacks += 1;
+                            }
+                        }
+                    }
+                }
+                let playable: Vec<Action> = legal
+                    .iter()
+                    .copied()
+                    .filter(|a| *a != Action::Concede)
+                    .collect();
+                // A living creature always has a legal attack, even when only the opposing
+                // provocateurs may be targeted: provocation never exhausts a player.
+                if !state.player(state.active).board.is_empty() {
+                    assert!(
+                        playable.iter().any(|a| matches!(a, Action::Attack { .. })),
+                        "seed {seed}: a creature but no attack is legal"
+                    );
+                }
+                assert!(!playable.is_empty(), "seed {seed}: exhausted yet not over");
+                let action = playable[policy.random_range(0..playable.len())];
+                if let Action::Attack {
+                    target: Target::Creature(victim),
+                    ..
+                } = action
+                    && state
+                        .player(state.active.opponent())
+                        .board
+                        .iter()
+                        .any(|c| c.id == victim && c.stats.provocation)
+                {
+                    attacks_on_provocateurs += 1;
+                }
+                let before = potential(&state);
+                apply(&mut state, action).unwrap();
+                assert!(
+                    potential(&state) < before,
+                    "seed {seed}: Φ did not fall on {action:?}"
+                );
+                steps += 1;
+                assert!(steps < 2000, "seed {seed}: the game does not end");
+            }
+            let (_, reason) = state.winner.unwrap();
+            assert_ne!(reason, WinReason::Exhaustion, "seed {seed}");
+        }
+        assert!(attacks_on_provocateurs > 100, "{attacks_on_provocateurs}");
+        assert!(forbidden_hero_attacks > 100, "{forbidden_hero_attacks}");
+    }
 }
