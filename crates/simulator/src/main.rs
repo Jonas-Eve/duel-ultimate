@@ -45,9 +45,14 @@ struct Outcome {
     deaths: usize,
 }
 
-/// Plays one game to its end.
+/// Plays one game of the fixture decks to its end.
 fn play(seed: u64) -> Outcome {
-    let (mut state, _) = new_game(fixture_setup(), seed).expect("the fixture is a valid setup");
+    play_with(fixture_setup(), seed)
+}
+
+/// Plays one game of `setup` to its end.
+fn play_with(setup: GameSetup, seed: u64) -> Outcome {
+    let (mut state, _) = new_game(setup, seed).expect("the setup is valid");
     let mut policy = ChaCha8Rng::seed_from_u64(seed ^ POLICY_SALT);
     let mut deaths = 0;
     for _ in 0..MAX_STEPS {
@@ -132,5 +137,31 @@ mod tests {
         for seed in 0..20 {
             assert_eq!(play(seed), play(seed));
         }
+    }
+
+    /// The fixture with ripostes of 0..=4 and provocation on a third of the cards.
+    fn riposting_setup() -> GameSetup {
+        let mut setup = fixture_setup();
+        for side in [&mut setup.one, &mut setup.two] {
+            for (n, card) in side.cards.iter_mut().enumerate() {
+                card.riposte = u32::try_from(n % 5).expect("a small index");
+                card.provocation = n % 3 == 0;
+            }
+        }
+        setup
+    }
+
+    #[test]
+    fn games_with_riposte_and_provocation_all_end_by_a_hero_going_down_or_exhaustion() {
+        let mut deaths = 0;
+        for seed in 0..100 {
+            let outcome = play_with(riposting_setup(), seed);
+            match outcome.reason {
+                WinReason::HeroDown | WinReason::Exhaustion => {}
+                WinReason::Concede => panic!("seed {seed}: conceded or hit the step cap"),
+            }
+            deaths += outcome.deaths;
+        }
+        assert!(deaths > 0, "creatures die in those games");
     }
 }

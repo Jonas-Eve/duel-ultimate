@@ -74,6 +74,15 @@ pub enum Event {
         creature: CardInstanceId,
         amount: u32,
     },
+    /// The creature `creature` of `player` (the attacker, the one that suffers) took the
+    /// riposte of its target: `amount` is the target's nominal riposte (the excess over the
+    /// attacker's remaining health is lost). Only for an attack on a creature with `riposte >= 1`,
+    /// even if that target dies of the attack.
+    Riposted {
+        player: PlayerId,
+        creature: CardInstanceId,
+        amount: u32,
+    },
     /// The creature left `player`'s board for their discard pile.
     Died {
         player: PlayerId,

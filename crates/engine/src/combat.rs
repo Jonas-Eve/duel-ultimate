@@ -1,5 +1,8 @@
 //! Resolution of an attack's damage: one isolated step, so a future rule that orders or
-//! modifies damage (strike first, ...) changes this function and nothing else.
+//! modifies damage (strike first, ...) changes [`plan_damage`] and [`apply_damage`] and
+//! nothing else. The attack and the riposte are simultaneous: both amounts are planned from
+//! the state as it is before the attack (a pure function), then applied, so a target killed
+//! by the attack still ripostes and an attacker killed by the riposte still dealt its blow.
 //!
 //! # Termination
 //!
@@ -12,50 +15,89 @@
 //! - a draw of `n` cards moves `n >= 1` cards from a pile to a hand: −`n`;
 //! - a summoning moves one card from a hand to a board: −1;
 //! - an attack removes `min(force, remaining health of the target) >= 1` from a hero or a
-//!   creature (the excess damage is lost, so it removes nothing more), and burying a dead
-//!   creature removes nothing, its health being 0.
+//!   creature (the excess damage is lost, so it removes nothing more);
+//! - its riposte (S2b, only against a creature) removes `min(riposte, current health of the
+//!   attacker) >= 0` more: finite health of a creature in play, never added to anything, so
+//!   it can only lower Φ further, and is 0 at riposte 0 (the attack's `>= 1` alone is then
+//!   enough);
+//! - burying a dead creature, whichever side or role (target, attacker, both), removes
+//!   nothing, its health being 0.
 //!
 //! Provocation (S2b) only restricts the set of legal attacks: it adds no action and changes
 //! no effect, so every action that remains decreases Φ exactly as above.
 //!
 //! (The first potential of the Epic, `2·|piles| + |hands| + Σ health`, broke once creatures
 //! counted: a summoning added the creature's health, and "−force" ignored the lost excess.)
-//! This relies on `force >= 1`, `health >= 1`, every cost `>= 1` and every draw `count >= 1`,
-//! all guaranteed by the validation `new_game` replays (`duel-cards`), and on there being no
-//! healing and no card leaving a discard pile or returning to a pile, a hand or a board. Any
-//! rule adding one of those must re-examine this.
+//! This relies on `force >= 1`, `health >= 1`, every cost `>= 1`, every draw `count >= 1` and
+//! `riposte` a finite integer (bounded by `MAX_STAT`), all guaranteed by the validation
+//! `new_game` replays (`duel-cards`), and on there being no healing, no riposte that heals,
+//! and no card leaving a discard pile or returning to a pile, a hand or a board. Any rule
+//! adding one of those (a heal, a return to hand, a recycling) must re-examine this.
 
 use crate::rules::{Event, Target};
 use crate::state::{CardInstance, CardInstanceId, GameState, PlayerId};
 
-/// Applies the damage of `attacker` (on `player`'s board) to `target`, saturating at 0
-/// health, and logs it. The caller has validated that the attacker is on that board.
-pub(crate) fn resolve_damage(
-    state: &mut GameState,
+/// The damage of one attack, computed before anything is applied: what the target takes and
+/// what the attacker takes back (the target's riposte).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AttackDamage {
+    /// The owner of the attacker.
+    pub(crate) player: PlayerId,
+    pub(crate) attacker: CardInstanceId,
+    pub(crate) target: Target,
+    /// The attacker's force: nominal, the excess over the target's health is lost.
+    pub(crate) on_target: u32,
+    /// The target's riposte: always 0 for a hero.
+    pub(crate) on_attacker: u32,
+}
+
+/// Step 1, pure: both damages of `attacker` (on `player`'s board) against `target`, read from
+/// the state as it is before the attack. The caller has validated the attack.
+pub(crate) fn plan_damage(
+    state: &GameState,
     player: PlayerId,
     attacker: CardInstanceId,
     target: Target,
-    events: &mut Vec<Event>,
-) {
-    let force = state
+) -> AttackDamage {
+    let on_target = state
         .player(player)
         .board
         .iter()
         .find(|c| c.id == attacker)
         .map_or(0, |c| c.stats.force);
-    debug_assert!(force >= 1, "validated attacker with force >= 1");
-    match target {
+    debug_assert!(on_target >= 1, "validated attacker with force >= 1");
+    // A hero has no riposte; a creature hits back with its own, even if this attack kills it.
+    let on_attacker = match target {
+        Target::Hero => 0,
+        Target::Creature(creature) => state
+            .player(player.opponent())
+            .board
+            .iter()
+            .find(|c| c.id == creature)
+            .map_or(0, |c| c.stats.riposte),
+    };
+    AttackDamage {
+        player,
+        attacker,
+        target,
+        on_target,
+        on_attacker,
+    }
+}
+
+/// Step 2: applies both damages of `plan`, saturating at 0 health, and logs them.
+pub(crate) fn apply_damage(state: &mut GameState, plan: AttackDamage, events: &mut Vec<Event>) {
+    let victim = plan.player.opponent();
+    match plan.target {
         Target::Hero => {
-            let victim = player.opponent();
             let side = state.player_mut(victim);
-            side.health = side.health.saturating_sub(force);
+            side.health = side.health.saturating_sub(plan.on_target);
             events.push(Event::Damaged {
                 player: victim,
-                amount: force,
+                amount: plan.on_target,
             });
         }
         Target::Creature(creature) => {
-            let victim = player.opponent();
             let Some(target) = state
                 .player_mut(victim)
                 .board
@@ -65,14 +107,45 @@ pub(crate) fn resolve_damage(
                 debug_assert!(false, "validated target on the opposing board");
                 return;
             };
-            target.stats.health = target.stats.health.saturating_sub(force);
+            target.stats.health = target.stats.health.saturating_sub(plan.on_target);
             events.push(Event::CreatureDamaged {
                 player: victim,
                 creature,
-                amount: force,
+                amount: plan.on_target,
             });
+            if plan.on_attacker >= 1 {
+                // The attacker is on the active player's board, a different creature from
+                // the target; a missing one (unreachable once validated) is simply skipped.
+                if let Some(attacker) = state
+                    .player_mut(plan.player)
+                    .board
+                    .iter_mut()
+                    .find(|c| c.id == plan.attacker)
+                {
+                    attacker.stats.health = attacker.stats.health.saturating_sub(plan.on_attacker);
+                    events.push(Event::Riposted {
+                        player: plan.player,
+                        creature: plan.attacker,
+                        amount: plan.on_attacker,
+                    });
+                } else {
+                    debug_assert!(false, "validated attacker on its board");
+                }
+            }
         }
     }
+}
+
+/// Resolves the damage of an attack: plan, then apply.
+pub(crate) fn resolve_damage(
+    state: &mut GameState,
+    player: PlayerId,
+    attacker: CardInstanceId,
+    target: Target,
+    events: &mut Vec<Event>,
+) {
+    let plan = plan_damage(state, player, attacker, target);
+    apply_damage(state, plan, events);
 }
 
 /// Moves every creature at 0 health from its board to its owner's discard pile and logs a
@@ -94,5 +167,93 @@ pub(crate) fn bury_dead(state: &mut GameState, events: &mut Vec<Event>) {
             creature: card.id,
         });
         state.player_mut(player).discard.push(card);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::new_game;
+    use crate::state::CardInstance;
+    use crate::testing::{draw, hero, setup, stats_with};
+
+    /// A running game with `attacker` (id 100, on One's board) and `target` (id 101, on Two's).
+    fn facing(attacker: (u32, u32, u32), target: (u32, u32, u32)) -> GameState {
+        let (mut state, _) = new_game(
+            setup(
+                hero(2, 8, 8, vec![draw(1, 1)]),
+                hero(1, 2, 5, vec![draw(1, 1)]),
+            ),
+            3,
+        )
+        .unwrap();
+        let card = |id, (force, health, riposte)| CardInstance {
+            id: CardInstanceId(id),
+            stats: stats_with(1, force, 1, health, false, riposte),
+        };
+        state.one.board = vec![card(100, attacker)];
+        state.two.board = vec![card(101, target)];
+        state
+    }
+
+    #[test]
+    fn plan_damage_reads_force_and_riposte_nominally_and_never_touches_the_state() {
+        // (attacker force, attacker health, target health, target riposte) -> (on_target, on_attacker)
+        let table = [
+            (1, 1, 1, 0, 1, 0),
+            (2, 5, 5, 3, 2, 3),
+            (3, 2, 1, 4, 3, 4), // excess on both sides stays nominal
+            (4, 1, 9, 0, 4, 0),
+            (1, 3, 3, 9, 1, 9),
+        ];
+        for (force, own, theirs, riposte, on_target, on_attacker) in table {
+            let state = facing((force, own, 0), (1, theirs, riposte));
+            let before = state.clone();
+            let plan = plan_damage(
+                &state,
+                PlayerId::One,
+                CardInstanceId(100),
+                Target::Creature(CardInstanceId(101)),
+            );
+            assert_eq!(state, before, "planning must not mutate the state");
+            assert_eq!(
+                plan,
+                AttackDamage {
+                    player: PlayerId::One,
+                    attacker: CardInstanceId(100),
+                    target: Target::Creature(CardInstanceId(101)),
+                    on_target,
+                    on_attacker,
+                },
+                "force {force}, riposte {riposte}"
+            );
+        }
+    }
+
+    #[test]
+    fn plan_damage_against_a_hero_has_no_riposte_even_with_ripostants_on_the_board() {
+        let state = facing((2, 5, 0), (1, 5, 7));
+        let before = state.clone();
+        let plan = plan_damage(&state, PlayerId::One, CardInstanceId(100), Target::Hero);
+        assert_eq!(state, before);
+        assert_eq!((plan.on_target, plan.on_attacker), (2, 0));
+    }
+
+    #[test]
+    fn apply_damage_applies_the_plan_it_is_given_not_a_recomputed_one() {
+        // A hand-made plan: the damage comes from the plan alone.
+        let mut state = facing((2, 5, 0), (1, 5, 7));
+        let plan = AttackDamage {
+            player: PlayerId::One,
+            attacker: CardInstanceId(100),
+            target: Target::Creature(CardInstanceId(101)),
+            on_target: 1,
+            on_attacker: 2,
+        };
+        let mut events = Vec::new();
+        apply_damage(&mut state, plan, &mut events);
+        assert_eq!(state.creature_health(CardInstanceId(101)), Some(4));
+        assert_eq!(state.creature_health(CardInstanceId(100)), Some(3));
+        assert_eq!(events.len(), 2);
     }
 }

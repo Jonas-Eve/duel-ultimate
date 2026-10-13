@@ -71,6 +71,7 @@ fn kinds(events: &[Event]) -> Vec<&'static str> {
             Event::Attacked { .. } => "Attacked",
             Event::Damaged { .. } => "Damaged",
             Event::CreatureDamaged { .. } => "CreatureDamaged",
+            Event::Riposted { .. } => "Riposted",
             Event::Died { .. } => "Died",
             Event::TokenMoved { .. } => "TokenMoved",
             Event::ActivePlayerChanged { .. } => "ActivePlayerChanged",
