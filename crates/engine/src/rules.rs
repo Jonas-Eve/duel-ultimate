@@ -108,6 +108,8 @@ pub enum RuleError {
     AttackerNotOnBoard,
     #[error("that target is not a creature of the opposing board")]
     TargetNotOnBoard,
+    #[error("an opposing creature with provocation must be attacked first")]
+    TargetForbiddenByProvocation,
 }
 
 impl RuleError {
@@ -120,6 +122,7 @@ impl RuleError {
             Self::EffectNotApplicable => "effect_not_applicable",
             Self::AttackerNotOnBoard => "attacker_not_on_board",
             Self::TargetNotOnBoard => "target_not_on_board",
+            Self::TargetForbiddenByProvocation => "target_forbidden_by_provocation",
         }
     }
 }
@@ -157,6 +160,22 @@ fn opposing_board_position(state: &GameState, card: CardInstanceId) -> Option<us
         .position(|c| c.id == card)
 }
 
+/// Whether provocation lets the active player aim at `target`. Computed from the current
+/// board every time (no cache: a remembered set would be a second state to invalidate): with
+/// no opposing creature with provocation anything goes (the S2a behavior), otherwise only one
+/// of those creatures. The single implementation of the filter, called by [`validate`] alone.
+fn provocation_allows(state: &GameState, target: Target) -> bool {
+    let opposing = &state.player(state.active.opponent()).board;
+    let mut provocateurs = opposing.iter().filter(|c| c.stats.provocation).peekable();
+    if provocateurs.peek().is_none() {
+        return true;
+    }
+    match target {
+        Target::Hero => false,
+        Target::Creature(id) => provocateurs.any(|c| c.id == id),
+    }
+}
+
 /// The single legality check, shared by [`apply`] and [`legal_actions`].
 pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleError> {
     if state.winner.is_some() {
@@ -168,14 +187,18 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
             .map(|_| ())
             .ok_or(RuleError::CardNotInHand),
         Action::Attack { attacker, target } => {
-            // Order of the checks: the attacker, then the target. Every refused target
-            // gets the same error, whatever zone (hidden or not) the id is in.
+            // Order of the checks: the attacker, then the target on the opposing board,
+            // then the provocation. Every id that is not an opposing creature gets
+            // `TargetNotOnBoard` whatever zone (hidden or not) it is in, even when a
+            // provocateur exists: the provocation error only ever speaks of the public board.
             board_position(state, *attacker).ok_or(RuleError::AttackerNotOnBoard)?;
-            match target {
-                Target::Hero => Ok(()),
-                Target::Creature(creature) => opposing_board_position(state, *creature)
-                    .map(|_| ())
-                    .ok_or(RuleError::TargetNotOnBoard),
+            if let Target::Creature(creature) = target {
+                opposing_board_position(state, *creature).ok_or(RuleError::TargetNotOnBoard)?;
+            }
+            if provocation_allows(state, *target) {
+                Ok(())
+            } else {
+                Err(RuleError::TargetForbiddenByProvocation)
             }
         }
         Action::Activate { effect } => {
@@ -193,7 +216,9 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
 /// [`legal_actions`]: the hand, hero effects, then per attacker (board order) the opposing
 /// hero first and each creature of the opposing board in order. At most
 /// `board x (1 + opposing board)` attacks. Own creatures, hand, pile and discard are never
-/// candidates; `validate` stays the single judge of what is legal.
+/// candidates; `validate` stays the single judge of what is legal, provocation included (a
+/// provocation hides the hero and the other creatures by refusing them there, not by a
+/// second filter here).
 fn candidates(state: &GameState) -> Vec<Action> {
     let side = state.player(state.active);
     let opposing = state.player(state.active.opponent());
@@ -221,8 +246,8 @@ fn playable(state: &GameState) -> Vec<Action> {
 }
 
 /// Ends the game if the active player has no legal action other than conceding. A living
-/// creature always has one (the opposing hero is always a legal target), so it keeps its
-/// owner in the game.
+/// creature always has one (an opposing provocateur if there is one, else the opposing hero),
+/// so it keeps its owner in the game.
 pub(crate) fn check_exhaustion(state: &mut GameState, events: &mut Vec<Event>) {
     let can_act = candidates(state)
         .iter()
@@ -335,8 +360,10 @@ fn pay(state: &mut GameState, cost: u32, events: &mut Vec<Event>) {
 /// order of the hero's list, then one `Attack` per (attacker, valid target) pair, attackers in
 /// order of summoning and, for each, the opposing hero first and then every creature of the
 /// opposing board in order (a dead creature is on no board, so it is neither listed as an
-/// attacker nor as a target; own creatures are never targets), then `Concede`. Empty once the
-/// game is over. [`apply`] accepts exactly these actions, and `Concede`.
+/// attacker nor as a target; own creatures are never targets), then `Concede`. While the
+/// opponent has a creature with provocation, only those creatures are listed as targets (in
+/// board order) and the hero is not: a provocation filters, it never adds an action. Empty once
+/// the game is over. [`apply`] accepts exactly these actions, and `Concede`.
 pub fn legal_actions(state: &GameState) -> Vec<Action> {
     if state.winner.is_some() {
         return Vec::new();
@@ -344,4 +371,139 @@ pub fn legal_actions(state: &GameState) -> Vec<Action> {
     let mut actions = playable(state);
     actions.push(Action::Concede);
     actions
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{draw, hero, potential, setup, stats_with};
+    use crate::{CardInstanceId, new_game};
+    use rand::{RngExt, SeedableRng};
+    use rand_chacha::ChaCha8Rng;
+
+    /// A random game where about a third of the cards (by deck position, shuffled at setup)
+    /// have provocation, on both sides.
+    fn provocative_game(seed: u64) -> GameState {
+        let mut s = setup(
+            hero(1 + (seed % 2) as u32, 3, 8, vec![draw(1, 1), draw(4, 3)]),
+            hero(1, 2, 6, vec![draw(2, 2)]),
+        );
+        let cards = |offset: u32| {
+            (0..30u32)
+                .map(|n| {
+                    let n = n + offset;
+                    stats_with(
+                        1 + n % 3,
+                        1 + n % 3,
+                        1 + n % 2,
+                        1 + n % 4,
+                        n.is_multiple_of(3),
+                        0,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        s.one.cards = cards(0);
+        s.two.cards = cards(1);
+        new_game(s, seed).unwrap().0
+    }
+
+    /// Every attacker of the active player against the hero, every id of the game (60 cards,
+    /// on any zone or none) and an unknown id.
+    fn every_attack(state: &GameState) -> Vec<Action> {
+        let ids = (0..61).chain([10_000]).map(CardInstanceId);
+        state
+            .player(state.active)
+            .board
+            .iter()
+            .flat_map(|attacker| {
+                std::iter::once(Target::Hero)
+                    .chain(ids.clone().map(Target::Creature))
+                    .map(|target| Action::Attack {
+                        attacker: attacker.id,
+                        target,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn legal_actions_and_apply_agree_on_provocative_games_and_phi_always_falls() {
+        let (mut attacks_on_provocateurs, mut forbidden_hero_attacks) = (0, 0);
+        for seed in 0..120 {
+            let mut state = provocative_game(seed);
+            let mut policy = ChaCha8Rng::seed_from_u64(seed ^ 0xFACE);
+            let mut steps = 0;
+            while state.winner.is_none() {
+                let legal = legal_actions(&state);
+                for action in every_attack(&state) {
+                    let mut clone = state.clone();
+                    match apply(&mut clone, action) {
+                        Ok(_) => assert!(
+                            legal.contains(&action),
+                            "seed {seed}: {action:?} applies but is not listed"
+                        ),
+                        Err(error) => {
+                            assert!(
+                                !legal.contains(&action),
+                                "seed {seed}: {action:?} is listed but refused with {error:?}"
+                            );
+                            assert_eq!(clone, state, "seed {seed}: a refusal changed the state");
+                            if error == RuleError::TargetForbiddenByProvocation
+                                && matches!(
+                                    action,
+                                    Action::Attack {
+                                        target: Target::Hero,
+                                        ..
+                                    }
+                                )
+                            {
+                                forbidden_hero_attacks += 1;
+                            }
+                        }
+                    }
+                }
+                let playable: Vec<Action> = legal
+                    .iter()
+                    .copied()
+                    .filter(|a| *a != Action::Concede)
+                    .collect();
+                // A living creature always has a legal attack, even when only the opposing
+                // provocateurs may be targeted: provocation never exhausts a player.
+                if !state.player(state.active).board.is_empty() {
+                    assert!(
+                        playable.iter().any(|a| matches!(a, Action::Attack { .. })),
+                        "seed {seed}: a creature but no attack is legal"
+                    );
+                }
+                assert!(!playable.is_empty(), "seed {seed}: exhausted yet not over");
+                let action = playable[policy.random_range(0..playable.len())];
+                if let Action::Attack {
+                    target: Target::Creature(victim),
+                    ..
+                } = action
+                    && state
+                        .player(state.active.opponent())
+                        .board
+                        .iter()
+                        .any(|c| c.id == victim && c.stats.provocation)
+                {
+                    attacks_on_provocateurs += 1;
+                }
+                let before = potential(&state);
+                apply(&mut state, action).unwrap();
+                assert!(
+                    potential(&state) < before,
+                    "seed {seed}: Φ did not fall on {action:?}"
+                );
+                steps += 1;
+                assert!(steps < 2000, "seed {seed}: the game does not end");
+            }
+            let (_, reason) = state.winner.unwrap();
+            assert_ne!(reason, WinReason::Exhaustion, "seed {seed}");
+        }
+        assert!(attacks_on_provocateurs > 100, "{attacks_on_provocateurs}");
+        assert!(forbidden_hero_attacks > 100, "{forbidden_hero_attacks}");
+    }
 }
