@@ -1,7 +1,8 @@
 //! End-to-end tests of stories S1 ("a duel playable to victory"), S2a ("targets, death and
-//! discard of creatures") and S2b ("provocation and riposte"), driven exclusively through the JSON boundary of `engine-wasm`
-//! (`Duel::from_json` / `legal_actions_json` / `apply_json`), the same one the future web
-//! client uses, on the `fixture` data set.
+//! discard of creatures"), S2b ("provocation and riposte") and S3 ("two starter decks, two
+//! heroes"), driven exclusively through the JSON boundary of `engine-wasm`
+//! (`Duel::from_json` / `start_events_json` / `legal_actions_json` / `apply_json`), the same one
+//! the future web client uses, on the `fixture` data set (S1 to S2b) and the `starter` set (S3).
 //!
 //! There is no state accessor on this boundary, so nothing here peeks at the engine:
 //! card ids, the active player and the budget are read from what the JSON exposes (legal
@@ -28,6 +29,13 @@
 //! by exhaustion when a riposte kills the last creature, and whole duels with both mechanics.
 //! Creatures with chosen stats at known ids come from mutating the setup as JSON (case 21 checks
 //! that a card's id is its position in its deck); cases 1 to 20 run unchanged as the regression.
+//!
+//! S3 (cases 32 to 40, at the very end): the `starter` set (Rush against Bulwark) from
+//! `data/starter/1.0.0/`, the versions recorded in `game_started` and read back by
+//! `start_events_json`, the two heroes' different openings, the costs, attack costs and forces
+//! observed in play against the data files, Bulwark's provocation, Rush's riposte, a scripted
+//! game to the victory and whole random duels. The health of the cards and the full
+//! distributions are not observable here; they are locked by the data tests of the set. Cases 1 to 31 run unchanged as the regression (case 40).
 
 use duel_cards::{CardsError, parse_cards, parse_decks, resolve_deck};
 use duel_engine::{GameSetup, PlayerSetup};
@@ -3407,4 +3415,908 @@ fn the_fixture_decks_never_riposte_nor_meet_provocation() {
             }
         }
     }
+}
+
+// =======================================================================================
+// S3: two starter decks, two heroes (cases 32 to 40)
+// =======================================================================================
+//
+// The same JSON boundary, on the `data/starter/1.0.0/` set (Rush "rush" against Bulwark
+// "bulwark"), loaded with `include_str!` like the fixture. What this file cannot observe is
+// locked elsewhere: there is no state accessor, so a card's health, a deck's whole
+// distribution and the averages of health are covered by the data tests of the `starter` set
+// (T2), not here. What it does observe is observable through the JSON: costs (`played.cost`),
+// attack costs (`attacked.cost`), forces (`damaged.amount`), the opening hands and effects of
+// the heroes, provocation and riposte in play, the version record of `game_started`, and whole
+// duels. The values below come from the data set: if they change, these cases change with it.
+
+const STARTER_CARDS: &str = include_str!("../../../data/starter/1.0.0/cards.json");
+const STARTER_DECKS: &str = include_str!("../../../data/starter/1.0.0/decks.json");
+const STARTER_VERSION: &str = "starter@1.0.0";
+
+/// The raw JSON decks of the starter set.
+fn starter_decks_json() -> Vec<Value> {
+    serde_json::from_str(STARTER_DECKS).unwrap()
+}
+
+/// The definition ids of a starter deck in deck order: a card's position here is its id's offset
+/// in the setup (case 21).
+fn deck_cards(deck: &str) -> Vec<String> {
+    let decks = starter_decks_json();
+    let found = decks.iter().find(|d| d["id"] == deck).expect("a deck");
+    found["cards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap().to_owned())
+        .collect()
+}
+
+/// A card definition of the starter `cards.json`, as written in the data.
+fn card_def(id: &str) -> Value {
+    let cards: Vec<Value> = serde_json::from_str(STARTER_CARDS).unwrap();
+    cards
+        .into_iter()
+        .find(|c| c["id"] == id)
+        .expect("a card of the set")
+}
+
+/// The ids, in the setup, of every copy of `def` in `deck` once it sits at `base` (One 0, Two 30).
+fn ids_of(deck: &str, base: u64, def: &str) -> Vec<u64> {
+    deck_cards(deck)
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| *c == def)
+        .map(|(i, _)| base + i as u64)
+        .collect()
+}
+
+/// The starter set as the JSON `GameSetup` a client sends: deck `one` for One, deck `two` for Two.
+fn starter_of(one: &str, two: &str) -> Value {
+    let cards = parse_cards(STARTER_CARDS).unwrap();
+    let decks = parse_decks(STARTER_DECKS).unwrap();
+    let side = |id: &str| {
+        let index = starter_decks_json()
+            .iter()
+            .position(|d| d["id"] == id)
+            .expect("a deck");
+        PlayerSetup {
+            hero: decks[index].hero.clone(),
+            cards: resolve_deck(&decks[index], &cards).unwrap(),
+        }
+    };
+    serde_json::to_value(GameSetup {
+        one: side(one),
+        two: side(two),
+        data_versions: vec![STARTER_VERSION.into()],
+    })
+    .unwrap()
+}
+
+/// Rush for One (initiative 3, it always starts), Bulwark for Two.
+fn starter() -> Value {
+    starter_of("rush", "bulwark")
+}
+
+/// Bulwark for One, Rush for Two (Rush still starts, whatever its side).
+fn starter_swapped() -> Value {
+    starter_of("bulwark", "rush")
+}
+
+fn started(first: &str, versions: &str) -> String {
+    format!(r#"[{{"game_started":{{"first":"{first}","budget":3{versions}}}}}]"#)
+}
+
+fn starter_versions() -> String {
+    format!(r#","data_versions":["{STARTER_VERSION}"]"#)
+}
+
+/// Both starter heroes alternate action after action: no effect, the whole deck in hand, a
+/// `max_time` and a budget of 1 so that every action crosses and hands over a budget of 1, and
+/// a health no test reaches. One (initiative 9) starts.
+fn alternating_starter(one: &str, two: &str) -> Value {
+    let mut setup = starter_of(one, two);
+    for (side, initiative) in [("one", 9), ("two", 1)] {
+        let hero = &mut setup[side]["hero"];
+        hero["effects"] = json!([]);
+        hero["starting_hand"] = 30.into();
+        hero["max_time"] = 1.into();
+        hero["start_budget"] = 1.into();
+        hero["health"] = 5000.into();
+        hero["initiative"] = initiative.into();
+    }
+    setup
+}
+
+/// What the offered attacks must be right now, from what the table knows.
+fn check_offer(t: &Table) {
+    assert_eq!(
+        attacks(&legal(&t.game)),
+        expected_attacks(&t.setup, t.active, &t.boards)
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 32: start and versions
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn the_starter_set_starts_with_rush_whatever_the_seed_and_records_its_version() {
+    let exact = started("One", &starter_versions());
+    assert_eq!(
+        exact,
+        r#"[{"game_started":{"first":"One","budget":3,"data_versions":["starter@1.0.0"]}}]"#
+    );
+    for seed in 0..20 {
+        let game = start(&starter(), seed);
+        assert_eq!(game.start_events_json().unwrap(), exact, "seed {seed}");
+    }
+    // Rush in the second place still starts, with the same budget.
+    let exact = started("Two", &starter_versions());
+    for seed in 0..20 {
+        let game = start(&starter_swapped(), seed);
+        assert_eq!(
+            game.start_events_json().unwrap(),
+            exact,
+            "swapped seed {seed}"
+        );
+    }
+}
+
+#[test]
+fn the_start_events_are_stable_public_and_the_fixture_has_its_own_version() {
+    let mut game = start(&starter(), 3);
+    let first = game.start_events_json().unwrap();
+    assert_eq!(game.start_events_json().unwrap(), first, "two calls");
+    for step in 0..6 {
+        let actions = legal(&game);
+        apply(&mut game, &play_first(&actions));
+        assert_eq!(
+            game.start_events_json().unwrap(),
+            first,
+            "after step {step}"
+        );
+    }
+
+    // Only public information: one event with three keys, no card id, no hand.
+    let events: Vec<Value> = serde_json::from_str(&first).unwrap();
+    assert_eq!(events.len(), 1);
+    let keys: Vec<&String> = events[0]["game_started"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .collect();
+    assert_eq!(keys, ["budget", "data_versions", "first"]);
+    assert_eq!(kinds(&events), ["game_started"]);
+    for hidden in ["card", "hand", "drew", "played"] {
+        assert!(!first.contains(hidden), "{hidden}");
+    }
+
+    // The fixture keeps its own record.
+    let game = start(&fixture(), 1);
+    let events: Vec<Value> = serde_json::from_str(&game.start_events_json().unwrap()).unwrap();
+    assert_eq!(
+        events[0]["game_started"]["data_versions"],
+        json!(["fixture@1.0.0"])
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 33: the shape of data_versions
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn an_empty_list_of_versions_is_omitted_and_several_entries_come_back_as_they_are() {
+    for (name, setup, first) in [
+        ("starter", starter(), "One"),
+        ("swapped", starter_swapped(), "Two"),
+    ] {
+        let mut setup = setup;
+        setup["data_versions"] = json!([]);
+        let game = start(&setup, 1);
+        // String comparison: the key is absent, not `[]` and not `null`.
+        assert_eq!(
+            game.start_events_json().unwrap(),
+            started(first, ""),
+            "{name}"
+        );
+        let events: Vec<Value> = serde_json::from_str(&game.start_events_json().unwrap()).unwrap();
+        assert!(events[0]["game_started"].get("data_versions").is_none());
+
+        // The entries are opaque: duplicates, an empty string, non-ASCII text, all in order.
+        let versions = json!([
+            STARTER_VERSION,
+            STARTER_VERSION,
+            "",
+            "é",
+            "日本語 \u{1F3B2}",
+            " x "
+        ]);
+        setup["data_versions"] = versions.clone();
+        let game = start(&setup, 1);
+        let events: Vec<Value> = serde_json::from_str(&game.start_events_json().unwrap()).unwrap();
+        assert_eq!(
+            events[0]["game_started"]["data_versions"], versions,
+            "{name}"
+        );
+        assert_eq!(
+            game.start_events_json().unwrap(),
+            started(first, &format!(r#","data_versions":{versions}"#)),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn hostile_shapes_of_data_versions_are_refused_one_by_one_and_the_key_is_required() {
+    let hostile: Vec<(&str, Value)> = vec![
+        ("a string", json!("starter@1.0.0")),
+        ("a number", json!(1)),
+        ("an object", json!({"v": "starter@1.0.0"})),
+        ("null", Value::Null),
+        ("a boolean", json!(true)),
+        ("an entry that is a number", json!([1])),
+        ("an entry that is null", json!([null])),
+        ("an entry that is an object", json!([{}])),
+        ("an entry that is a list", json!([["x"]])),
+        ("a valid entry then a number", json!(["ok", 2])),
+    ];
+    for (name, versions) in hostile {
+        let mut setup = starter();
+        setup["data_versions"] = versions;
+        // One at a time: each shape gets its own verdict.
+        let verdict = Duel::from_json(&setup.to_string(), 1).err();
+        assert!(verdict.is_some(), "{name} was accepted");
+        assert_eq!(error_code(&verdict.unwrap()), "invalid_json", "{name}");
+    }
+
+    // The key is mandatory.
+    let mut setup = starter();
+    setup.as_object_mut().unwrap().remove("data_versions");
+    assert_eq!(setup_error(&setup, 1), "invalid_json", "the key is absent");
+
+    // Control: the same setup with a valid list starts.
+    setup["data_versions"] = json!([STARTER_VERSION]);
+    start(&setup, 1);
+}
+
+#[test]
+fn a_setup_exhausted_at_the_start_reports_game_started_then_game_won() {
+    let won =
+        |winner: &str| format!(r#"{{"game_won":{{"winner":"{winner}","reason":"exhaustion"}}}}"#);
+    // Rush starts with nothing to do (no effect, empty hand): Bulwark wins at once.
+    let mut setup = starter();
+    strip(&mut setup, "one");
+    let mut game = start(&setup, 1);
+    let first = format!(
+        r#"[{{"game_started":{{"first":"One","budget":3,"data_versions":["starter@1.0.0"]}}}},{}]"#,
+        won("Two")
+    );
+    assert_eq!(game.start_events_json().unwrap(), first);
+    let events: Vec<Value> = serde_json::from_str(&first).unwrap();
+    assert_eq!(kinds(&events), ["game_started", "game_won"]);
+    every_action_is_refused_as_game_over(&mut game);
+    assert_eq!(
+        game.start_events_json().unwrap(),
+        first,
+        "unchanged by refusals"
+    );
+
+    // Rush in the second place starts all the same, and loses the same way.
+    let mut setup = starter_swapped();
+    strip(&mut setup, "two");
+    let game = start(&setup, 1);
+    let first = format!(
+        r#"[{{"game_started":{{"first":"Two","budget":3,"data_versions":["starter@1.0.0"]}}}},{}]"#,
+        won("One")
+    );
+    assert_eq!(game.start_events_json().unwrap(), first);
+    assert_eq!(game.legal_actions_json().unwrap(), "[]");
+
+    // Without versions the first event loses the key, the second is unchanged.
+    let mut setup = starter();
+    strip(&mut setup, "one");
+    setup["data_versions"] = json!([]);
+    let game = start(&setup, 1);
+    assert_eq!(
+        game.start_events_json().unwrap(),
+        format!(
+            r#"[{{"game_started":{{"first":"One","budget":3}}}},{}]"#,
+            won("Two")
+        )
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 34: the heroes play differently
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn the_two_heroes_open_differently_with_their_own_hands_effects_and_handovers() {
+    for (name, setup, rush_base) in [
+        ("rush first as One", starter(), 0u64),
+        ("rush first as Two", starter_swapped(), 30),
+    ] {
+        for seed in 0..10 {
+            let what = format!("{name}, seed {seed}");
+            let mut game = start(&setup, seed);
+            // Rush: 5 playable cards, two effects.
+            let offered = legal(&game);
+            let hand = plays(&offered);
+            assert_eq!(hand.len(), 5, "{what}");
+            assert!(hand.iter().all(|c| (rush_base..rush_base + 30).contains(c)));
+            let effects: Vec<&Value> = offered.iter().filter(|a| kind(a) == "activate").collect();
+            assert_eq!(effects, [&activate(0), &activate(1)], "{what}");
+
+            // "Renforts" (cost 4 > budget 3): three cards, then Bulwark gets min(4 - 3 + 1, 10).
+            let rush = if rush_base == 0 { "One" } else { "Two" };
+            let bulwark = if rush_base == 0 { "Two" } else { "One" };
+            let events = apply(&mut game, &activate(1));
+            assert_eq!(
+                kinds(&events),
+                [
+                    "effect_activated",
+                    "drew",
+                    "drew",
+                    "drew",
+                    "token_moved",
+                    "active_player_changed"
+                ],
+                "{what}"
+            );
+            assert_eq!(
+                events[0],
+                json!({"effect_activated": {"player": rush, "effect": 1, "cost": 4}}),
+                "{what}"
+            );
+            assert_eq!(count(&events, "drew"), 3);
+            assert!(events[1..4].iter().all(|e| e["drew"]["player"] == rush));
+            assert_eq!(token(&events), (bulwark.to_owned(), 2), "{what}");
+
+            // Bulwark: 4 playable cards, two effects; "Garnison" (cost 3 > budget 2) hands the
+            // token back with min(3 - 2 + 1, 6) = 2.
+            let offered = legal(&game);
+            assert_eq!(plays(&offered).len(), 4, "{what}");
+            assert_eq!(active_effects(&game), 2, "{what}");
+            assert!(
+                plays(&offered)
+                    .iter()
+                    .all(|c| !(rush_base..rush_base + 30).contains(c))
+            );
+            let events = apply(&mut game, &activate(0));
+            assert_eq!(
+                kinds(&events),
+                [
+                    "effect_activated",
+                    "drew",
+                    "token_moved",
+                    "active_player_changed"
+                ],
+                "{what}"
+            );
+            assert_eq!(
+                events[0],
+                json!({"effect_activated": {"player": bulwark, "effect": 0, "cost": 3}}),
+                "{what}"
+            );
+            assert_eq!(events[1]["drew"]["player"], bulwark);
+            assert_eq!(token(&events), (rush.to_owned(), 2), "{what}");
+        }
+    }
+}
+
+#[test]
+fn the_heroes_time_caps_and_start_budgets_show_in_the_handovers() {
+    // Every card costs 100 (the real heroes are kept), so a handover always hits the cap of the
+    // receiver: the `max_time` of its hero.
+    let mut setup = starter();
+    uniform_cards(&mut setup, 100, 1);
+    let mut game = start(&setup, 4);
+    let card = plays(&legal(&game))[0];
+    let events = apply(&mut game, &play(card));
+    assert_eq!(token(&events), ("Two".to_owned(), 10), "Bulwark's cap");
+    let card = plays(&legal(&game))[0];
+    let events = apply(&mut game, &play(card));
+    assert_eq!(token(&events), ("One".to_owned(), 6), "Rush's cap");
+
+    // Bulwark, when it starts (its initiative raised above Rush's), starts with its own budget.
+    let mut setup = starter_swapped();
+    setup["one"]["hero"]["initiative"] = 9.into();
+    let game = start(&setup, 4);
+    assert_eq!(
+        game.start_events_json().unwrap(),
+        started("One", &starter_versions()).replace("\"budget\":3", "\"budget\":5")
+    );
+    assert_eq!(plays(&legal(&game)).len(), 4);
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 35: the profiles, as far as the JSON shows them
+// ---------------------------------------------------------------------------------------
+
+/// What a deck showed when all of it was played, then each creature attacked the enemy hero.
+struct Profile {
+    costs: Vec<u64>,
+    attack_costs: Vec<u64>,
+    forces: Vec<u64>,
+}
+
+/// Plays the 30 cards of `deck` (all in hand, a budget that never runs out, no opposing
+/// creature so no provocation) and attacks the opposing hero with each, reading the costs and
+/// the damage from the events. The foe has no hand, no effect and a health no attack empties.
+fn observe(deck: &str, foe: &str) -> Profile {
+    let mut setup = starter_of(deck, foe);
+    for (side, hand, initiative) in [("one", 30, 9), ("two", 0, 1)] {
+        let hero = &mut setup[side]["hero"];
+        hero["effects"] = json!([]);
+        hero["starting_hand"] = hand.into();
+        hero["max_time"] = 1000.into();
+        hero["start_budget"] = 1000.into();
+        hero["initiative"] = initiative.into();
+    }
+    setup["two"]["hero"]["health"] = 5000.into();
+    let mut game = start(&setup, 3);
+
+    let mut hand = plays(&legal(&game));
+    hand.sort_unstable();
+    assert_eq!(
+        hand,
+        (0..30).collect::<Vec<u64>>(),
+        "{deck}: the whole deck"
+    );
+    let mut costs = Vec::new();
+    for id in 0..30 {
+        let events = apply(&mut game, &play(id));
+        let played = find(&events, "played").unwrap();
+        assert_eq!(played["card"], id);
+        costs.push(played["cost"].as_u64().unwrap());
+    }
+    let (mut attack_costs, mut forces) = (Vec::new(), Vec::new());
+    for id in 0..30 {
+        assert_eq!(
+            targets_of(&legal(&game), id),
+            [json!("hero")],
+            "{deck} {id}"
+        );
+        let events = apply(&mut game, &strike_hero(id));
+        assert_eq!(
+            count(&events, "game_won"),
+            0,
+            "{deck}: the hero must survive"
+        );
+        attack_costs.push(find(&events, "attacked").unwrap()["cost"].as_u64().unwrap());
+        let damage = find(&events, "damaged").unwrap();
+        assert_eq!(damage["player"], "Two");
+        forces.push(damage["amount"].as_u64().unwrap());
+    }
+    Profile {
+        costs,
+        attack_costs,
+        forces,
+    }
+}
+
+/// The same three series, read from `decks.json` and `cards.json`.
+fn expected_profile(deck: &str) -> Profile {
+    let stat = |name: &str| -> Vec<u64> {
+        deck_cards(deck)
+            .iter()
+            .map(|c| card_def(c)[name].as_u64().unwrap())
+            .collect()
+    };
+    Profile {
+        costs: stat("cost"),
+        attack_costs: stat("attack_cost"),
+        forces: stat("force"),
+    }
+}
+
+fn mean(values: &[u64]) -> f64 {
+    values.iter().sum::<u64>() as f64 / values.len() as f64
+}
+
+fn sorted(values: &[u64]) -> Vec<u64> {
+    let mut v = values.to_vec();
+    v.sort_unstable();
+    v
+}
+
+#[test]
+fn the_observed_costs_attack_costs_and_forces_are_the_data_and_the_decks_differ() {
+    let rush = observe("rush", "bulwark");
+    let bulwark = observe("bulwark", "rush");
+    for (name, seen) in [("rush", &rush), ("bulwark", &bulwark)] {
+        let wanted = expected_profile(name);
+        // Per card (the id is the position) and as multisets.
+        assert_eq!(seen.costs, wanted.costs, "{name} costs");
+        assert_eq!(
+            seen.attack_costs, wanted.attack_costs,
+            "{name} attack costs"
+        );
+        assert_eq!(seen.forces, wanted.forces, "{name} forces");
+        assert_eq!(sorted(&seen.costs), sorted(&wanted.costs));
+        assert_eq!(sorted(&seen.attack_costs), sorted(&wanted.attack_costs));
+        assert_eq!(sorted(&seen.forces), sorted(&wanted.forces));
+    }
+    // Rush is cheap, hits hard and attacks fast; Bulwark is the opposite (the thresholds of the
+    // data tests).
+    assert!(mean(&bulwark.costs) - mean(&rush.costs) >= 1.5);
+    assert!(mean(&rush.forces) - mean(&bulwark.forces) >= 0.5);
+    assert!(mean(&bulwark.attack_costs) - mean(&rush.attack_costs) >= 1.0);
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 36: Bulwark's provocation in play
+// ---------------------------------------------------------------------------------------
+
+const FORBIDDEN: &str = "target_forbidden_by_provocation";
+
+#[test]
+fn bulwark_wardens_shield_what_stands_beside_them_and_give_it_back_when_they_fall() {
+    let setup = alternating_starter("rush", "bulwark");
+    let raiders = ids_of("rush", 0, "raider");
+    let wardens = ids_of("bulwark", 30, "warden");
+    let pikemen = ids_of("bulwark", 30, "pikeman");
+    assert!(wardens.iter().all(|w| is_provocateur(&setup, *w)));
+    assert!(pikemen.iter().all(|p| !is_provocateur(&setup, *p)));
+    assert_eq!(card_def("warden")["health"], 6);
+    let (r1, r2, w, x) = (raiders[0], raiders[1], wardens[0], pikemen[0]);
+
+    for seed in 0..4 {
+        let mut t = Table::new(&setup, seed);
+        for card in [r1, w, r2, x] {
+            t.act(&play(card));
+            check_offer(&t);
+        }
+        assert_eq!((t.active, &t.boards), (0, &[vec![r1, r2], vec![w, x]]));
+        let offered = legal(&t.game);
+        // Only the warden, for each attacker: neither the hero nor the other creature.
+        assert_eq!(
+            attacks(&offered),
+            [(r1, creature(w)), (r2, creature(w))],
+            "seed {seed}"
+        );
+
+        // Refusals, on a twin: the state stays the same.
+        let (mut a, mut b) = (t.fork(), t.fork());
+        for attacker in [r1, r2] {
+            assert_eq!(refusal(&mut a.game, &strike(attacker, x)), FORBIDDEN);
+            assert_eq!(refusal(&mut a.game, &strike_hero(attacker)), FORBIDDEN);
+            // Not on the opposing board: the same answer whatever the id.
+            for gone in [59, 9999, r2 + attacker] {
+                assert_eq!(
+                    refusal(&mut a.game, &strike(attacker, gone)),
+                    "target_not_on_board",
+                    "seed {seed}, id {gone}"
+                );
+            }
+        }
+        assert_twins_agree(&mut a.game, &mut b.game, 6);
+
+        // The warden takes 3 then 3 (6 health): two attacks, Bulwark acting in between.
+        let events = t.act(&strike(r1, w));
+        assert_eq!(
+            kinds(&events),
+            [
+                "attacked",
+                "creature_damaged",
+                "token_moved",
+                "active_player_changed"
+            ]
+        );
+        assert_eq!(
+            events[1],
+            json!({"creature_damaged": {"player": "Two", "creature": w, "amount": 3}})
+        );
+        // Bulwark attacks freely while Rush holds no provocateur: the hero, then each creature.
+        check_offer(&t);
+        for attacker in [w, x] {
+            assert_eq!(
+                targets_of(&legal(&t.game), attacker),
+                [json!("hero"), creature(r1), creature(r2)],
+                "seed {seed}"
+            );
+        }
+        t.act(&play(pikemen[1]));
+        check_offer(&t);
+        assert_eq!(
+            attacks(&legal(&t.game)),
+            [(r1, creature(w)), (r2, creature(w))],
+            "the wounded warden still shields"
+        );
+        let events = t.act(&strike(r2, w));
+        assert_eq!(
+            kinds(&events),
+            [
+                "attacked",
+                "creature_damaged",
+                "died",
+                "token_moved",
+                "active_player_changed"
+            ]
+        );
+        assert_eq!(
+            find(&events, "died"),
+            Some(&json!({"player": "Two", "creature": w}))
+        );
+        check_offer(&t);
+        t.act(&play(pikemen[2]));
+
+        // At once: the hero and the other creatures are offered again, in board order.
+        let offered = legal(&t.game);
+        for attacker in [r1, r2] {
+            assert_eq!(
+                targets_of(&offered, attacker),
+                [
+                    json!("hero"),
+                    creature(x),
+                    creature(pikemen[1]),
+                    creature(pikemen[2])
+                ],
+                "seed {seed}"
+            );
+        }
+        check_offer(&t);
+        let events = t.act(&strike_hero(r1));
+        assert_eq!(kinds(&events)[..2], ["attacked", "damaged"]);
+    }
+}
+
+#[test]
+fn several_wardens_are_offered_in_board_order_around_a_plain_creature() {
+    let setup = alternating_starter("rush", "bulwark");
+    let raiders = ids_of("rush", 0, "raider");
+    let wardens = ids_of("bulwark", 30, "warden");
+    let x = ids_of("bulwark", 30, "pikeman")[0];
+    let mut t = Table::new(&setup, 1);
+    for card in [
+        raiders[0], wardens[0], raiders[1], x, raiders[2], wardens[1],
+    ] {
+        t.act(&play(card));
+    }
+    assert_eq!(t.boards[1], [wardens[0], x, wardens[1]]);
+    check_offer(&t);
+    for attacker in &t.boards[0] {
+        assert_eq!(
+            targets_of(&legal(&t.game), *attacker),
+            [creature(wardens[0]), creature(wardens[1])]
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 37: Rush's riposte in play
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn a_spiked_wolf_ripostes_each_attacker_until_one_dies_of_it() {
+    let setup = alternating_starter("rush", "bulwark");
+    let wolves = ids_of("rush", 0, "spiked_wolf");
+    let pike = ids_of("bulwark", 30, "pikeman")[0];
+    assert_eq!(wolves.len(), 6);
+    for wolf in &wolves {
+        assert_eq!(card_of(&setup, *wolf)["riposte"], 1);
+    }
+    // The data: no Bulwark card and no other Rush card ripostes.
+    for id in (0..60).filter(|id| !wolves.contains(id)) {
+        assert_eq!(card_of(&setup, id)["riposte"], 0, "id {id}");
+    }
+    assert_eq!(card_def("pikeman")["health"], 5);
+
+    let mut t = Table::new(&setup, 2);
+    t.act(&play(wolves[0]));
+    t.act(&play(pike));
+    // Pikeman (force 2, attack cost 2) against a wolf (1 health): the wolf dies, but only after
+    // its riposte of 1, owed to the owner of the attacker. The pikeman has 5 health.
+    for k in 0..5 {
+        t.act(&play(wolves[k + 1]));
+        check_offer(&t);
+        assert_eq!(t.active, 1);
+        let events = t.act(&strike(pike, wolves[k]));
+        let mut wanted = vec!["attacked", "creature_damaged", "riposted", "died"];
+        if k == 4 {
+            wanted.push("died");
+        }
+        wanted.extend(["token_moved", "active_player_changed"]);
+        assert_eq!(kinds(&events), wanted, "hit {k}");
+        assert_eq!(
+            events[0],
+            json!({"attacked": {"player": "Two", "attacker": pike, "cost": 2}})
+        );
+        assert_eq!(
+            events[1],
+            json!({"creature_damaged": {"player": "One", "creature": wolves[k], "amount": 2}})
+        );
+        assert_eq!(
+            events[2],
+            json!({"riposted": {"player": "Two", "creature": pike, "amount": 1}}),
+            "hit {k}"
+        );
+        assert_eq!(
+            events[3],
+            json!({"died": {"player": "One", "creature": wolves[k]}})
+        );
+        if k == 4 {
+            // The fifth riposte kills the pikeman: both died, in id order (wolf, then pikeman).
+            assert_eq!(
+                events[4],
+                json!({"died": {"player": "Two", "creature": pike}})
+            );
+        }
+    }
+    assert!(t.boards[1].is_empty(), "the pikeman is dead");
+    assert_eq!(t.boards[0], [wolves[5]]);
+    assert_eq!(t.discards, [wolves[..5].to_vec(), vec![pike]]);
+    check_offer(&t);
+}
+
+#[test]
+fn an_attack_on_the_hero_or_on_a_bulwark_creature_is_never_riposted() {
+    let setup = alternating_starter("rush", "bulwark");
+    let wolf = ids_of("rush", 0, "spiked_wolf")[0];
+    let pike = ids_of("bulwark", 30, "pikeman")[0];
+    let mut t = Table::new(&setup, 5);
+    t.act(&play(wolf));
+    t.act(&play(pike));
+    // The wolf (force 3) hits a Bulwark creature, whose riposte is 0: no `riposted`.
+    let events = t.act(&strike(wolf, pike));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "creature_damaged",
+            "token_moved",
+            "active_player_changed"
+        ]
+    );
+    assert_eq!(
+        events[1],
+        json!({"creature_damaged": {"player": "Two", "creature": pike, "amount": 3}})
+    );
+    // The pikeman hits the Rush hero, while a wolf with a riposte stands on the board: nothing.
+    let events = t.act(&strike_hero(pike));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "damaged",
+            "token_moved",
+            "active_player_changed"
+        ]
+    );
+    assert_eq!(
+        events[1],
+        json!({"damaged": {"player": "One", "amount": 2}})
+    );
+
+    // Every Bulwark creature, hit by anything of Rush, answers nothing (all have riposte 0).
+    for victim in ids_of("bulwark", 30, "colossus") {
+        let mut t = Table::new(&setup, 6);
+        t.act(&play(wolf));
+        t.act(&play(victim));
+        let events = t.act(&strike(wolf, victim));
+        assert_eq!(count(&events, "riposted"), 0, "colossus {victim}");
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 38: a scripted game to the victory
+// ---------------------------------------------------------------------------------------
+
+/// The scripted policy: the first play, else the first attack, else the first activation.
+/// Never concedes (it is always the last legal action).
+fn play_first(actions: &[Value]) -> Value {
+    ["play", "attack", "activate"]
+        .iter()
+        .find_map(|k| actions.iter().find(|a| kind(a) == *k))
+        .expect("an unfinished game always has a non-concede action")
+        .clone()
+}
+
+/// A fresh duel brought to where a journal ended, by replaying its actions.
+fn replayed(setup: &Value, seed: u32, journal: &[Step]) -> Duel {
+    let mut game = start(setup, seed);
+    for (_, action, events) in journal {
+        assert_eq!(&apply(&mut game, action), events);
+    }
+    game
+}
+
+#[test]
+fn a_scripted_game_ends_by_a_lethal_attack_in_both_orders_of_the_decks() {
+    for (name, setup) in [
+        ("rush first", starter()),
+        ("bulwark first", starter_swapped()),
+    ] {
+        for seed in 0..12 {
+            let what = format!("{name}, seed {seed}");
+            let journal = run_policy(&setup, seed, play_first);
+            assert_eq!(
+                journal,
+                run_policy(&setup, seed, play_first),
+                "{what}: not deterministic"
+            );
+            let seen = assert_a_provocation_duel_is_sound(&what, &setup, &journal);
+            assert_eq!((seen.hero_down, seen.exhaustion), (1, 0), "{what}");
+
+            // The last event is the victory by `hero_down`, with no handover after the lethal
+            // attack.
+            let (_, action, last) = journal.last().unwrap();
+            assert_eq!(kind(action), "attack", "{what}");
+            assert_eq!(action["attack"]["target"], json!("hero"), "{what}");
+            assert_eq!(kinds(last), ["attacked", "damaged", "game_won"], "{what}");
+            let won = &last.last().unwrap()["game_won"];
+            assert_eq!(won["reason"], "hero_down", "{what}");
+            assert_eq!(won["winner"], last[0]["attacked"]["player"], "{what}");
+            for (_, _, events) in &journal {
+                let names = kinds(events);
+                if names.contains(&"game_won".to_owned()) {
+                    assert_eq!(names.last().unwrap(), "game_won");
+                    assert!(!names.contains(&"token_moved".to_owned()));
+                    assert!(!names.contains(&"active_player_changed".to_owned()));
+                }
+            }
+
+            // Afterwards nothing is legal and everything is refused as `game_over`.
+            let mut game = replayed(&setup, seed, &journal);
+            every_action_is_refused_as_game_over(&mut game);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 39: whole random duels on the starter set
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn pseudo_random_duels_on_the_starter_set_respect_every_rule_and_see_ripostes_and_deaths() {
+    let mut total = Observed::default();
+    let mut duels = 0;
+    for (name, setup) in [
+        ("rush first", starter()),
+        ("bulwark first", starter_swapped()),
+    ] {
+        for seed in 0..25 {
+            let what = format!("{name}, seed {seed}");
+            let journal = run_policy(&setup, seed, pseudo_random(seed));
+            assert_eq!(
+                journal,
+                run_policy(&setup, seed, pseudo_random(seed)),
+                "{what}: not deterministic"
+            );
+            // No concession, a victory by hero_down or exhaustion, no dead creature offered
+            // again, every attack offered consistent with provocation, riposte as the data says.
+            let seen = assert_a_provocation_duel_is_sound(&what, &setup, &journal);
+            total.ripostes += seen.ripostes;
+            total.deaths += seen.deaths;
+            total.shielded += seen.shielded;
+            total.hero_down += seen.hero_down;
+            total.exhaustion += seen.exhaustion;
+            duels += 1;
+        }
+    }
+    assert_eq!(duels, 50);
+    assert_eq!(total.hero_down + total.exhaustion, duels);
+    assert!(total.ripostes > 0, "no riposte ever happened");
+    assert!(total.deaths > 0, "no creature ever died");
+    assert!(total.shielded > 0, "no warden ever shielded a hero");
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 40: S1, S2a and S2b are unchanged
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn the_fixture_is_untouched_by_the_starter_set() {
+    // Cases 1 to 31 above run as they were. The fixture still has neither provocation nor
+    // riposte, keeps its own version, and the starter set is a different thing.
+    let setup = fixture();
+    for id in 0..60 {
+        let card = card_of(&setup, id);
+        assert_eq!(card["riposte"], 0, "id {id}");
+        assert_eq!(card["provocation"], false, "id {id}");
+    }
+    assert_eq!(setup["data_versions"], json!(["fixture@1.0.0"]));
+    assert_ne!(setup["one"], starter()["one"]);
+    assert_ne!(setup["two"], starter()["two"]);
 }
