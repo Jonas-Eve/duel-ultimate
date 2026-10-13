@@ -160,6 +160,22 @@ fn opposing_board_position(state: &GameState, card: CardInstanceId) -> Option<us
         .position(|c| c.id == card)
 }
 
+/// Whether provocation lets the active player aim at `target`. Computed from the current
+/// board every time (no cache: a remembered set would be a second state to invalidate): with
+/// no opposing creature with provocation anything goes (the S2a behavior), otherwise only one
+/// of those creatures. The single implementation of the filter, called by [`validate`] alone.
+fn provocation_allows(state: &GameState, target: Target) -> bool {
+    let opposing = &state.player(state.active.opponent()).board;
+    let mut provocateurs = opposing.iter().filter(|c| c.stats.provocation).peekable();
+    if provocateurs.peek().is_none() {
+        return true;
+    }
+    match target {
+        Target::Hero => false,
+        Target::Creature(id) => provocateurs.any(|c| c.id == id),
+    }
+}
+
 /// The single legality check, shared by [`apply`] and [`legal_actions`].
 pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleError> {
     if state.winner.is_some() {
@@ -171,14 +187,18 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
             .map(|_| ())
             .ok_or(RuleError::CardNotInHand),
         Action::Attack { attacker, target } => {
-            // Order of the checks: the attacker, then the target. Every refused target
-            // gets the same error, whatever zone (hidden or not) the id is in.
+            // Order of the checks: the attacker, then the target on the opposing board,
+            // then the provocation. Every id that is not an opposing creature gets
+            // `TargetNotOnBoard` whatever zone (hidden or not) it is in, even when a
+            // provocateur exists: the provocation error only ever speaks of the public board.
             board_position(state, *attacker).ok_or(RuleError::AttackerNotOnBoard)?;
-            match target {
-                Target::Hero => Ok(()),
-                Target::Creature(creature) => opposing_board_position(state, *creature)
-                    .map(|_| ())
-                    .ok_or(RuleError::TargetNotOnBoard),
+            if let Target::Creature(creature) = target {
+                opposing_board_position(state, *creature).ok_or(RuleError::TargetNotOnBoard)?;
+            }
+            if provocation_allows(state, *target) {
+                Ok(())
+            } else {
+                Err(RuleError::TargetForbiddenByProvocation)
             }
         }
         Action::Activate { effect } => {
@@ -196,7 +216,9 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
 /// [`legal_actions`]: the hand, hero effects, then per attacker (board order) the opposing
 /// hero first and each creature of the opposing board in order. At most
 /// `board x (1 + opposing board)` attacks. Own creatures, hand, pile and discard are never
-/// candidates; `validate` stays the single judge of what is legal.
+/// candidates; `validate` stays the single judge of what is legal, provocation included (a
+/// provocation hides the hero and the other creatures by refusing them there, not by a
+/// second filter here).
 fn candidates(state: &GameState) -> Vec<Action> {
     let side = state.player(state.active);
     let opposing = state.player(state.active.opponent());
@@ -224,8 +246,8 @@ fn playable(state: &GameState) -> Vec<Action> {
 }
 
 /// Ends the game if the active player has no legal action other than conceding. A living
-/// creature always has one (the opposing hero is always a legal target), so it keeps its
-/// owner in the game.
+/// creature always has one (an opposing provocateur if there is one, else the opposing hero),
+/// so it keeps its owner in the game.
 pub(crate) fn check_exhaustion(state: &mut GameState, events: &mut Vec<Event>) {
     let can_act = candidates(state)
         .iter()
@@ -338,8 +360,10 @@ fn pay(state: &mut GameState, cost: u32, events: &mut Vec<Event>) {
 /// order of the hero's list, then one `Attack` per (attacker, valid target) pair, attackers in
 /// order of summoning and, for each, the opposing hero first and then every creature of the
 /// opposing board in order (a dead creature is on no board, so it is neither listed as an
-/// attacker nor as a target; own creatures are never targets), then `Concede`. Empty once the
-/// game is over. [`apply`] accepts exactly these actions, and `Concede`.
+/// attacker nor as a target; own creatures are never targets), then `Concede`. While the
+/// opponent has a creature with provocation, only those creatures are listed as targets (in
+/// board order) and the hero is not: a provocation filters, it never adds an action. Empty once
+/// the game is over. [`apply`] accepts exactly these actions, and `Concede`.
 pub fn legal_actions(state: &GameState) -> Vec<Action> {
     if state.winner.is_some() {
         return Vec::new();
@@ -368,7 +392,14 @@ mod tests {
             (0..30u32)
                 .map(|n| {
                     let n = n + offset;
-                    stats_with(1 + n % 3, 1 + n % 3, 1 + n % 2, 1 + n % 4, n.is_multiple_of(3), 0)
+                    stats_with(
+                        1 + n % 3,
+                        1 + n % 3,
+                        1 + n % 2,
+                        1 + n % 4,
+                        n.is_multiple_of(3),
+                        0,
+                    )
                 })
                 .collect::<Vec<_>>()
         };

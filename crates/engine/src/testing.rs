@@ -34,8 +34,7 @@ pub(crate) fn stats(cost: u32, force: u32, attack_cost: u32, health: u32) -> Cre
     stats_with(cost, force, attack_cost, health, false, 0)
 }
 
-/// Stats of a creature, `provocation` and `riposte` included (read by the engine from S2b-T2/T3).
-#[allow(dead_code)] // reused by S2b-T2 and S2b-T3
+/// Stats of a creature, `provocation` and `riposte` included (provocation is read by the engine, riposte by S2b-T3).
 pub(crate) fn stats_with(
     cost: u32,
     force: u32,

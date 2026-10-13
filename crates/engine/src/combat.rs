@@ -15,6 +15,9 @@
 //!   creature (the excess damage is lost, so it removes nothing more), and burying a dead
 //!   creature removes nothing, its health being 0.
 //!
+//! Provocation (S2b) only restricts the set of legal attacks: it adds no action and changes
+//! no effect, so every action that remains decreases Φ exactly as above.
+//!
 //! (The first potential of the Epic, `2·|piles| + |hands| + Σ health`, broke once creatures
 //! counted: a summoning added the creature's health, and "−force" ignored the lost excess.)
 //! This relies on `force >= 1`, `health >= 1`, every cost `>= 1` and every draw `count >= 1`,
