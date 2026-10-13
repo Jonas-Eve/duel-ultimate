@@ -5,7 +5,25 @@ use duel_engine::{
     Action, Event, GameSetup, GameState, PlayerId, Target, WinReason, apply, legal_actions,
     new_game,
 };
-use duel_simulator::{MAX_STEPS, play_inspected, play_with, setup_from};
+use duel_simulator::{DEFAULT_MAX_ACTIONS, GameRecord, play_game, random_policy, setup_from};
+
+/// One game with the random policy and the default cap, showing `on_step` each step.
+fn play_inspected(
+    setup: GameSetup,
+    seed: u64,
+    on_step: impl FnMut(&[Action], &[Event]),
+) -> GameRecord {
+    play_game(setup, seed, random_policy, DEFAULT_MAX_ACTIONS, on_step)
+}
+
+fn play_with(setup: GameSetup, seed: u64) -> GameRecord {
+    play_inspected(setup, seed, |_, _| {})
+}
+
+/// How the game ended; an interrupted game (the cap) has no end.
+fn reason_of(record: &GameRecord) -> Option<WinReason> {
+    record.winner.map(|(_, reason)| reason)
+}
 
 fn started_versions(setup: GameSetup) -> Vec<String> {
     let (_, events) = new_game(setup, 0).expect("the setup is valid");
@@ -65,10 +83,12 @@ fn starter_games_all_end_by_a_hero_going_down_or_exhaustion_and_use_both_mechani
                     .filter(|event| matches!(event, Event::Riposted { .. }))
                     .count();
             });
-            match outcome.reason {
-                WinReason::HeroDown => hero_down += 1,
-                WinReason::Exhaustion => {}
-                WinReason::Concede => panic!("seed {seed}: conceded or hit the step cap"),
+            match reason_of(&outcome) {
+                Some(WinReason::HeroDown) => hero_down += 1,
+                Some(WinReason::Exhaustion) => {}
+                Some(WinReason::Concede) | None => {
+                    panic!("seed {seed}: conceded or hit the step cap")
+                }
             }
             deaths += outcome.deaths;
         }
@@ -111,7 +131,7 @@ fn scripted(state: &GameState) -> Action {
 /// Plays the scripted policy to the end; returns the whole journal.
 fn scripted_game(setup: GameSetup, seed: u64) -> (GameState, Vec<Event>) {
     let (mut state, mut journal) = new_game(setup, seed).expect("the setup is valid");
-    for _ in 0..MAX_STEPS {
+    for _ in 0..DEFAULT_MAX_ACTIONS {
         if state.winner().is_some() {
             return (state, journal);
         }

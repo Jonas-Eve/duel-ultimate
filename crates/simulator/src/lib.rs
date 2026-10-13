@@ -6,8 +6,14 @@
 //! This library never reads the disk or the network: the data comes in as strings
 //! ([`setup_from`]). Only the `duel-simulator` binary embeds data files.
 
+pub mod batch;
 pub mod report;
 pub mod stats;
+
+pub use batch::{
+    BatchConfig, Contender, DEFAULT_MAX_ACTIONS, GameRecord, Policy, contenders_from, derive_seed,
+    game_seed, play_game, policy_rng, random_policy, run_batch, run_batch_observed,
+};
 
 pub use report::{Kind, MatchupReport, Report};
 pub use stats::{fmt_mean, fmt_share, percent, wilson_95};
@@ -119,8 +125,18 @@ mod tests {
         .expect("the fixture is valid")
     }
 
+    /// One game with the random policy and the default cap.
+    fn play_with(setup: GameSetup, seed: u64) -> GameRecord {
+        play_game(setup, seed, random_policy, DEFAULT_MAX_ACTIONS, |_, _| {})
+    }
+
+    /// How the game ended; an interrupted game (the cap) has no end.
+    fn reason_of(record: &GameRecord) -> Option<WinReason> {
+        record.winner.map(|(_, reason)| reason)
+    }
+
     /// Plays one game of the fixture decks to its end.
-    fn play(seed: u64) -> Outcome {
+    fn play(seed: u64) -> GameRecord {
         play_with(fixture_setup(), seed)
     }
 
@@ -136,10 +152,12 @@ mod tests {
     fn every_game_ends_by_a_hero_going_down_or_exhaustion_never_by_concession() {
         let mut hero_down = 0;
         for seed in 0..200 {
-            match play(seed).reason {
-                WinReason::HeroDown => hero_down += 1,
-                WinReason::Exhaustion => {}
-                WinReason::Concede => panic!("seed {seed}: the policy never concedes"),
+            match reason_of(&play(seed)) {
+                Some(WinReason::HeroDown) => hero_down += 1,
+                Some(WinReason::Exhaustion) => {}
+                Some(WinReason::Concede) | None => {
+                    panic!("seed {seed}: the policy never concedes")
+                }
             }
         }
         assert!(hero_down > 0, "the random policy attacks, so heroes fall");
@@ -175,9 +193,11 @@ mod tests {
         let mut deaths = 0;
         for seed in 0..100 {
             let outcome = play_with(riposting_setup(), seed);
-            match outcome.reason {
-                WinReason::HeroDown | WinReason::Exhaustion => {}
-                WinReason::Concede => panic!("seed {seed}: conceded or hit the step cap"),
+            match reason_of(&outcome) {
+                Some(WinReason::HeroDown | WinReason::Exhaustion) => {}
+                Some(WinReason::Concede) | None => {
+                    panic!("seed {seed}: conceded or hit the step cap")
+                }
             }
             deaths += outcome.deaths;
         }
