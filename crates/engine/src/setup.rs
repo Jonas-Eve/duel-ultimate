@@ -16,7 +16,9 @@ pub struct PlayerSetup {
 }
 
 /// Everything a game needs. The engine reads neither disk nor identifiers: callers resolve
-/// decks with `duel-cards` first. `data_versions` is recorded as is (replays, balance).
+/// decks with `duel-cards` first. `data_versions` is opaque and untrusted: recorded as is in
+/// the state and copied into `Event::GameStarted` (replays, balance), never interpreted,
+/// validated or sorted. The key is mandatory in JSON (an empty list is valid).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GameSetup {
@@ -91,8 +93,9 @@ fn deal(state: &mut GameState, player: PlayerId) {
 }
 
 /// Starts a game. Re-validates `setup` (it may come from an untrusted client) and never
-/// panics. The events hold `GameStarted` and, if the first player has nothing to do,
-/// `GameWon`.
+/// panics. The events hold `GameStarted` (with a copy of `setup.data_versions`, which
+/// influences neither the generator nor any rule) and, if the first player has nothing to
+/// do, `GameWon`.
 ///
 /// The generator is consumed in this order: One's shuffle, Two's shuffle, then
 /// `random_below(2)` only if both heroes have the same initiative (0 means One).
@@ -123,6 +126,7 @@ pub fn new_game(setup: GameSetup, seed: u64) -> Result<(GameState, Vec<Event>), 
     let mut events = vec![Event::GameStarted {
         first: state.active,
         budget: state.budget,
+        data_versions: state.data_versions().to_vec(),
     }];
     rules::check_exhaustion(&mut state, &mut events);
     Ok((state, events))

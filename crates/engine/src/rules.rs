@@ -38,9 +38,14 @@ pub enum Target {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Event {
+    /// The game began. `data_versions` is the opaque list of the setup, copied as is; it is
+    /// last, and absent from the JSON when empty, so a journal without versions keeps the
+    /// exact form it had before the field existed.
     GameStarted {
         first: PlayerId,
         budget: u32,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        data_versions: Vec<String>,
     },
     EffectActivated {
         player: PlayerId,
