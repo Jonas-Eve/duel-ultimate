@@ -28,11 +28,24 @@ fn draw_effect(cost: u32, count: u32) -> HeroEffect {
 }
 
 fn stats() -> CreatureStats {
+    stats_with(1, 1, 1, 1, false, 0)
+}
+
+fn stats_with(
+    cost: u32,
+    force: u32,
+    attack_cost: u32,
+    health: u32,
+    provocation: bool,
+    riposte: u32,
+) -> CreatureStats {
     CreatureStats {
-        cost: 1,
-        force: 1,
-        attack_cost: 1,
-        health: 1,
+        cost,
+        force,
+        attack_cost,
+        health,
+        provocation,
+        riposte,
     }
 }
 
@@ -44,6 +57,8 @@ fn card(id: &str) -> Card {
         force: 1,
         attack_cost: 1,
         health: 1,
+        provocation: false,
+        riposte: 0,
     }
 }
 
@@ -91,21 +106,15 @@ fn resolve_deck_copies_the_stats_of_each_card_in_order() {
             force: 3,
             attack_cost: 4,
             health: 5,
+            provocation: false,
+            riposte: 0,
         },
         card("b"),
     ];
     let mut ids = vec!["b"; DECK_SIZE];
     ids[0] = "a";
     let resolved = resolve_deck(&deck_of(&ids), &cards).unwrap();
-    assert_eq!(
-        resolved[0],
-        CreatureStats {
-            cost: 2,
-            force: 3,
-            attack_cost: 4,
-            health: 5
-        }
-    );
+    assert_eq!(resolved[0], stats_with(2, 3, 4, 5, false, 0));
     assert_eq!(resolved[1], stats());
 }
 
@@ -344,12 +353,7 @@ fn accepts_exact_limits() {
     h.starting_hand = DECK_SIZE as u32;
     assert_eq!(validate_hero(&h), Ok(()));
     assert_eq!(validate_deck_shape(&h, DECK_SIZE), Ok(()));
-    let at_max = CreatureStats {
-        cost: MAX_STAT,
-        force: MAX_STAT,
-        attack_cost: MAX_STAT,
-        health: MAX_STAT,
-    };
+    let at_max = stats_with(MAX_STAT, MAX_STAT, MAX_STAT, MAX_STAT, true, MAX_STAT);
     assert_eq!(validate_creature(&at_max), Ok(()));
 }
 

@@ -131,7 +131,9 @@ pub fn validate_creature(stats: &CreatureStats) -> Result<(), CardsError> {
     cost_in_range("cost", stats.cost)?;
     cost_in_range("attack_cost", stats.attack_cost)?;
     positive_in_range("force", stats.force)?;
-    positive_in_range("health", stats.health)
+    positive_in_range("health", stats.health)?;
+    // 0 is valid (the default: no riposte); only the upper bound applies.
+    below_max("riposte", stats.riposte)
 }
 
 pub fn validate_hero(hero: &Hero) -> Result<(), CardsError> {

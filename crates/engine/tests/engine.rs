@@ -30,12 +30,7 @@ fn hero(initiative: u32, start_budget: u32, max_time: u32, effects: Vec<HeroEffe
 
 fn cards() -> Vec<CreatureStats> {
     (1..=30)
-        .map(|n| CreatureStats {
-            cost: n,
-            force: 1 + n % 3,
-            attack_cost: 1 + n % 2,
-            health: 1 + n % 4,
-        })
+        .map(|n| stats(n, 1 + n % 3, 1 + n % 2, 1 + n % 4))
         .collect()
 }
 
@@ -623,14 +618,7 @@ fn actions_travel_as_snake_case_json_and_reject_unknown_fields() {
 
 /// A deck where every card costs `cost` to summon.
 fn flat_cards(cost: u32) -> Vec<CreatureStats> {
-    (0..30)
-        .map(|_| CreatureStats {
-            cost,
-            force: 2,
-            attack_cost: 1,
-            health: 3,
-        })
-        .collect()
+    (0..30).map(|_| stats(cost, 2, 1, 3)).collect()
 }
 
 /// One (budget 3, max_time 8) against a Two of `two_max`; every card costs `cost`.
@@ -848,14 +836,7 @@ fn drawing_everything_then_activating_again_is_refused_as_not_applicable() {
 
 /// A deck where every card has these stats (summoning costs 1).
 fn attackers(force: u32, attack_cost: u32) -> Vec<CreatureStats> {
-    (0..30)
-        .map(|_| CreatureStats {
-            cost: 1,
-            force,
-            attack_cost,
-            health: 3,
-        })
-        .collect()
+    (0..30).map(|_| stats(1, force, attack_cost, 3)).collect()
 }
 
 /// One is active with `budget` left (max_time 8) after summoning a creature of `force` and
@@ -1372,7 +1353,7 @@ fn play_scripted_s2a(seed: u64) -> (GameState, Vec<Event>) {
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1_442_695_040_888_963_407);
         let pick = usize::try_from((rng >> 33) % actions.len() as u64).unwrap();
-        log.extend(apply(&mut state, actions[pick].clone()).unwrap());
+        log.extend(apply(&mut state, actions[pick]).unwrap());
     }
     (state, log)
 }
@@ -1434,11 +1415,26 @@ fn s2a_scripted_games_keep_their_exact_outcome_and_journal() {
 // ---- Attacking creatures -------------------------------------------------------------------
 
 fn stats(cost: u32, force: u32, attack_cost: u32, health: u32) -> CreatureStats {
+    stats_with(cost, force, attack_cost, health, false, 0)
+}
+
+/// Stats with `provocation` and `riposte`, reusable by the S2b tests (T2, T3).
+#[allow(dead_code)] // first used by S2b-T2 / S2b-T3
+fn stats_with(
+    cost: u32,
+    force: u32,
+    attack_cost: u32,
+    health: u32,
+    provocation: bool,
+    riposte: u32,
+) -> CreatureStats {
     CreatureStats {
         cost,
         force,
         attack_cost,
         health,
+        provocation,
+        riposte,
     }
 }
 
