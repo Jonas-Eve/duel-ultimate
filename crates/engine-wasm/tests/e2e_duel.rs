@@ -230,6 +230,21 @@ fn a_valid_setup_starts_a_duel_with_legal_actions() {
 }
 
 #[test]
+fn a_four_key_setup_still_starts_and_riposte_at_the_maximum_is_accepted() {
+    // The stats of every card carry only the S1/S2a keys: `provocation` and `riposte` default.
+    let mut setup = fixture();
+    uniform_stats(&mut setup, 1, 1, 1, 1);
+    assert!(setup["one"]["cards"][0].get("riposte").is_none());
+    let game = start(&setup, 1);
+    assert!(!plays(&legal(&game)).is_empty());
+    // The bound is inclusive: `MAX_STAT` itself starts, `MAX_STAT + 1` is `invalid_setup`.
+    setup["one"]["cards"][0]["riposte"] = 10_000.into();
+    start(&setup, 1);
+    setup["one"]["cards"][0]["riposte"] = 10_001.into();
+    assert_eq!(setup_error(&setup, 1), "invalid_setup");
+}
+
+#[test]
 fn semantically_invalid_data_is_refused_with_invalid_setup() {
     let cases: Vec<Mutation> = vec![
         ("card cost 0", |v| v["one"]["cards"][0]["cost"] = 0.into()),
@@ -242,6 +257,9 @@ fn semantically_invalid_data_is_refused_with_invalid_setup() {
         }),
         ("card stat above the maximum", |v| {
             v["one"]["cards"][2]["force"] = 10_001.into()
+        }),
+        ("card riposte above the maximum", |v| {
+            v["two"]["cards"][4]["riposte"] = 10_001.into()
         }),
         ("effect cost 0", |v| {
             v["one"]["hero"]["effects"][0]["cost"] = 0.into()

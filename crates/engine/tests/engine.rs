@@ -235,6 +235,15 @@ fn invalid_data_is_rejected_at_setup_without_panicking() {
     assert_eq!(e, CardsError::CostBelowOne { field: "cost" });
     let SetupError::Invalid(e) = bad(&|s| s.two.cards[0].force = 0);
     assert_eq!(e, CardsError::NonPositiveStat { field: "force" });
+    let SetupError::Invalid(e) = bad(&|s| s.one.cards[5].riposte = MAX_STAT + 1);
+    assert_eq!(
+        e,
+        CardsError::StatTooHigh {
+            field: "riposte",
+            value: MAX_STAT + 1,
+            max: MAX_STAT
+        }
+    );
     let SetupError::Invalid(e) = bad(&|s| s.two.cards[0].health = MAX_STAT + 1);
     assert!(matches!(
         e,
