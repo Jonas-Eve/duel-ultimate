@@ -158,7 +158,8 @@ fn the_higher_initiative_starts_with_its_start_budget() {
             events.first(),
             Some(&Event::GameStarted {
                 first: PlayerId::Two,
-                budget: 6
+                budget: 6,
+                data_versions: vec!["fixture@1.0.0".into()]
             })
         );
         assert_eq!(state.winner(), None);
@@ -1344,10 +1345,6 @@ fn s1_hero_only_games_keep_their_exact_outcome_and_journal() {
 /// `legal_actions` other than `Concede` (creature targets included), from a generator owned
 /// by the test (a 64-bit LCG), so that the policy does not depend on the engine's own seed.
 /// Returns the final state and the journal.
-fn play_scripted_s2a(seed: u64) -> (GameState, Vec<Event>) {
-    play_scripted_s2a_from(s1_setup(), seed)
-}
-
 fn play_scripted_s2a_from(setup: GameSetup, seed: u64) -> (GameState, Vec<Event>) {
     let (mut state, mut log) = new_game(setup, seed).unwrap();
     let mut rng = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xdead_beef;

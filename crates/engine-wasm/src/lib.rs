@@ -2,12 +2,14 @@
 //! replays). The server stays authoritative; the client never decides an outcome.
 //!
 //! The surface is deliberately small: a constructor from a JSON setup, `legal_actions()`
-//! and `apply(action)`, all as JSON strings. There is no accessor for the full state, so
-//! nothing hidden (the opponent's hand, the piles) can leak through this binding.
+//! and `apply(action)`, all as JSON strings, plus `start_events()`: the events of the setup
+//! (`game_started` with the recorded `data_versions`, possibly `game_won`), which are public
+//! (no hand, pile or card id). There is no accessor for the full state, so nothing hidden
+//! (the opponent's hand, the piles) can leak through this binding.
 //! [`Duel`] holds the logic and is testable natively; [`Game`] only converts its errors
 //! to `JsError` (which cannot be built off the wasm target).
 
-use duel_engine::{Action, GameSetup, GameState, apply, legal_actions, new_game};
+use duel_engine::{Action, Event, GameSetup, GameState, apply, legal_actions, new_game};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -15,27 +17,40 @@ use wasm_bindgen::prelude::*;
 pub const MAX_INPUT_BYTES: usize = 1024 * 1024;
 
 /// The binding's logic, with errors as `{"code","message"}` JSON strings.
-pub struct Duel(GameState);
+pub struct Duel {
+    state: GameState,
+    /// What `new_game` emitted, kept to be read back (and only that) at any time.
+    start_events: Vec<Event>,
+}
 
 impl Duel {
     /// Starts a game from a JSON `GameSetup`.
     pub fn from_json(setup_json: &str, seed: u32) -> Result<Self, String> {
         let setup: GameSetup = parse(setup_json)?;
-        let (state, _events) =
+        let (state, start_events) =
             new_game(setup, seed.into()).map_err(|e| error_json(e.code(), &e.to_string()))?;
-        Ok(Self(state))
+        Ok(Self {
+            state,
+            start_events,
+        })
+    }
+
+    /// The events of the game's start, as a JSON array: the same at every call, whatever
+    /// was applied since.
+    pub fn start_events_json(&self) -> Result<String, String> {
+        to_json(&self.start_events)
     }
 
     /// The legal actions of the active player, as a JSON array.
     pub fn legal_actions_json(&self) -> Result<String, String> {
-        to_json(&legal_actions(&self.0))
+        to_json(&legal_actions(&self.state))
     }
 
     /// Applies a JSON action; returns the produced events as a JSON array.
     pub fn apply_json(&mut self, action_json: &str) -> Result<String, String> {
         let action: Action = parse(action_json)?;
         let events =
-            apply(&mut self.0, action).map_err(|e| error_json(e.code(), &e.to_string()))?;
+            apply(&mut self.state, action).map_err(|e| error_json(e.code(), &e.to_string()))?;
         to_json(&events)
     }
 }
@@ -70,6 +85,10 @@ impl Game {
         Duel::from_json(setup_json, seed)
             .map(Game)
             .map_err(|e| JsError::new(&e))
+    }
+
+    pub fn start_events(&self) -> Result<String, JsError> {
+        self.0.start_events_json().map_err(|e| JsError::new(&e))
     }
 
     pub fn legal_actions(&self) -> Result<String, JsError> {
