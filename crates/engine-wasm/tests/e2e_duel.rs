@@ -1,5 +1,5 @@
-//! End-to-end tests of stories S1 ("a duel playable to victory") and S2a ("targets, death and
-//! discard of creatures"), driven exclusively through the JSON boundary of `engine-wasm`
+//! End-to-end tests of stories S1 ("a duel playable to victory"), S2a ("targets, death and
+//! discard of creatures") and S2b ("provocation and riposte"), driven exclusively through the JSON boundary of `engine-wasm`
 //! (`Duel::from_json` / `legal_actions_json` / `apply_json`), the same one the future web
 //! client uses, on the `fixture` data set.
 //!
@@ -14,13 +14,20 @@
 //! a pile, but reachable through the JSON boundary by mutating the setup: a hero with no
 //! effect and no hand, at setup and as the consequence of a handover).
 //!
-//! S2a (cases 12 to 20, at the end of the file): an attack aims at the hero or at an opposing
-//! creature, a creature at 0 health dies and leaves the board (it is then neither a target nor
+//! S2a (cases 12 to 20): an attack aims at the hero or at an opposing creature, a creature at 0 health dies and leaves the board (it is then neither a target nor
 //! an attacker), excess damage is lost, hostile targets are all refused alike, the time rule
 //! applies to creature attacks, a kill can exhaust the receiver of the token, and whole duels
 //! fought creatures first end by themselves. The discard pile is not observable in JSON (its
 //! order is covered by the engine's unit tests): the order of the successive `died` events and
 //! the absence of the creature from every later action stand for it.
+//!
+//! S2b (cases 21 to 31, at the end of the file): `provocation` and `riposte` as optional data
+//! with hostile forms refused at the boundary, the targets offered and refused under provocation
+//! (the hero shielded, hidden zones indistinguishable, recomputed after every action), the
+//! simultaneous riposte and its journal, simultaneous deaths in id order, the time rule, defeat
+//! by exhaustion when a riposte kills the last creature, and whole duels with both mechanics.
+//! Creatures with chosen stats at known ids come from mutating the setup as JSON (case 21 checks
+//! that a card's id is its position in its deck); cases 1 to 20 run unchanged as the regression.
 
 use duel_cards::{CardsError, parse_cards, parse_decks, resolve_deck};
 use duel_engine::{GameSetup, PlayerSetup};
@@ -1969,5 +1976,1435 @@ fn a_hero_only_duel_never_touches_a_creature() {
             ["attacked", "damaged", "game_won"],
             "seed {seed}"
         );
+    }
+}
+
+// =======================================================================================
+// S2b: provocation and riposte (cases 21 to 31)
+// =======================================================================================
+//
+// These cases need creatures with chosen stats at known places, still without any state
+// accessor. The setup is mutated as JSON: a card's id is its position in its deck of the setup
+// (One 0..29, Two 30..59, before the shuffle), so a deck of chosen cards plus a hand as big as
+// the deck (`starting_hand` 30) puts every card in hand with a known id. Case 21 checks that
+// link before the other cases lean on it. In an `arena` every action crosses the budget of 1,
+// so the players alternate action after action; the only way to hand the token over without
+// touching the position is to summon a harmless filler (`pass`).
+
+const SIDE_KEYS: [&str; 2] = ["one", "two"];
+
+/// The complete JSON stats of a creature, `provocation` and `riposte` included.
+fn stats_json(
+    cost: u32,
+    force: u32,
+    attack_cost: u32,
+    health: u32,
+    provocation: bool,
+    riposte: u32,
+) -> Value {
+    json!({
+        "cost": cost, "force": force, "attack_cost": attack_cost, "health": health,
+        "provocation": provocation, "riposte": riposte
+    })
+}
+
+/// A whole deck of one side (`"one"` or `"two"`), card by card: ids follow the positions.
+fn set_side_cards(setup: &mut Value, side: &str, cards: Vec<Value>) {
+    assert_eq!(cards.len(), 30, "a deck holds exactly 30 cards");
+    setup[side]["cards"] = Value::Array(cards);
+}
+
+/// The card that fills a deck around the chosen ones: summoned only to give the token away.
+/// Its 77 health is unlike any chosen card's, so the two are never confused.
+fn filler() -> Value {
+    stats_json(1, 1, 1, 77, false, 0)
+}
+
+/// A creature of cost 1, force 1, attack cost 1, without provocation nor riposte.
+fn plain(health: u32) -> Value {
+    stats_json(1, 1, 1, health, false, 0)
+}
+
+/// A creature of cost 1, force 1, attack cost 1, with provocation.
+fn taunt(health: u32) -> Value {
+    stats_json(1, 1, 1, health, true, 0)
+}
+
+/// A creature of cost 1, force 1, attack cost 1, with a riposte.
+fn riposter(health: u32, riposte: u32) -> Value {
+    stats_json(1, 1, 1, health, false, riposte)
+}
+
+/// The chosen cards first (ids 0.. for One, 30.. for Two), then fillers up to 30.
+fn roster(mut chosen: Vec<Value>) -> Vec<Value> {
+    assert!(chosen.len() <= 30 && !chosen.contains(&filler()));
+    chosen.resize(30, filler());
+    chosen
+}
+
+/// Two decks of chosen cards in the fixture's setup, both heroes with the whole deck in hand,
+/// no effect, 100 health, `max_time` 10 and a budget of 1: One (initiative 9) starts, and since
+/// every card costs 1 to play and 1 to attack with, every action hands the token over.
+fn arena(one: Vec<Value>, two: Vec<Value>) -> Value {
+    let mut setup = fixture();
+    set_side_cards(&mut setup, "one", roster(one));
+    set_side_cards(&mut setup, "two", roster(two));
+    for (side, initiative) in [("one", 9), ("two", 1)] {
+        let hero = &mut setup[side]["hero"];
+        hero["effects"] = json!([]);
+        hero["initiative"] = initiative.into();
+        hero["max_time"] = 10.into();
+        hero["start_budget"] = 1.into();
+        hero["starting_hand"] = 30.into();
+        hero["health"] = 100.into();
+    }
+    setup
+}
+
+/// The stats a setup gives to the card of this id (One 0..29, Two 30..59).
+fn card_of(setup: &Value, id: u64) -> &Value {
+    &setup[SIDE_KEYS[(id / 30) as usize]]["cards"][(id % 30) as usize]
+}
+
+fn is_provocateur(setup: &Value, id: u64) -> bool {
+    card_of(setup, id)["provocation"] == true
+}
+
+/// The active player summons a filler and so hands the token over.
+fn pass(t: &mut Table) -> Vec<Value> {
+    let card = plays(&legal(&t.game))
+        .into_iter()
+        .find(|id| *card_of(&t.setup, *id) == filler())
+        .expect("a filler is still in hand");
+    t.act(&play(card))
+}
+
+/// Summons `one` and `two` in order (ids), the players taking turns, passing when one has
+/// nothing left to summon; ends with One active.
+fn deploy_ids(setup: &Value, seed: u32, one: &[u64], two: &[u64]) -> Table {
+    let mut t = Table::new(setup, seed);
+    let lists = [one, two];
+    let mut next = [0usize; 2];
+    while next[0] < one.len() || next[1] < two.len() {
+        let me = t.active;
+        if next[me] < lists[me].len() {
+            t.act(&play(lists[me][next[me]]));
+            next[me] += 1;
+        } else {
+            pass(&mut t);
+        }
+    }
+    while t.active != 0 {
+        pass(&mut t);
+    }
+    t
+}
+
+/// What provocation allows, from the boards a client rebuilt out of the events and from the
+/// setup alone: per attacker in board order, the hero then the opposing board when it holds no
+/// provocateur, else the provocateurs only, in board order.
+fn expected_attacks(setup: &Value, active: usize, boards: &[Vec<u64>; 2]) -> Vec<(u64, Value)> {
+    let foe = &boards[1 - active];
+    let taunts: Vec<u64> = foe
+        .iter()
+        .copied()
+        .filter(|id| is_provocateur(setup, *id))
+        .collect();
+    let mut targets: Vec<Value> = Vec::new();
+    if taunts.is_empty() {
+        targets.push(json!("hero"));
+        targets.extend(foe.iter().map(|id| json!({"creature": *id})));
+    } else {
+        targets.extend(taunts.iter().map(|id| json!({"creature": *id})));
+    }
+    boards[active]
+        .iter()
+        .flat_map(|a| targets.iter().map(move |target| (*a, target.clone())))
+        .collect()
+}
+
+/// The targets one attacker is offered, in order.
+fn targets_of(actions: &[Value], attacker: u64) -> Vec<Value> {
+    attacks(actions)
+        .into_iter()
+        .filter(|(a, _)| *a == attacker)
+        .map(|(_, target)| target)
+        .collect()
+}
+
+fn creature(id: u64) -> Value {
+    json!({"creature": id})
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 21: the data, and the card ids the other cases rely on
+// ---------------------------------------------------------------------------------------
+
+/// The ids of a deck are the positions of its cards in the setup, whichever side starts:
+/// a distinct cost per position, read back from the `played` event of that very id.
+#[test]
+fn a_card_id_is_its_position_in_its_deck_in_the_setup() {
+    for (starter, base) in [("one", 0u64), ("two", 30)] {
+        let mut setup = fixture();
+        for (side, initiative) in [("one", 1), ("two", 1)] {
+            setup[side]["hero"]["initiative"] = initiative.into();
+            setup[side]["hero"]["starting_hand"] = 30.into();
+            setup[side]["hero"]["effects"] = json!([]);
+            setup[side]["hero"]["max_time"] = 100.into();
+            setup[side]["hero"]["start_budget"] = 100.into();
+            let cards: Vec<Value> = (0..30)
+                .map(|i| stats_json(i + 1, 1, 1, 1, false, 0))
+                .collect();
+            set_side_cards(&mut setup, side, cards);
+        }
+        setup[starter]["hero"]["initiative"] = 9.into();
+        let mut hand = plays(&legal(&start(&setup, 4)));
+        hand.sort_unstable();
+        assert_eq!(hand, (base..base + 30).collect::<Vec<u64>>(), "{starter}");
+        for position in 0..30u64 {
+            let mut game = start(&setup, 4);
+            let events = apply(&mut game, &play(base + position));
+            assert_eq!(
+                find(&events, "played").unwrap()["cost"],
+                position + 1,
+                "{starter} card {}",
+                base + position
+            );
+        }
+    }
+}
+
+#[test]
+fn provocation_and_riposte_are_optional_data_and_the_old_shape_behaves_as_before() {
+    // Cards of the S1/S2a shape (four keys) against the same cards with the defaults spelled
+    // out: they start, and every kind of duel gives the very same journals.
+    let mut legacy = fixture();
+    for side in SIDE_KEYS {
+        let cards: Vec<Value> = (0..30u32)
+            .map(|i| {
+                json!({"cost": 1 + i % 3, "force": 1 + i % 2, "attack_cost": 1 + i % 3,
+                       "health": 1 + i % 5})
+            })
+            .collect();
+        set_side_cards(&mut legacy, side, cards);
+    }
+    let mut explicit = legacy.clone();
+    for side in SIDE_KEYS {
+        for card in explicit[side]["cards"].as_array_mut().unwrap() {
+            card["provocation"] = false.into();
+            card["riposte"] = 0.into();
+        }
+    }
+    assert!(legacy["one"]["cards"][0].get("provocation").is_none());
+    assert_eq!(explicit["two"]["cards"][7]["riposte"], 0);
+    for seed in 0..8 {
+        let old = run_policy(&legacy, seed, creature_first);
+        assert_eq!(
+            old,
+            run_policy(&explicit, seed, creature_first),
+            "seed {seed}"
+        );
+        assert_eq!(
+            run_policy(&legacy, seed, pseudo_random(seed)),
+            run_policy(&explicit, seed, pseudo_random(seed)),
+            "seed {seed}"
+        );
+        assert!(
+            old.iter()
+                .all(|(_, _, events)| count(events, "riposted") == 0),
+            "seed {seed}: no riposte without the data"
+        );
+    }
+}
+
+#[test]
+fn a_setup_with_provocation_and_riposte_starts_and_hostile_forms_are_refused() {
+    let mut base = fixture();
+    uniform_stats(&mut base, 1, 1, 1, 1);
+    let with = |field: &str, value: Value| {
+        let mut setup = base.clone();
+        setup["one"]["cards"][4][field] = value;
+        setup
+    };
+
+    // Valid values start (each hostile form below is first checked against its valid twin).
+    for (field, good) in [
+        ("provocation", json!(true)),
+        ("provocation", json!(false)),
+        ("riposte", json!(0)),
+        ("riposte", json!(3)),
+        ("riposte", json!(10_000)),
+    ] {
+        start(&with(field, good.clone()), 1);
+        assert!(
+            Duel::from_json(&with(field, good).to_string(), 1).is_ok(),
+            "{field}"
+        );
+    }
+    let setup = arena(
+        vec![taunt(2), riposter(2, 5)],
+        vec![stats_json(1, 1, 1, 1, true, 9)],
+    );
+    assert!(!plays(&legal(&start(&setup, 1))).is_empty());
+
+    // Wrong JSON types and shapes never reach the rules.
+    let hostile_riposte = [
+        ("negative", "-1"),
+        ("a float", "1.5"),
+        ("a string", r#""3""#),
+        ("null", "null"),
+        ("2^32", "4294967296"),
+        ("a boolean", "true"),
+        ("an array", "[3]"),
+    ];
+    for (what, raw) in hostile_riposte {
+        let value: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            setup_error(&with("riposte", value), 1),
+            "invalid_json",
+            "riposte {what}"
+        );
+    }
+    let hostile_provocation = [
+        ("1", "1"),
+        ("0", "0"),
+        ("the string true", r#""true""#),
+        ("null", "null"),
+        ("an array", "[]"),
+        ("an object", "{}"),
+    ];
+    for (what, raw) in hostile_provocation {
+        let value: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            setup_error(&with("provocation", value), 1),
+            "invalid_json",
+            "provocation {what}"
+        );
+    }
+    assert_eq!(
+        setup_error(&with("keyword", true.into()), 1),
+        "invalid_json",
+        "an unknown key is still refused"
+    );
+
+    // Well-formed but out of bounds: `invalid_setup`, from `MAX_STAT` + 1 up to `u32::MAX`.
+    start(&with("riposte", 10_000.into()), 1);
+    for too_big in [10_001u64, 99_999, u64::from(u32::MAX)] {
+        assert_eq!(
+            setup_error(&with("riposte", too_big.into()), 1),
+            "invalid_setup",
+            "riposte {too_big}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 22: the targets offered under provocation
+// ---------------------------------------------------------------------------------------
+
+/// Two's chosen cards: 30 is a provocateur, 31 is not, 32 and 33 are provocateurs.
+fn two_with_taunts() -> Vec<Value> {
+    vec![taunt(3), plain(3), taunt(3), taunt(3)]
+}
+
+/// The attacks of `actions` come before Concede, which is last and alone.
+fn assert_attacks_precede_concede(actions: &[Value]) {
+    assert_eq!(actions.last(), Some(&json!("concede")));
+    assert_eq!(actions.iter().filter(|a| kind(a) == "concede").count(), 1);
+    let last_attack = actions.iter().rposition(|a| kind(a) == "attack");
+    assert!(last_attack.is_none_or(|i| i < actions.len() - 1));
+    assert!(
+        actions
+            .iter()
+            .take_while(|a| kind(a) != "attack")
+            .all(|a| ["play", "activate"].contains(&kind(a).as_str())),
+        "hand and effects come before the attacks"
+    );
+}
+
+#[test]
+fn without_a_provocateur_every_attacker_is_offered_the_hero_then_each_opposing_creature() {
+    for seed in 0..5 {
+        // Two holds a ripostant: riposte alone restricts nothing.
+        let setup = arena(vec![plain(3), plain(3)], vec![plain(3), riposter(3, 2)]);
+        let t = deploy_ids(&setup, seed, &[0, 1], &[30, 31]);
+        let actions = legal(&t.game);
+        assert_eq!(
+            attacks(&actions),
+            [
+                (0, json!("hero")),
+                (0, creature(30)),
+                (0, creature(31)),
+                (1, json!("hero")),
+                (1, creature(30)),
+                (1, creature(31)),
+            ],
+            "seed {seed}"
+        );
+        assert_attacks_precede_concede(&actions);
+    }
+}
+
+#[test]
+fn with_provocateurs_only_they_are_offered_in_board_order_and_never_the_hero() {
+    for seed in 0..5 {
+        // (summoning order of Two's cards, the provocateurs among them in board order)
+        let cases: [(&[u64], &[u64]); 3] = [
+            (&[30, 31], &[30]),
+            (&[30, 31, 32], &[30, 32]),
+            (&[33, 31, 32, 30], &[33, 32, 30]), // board order, not id order
+        ];
+        for (summoned, taunts) in cases {
+            let setup = arena(vec![plain(3), plain(3)], two_with_taunts());
+            let t = deploy_ids(&setup, seed, &[0, 1], summoned);
+            let actions = legal(&t.game);
+            let wanted: Vec<Value> = taunts.iter().map(|id| creature(*id)).collect();
+            for attacker in t.boards[0].clone() {
+                assert_eq!(
+                    targets_of(&actions, attacker),
+                    wanted,
+                    "seed {seed}, board {summoned:?}, attacker {attacker}"
+                );
+            }
+            assert_eq!(
+                attacks(&actions),
+                expected_attacks(&t.setup, t.active, &t.boards),
+                "the model agrees"
+            );
+            assert!(attacks(&actions).iter().all(|(_, target)| target != "hero"));
+            assert_attacks_precede_concede(&actions);
+
+            // What is offered is accepted (offered means legal), on a twin each.
+            for (attacker, target) in attacks(&actions) {
+                let mut twin = t.fork();
+                let events = twin.act(&json!({"attack": {"attacker": attacker, "target": target}}));
+                assert_eq!(kind(&events[0]), "attacked");
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 23: refusals under provocation
+// ---------------------------------------------------------------------------------------
+
+/// The ids of `side`'s cards that sit in none of its zones a client can see: its pile.
+fn pile_of(t: &Table, side: usize) -> Vec<u64> {
+    let base = 30 * side as u64;
+    (base..base + 30)
+        .filter(|id| {
+            ![&t.hands[side], &t.boards[side], &t.discards[side]]
+                .iter()
+                .any(|zone| zone.contains(id))
+        })
+        .collect()
+}
+
+#[test]
+fn a_target_forbidden_by_provocation_is_identifiable_and_hidden_zones_stay_indistinguishable() {
+    // One: creatures 0 and 1. Two: provocateurs 30 (1 health) and 31, plain 32; one card of
+    // its deck stays in the pile. 30 dies before the position under test, so a dead
+    // provocateur and a live one are both around.
+    let mut setup = arena(vec![plain(3), plain(3)], vec![taunt(1), taunt(5), plain(5)]);
+    setup["two"]["hero"]["starting_hand"] = 29.into();
+    let mut t = Table::new(&setup, 6);
+    t.act(&play(0));
+    t.act(&play(30));
+    t.act(&play(1));
+    t.act(&play(31));
+    let events = t.act(&strike(0, 30)); // a provocateur may be attacked
+    assert_eq!(count(&events, "died"), 1);
+    t.act(&play(32));
+    assert_eq!(t.active, 0);
+    assert_eq!(t.boards, [vec![0, 1], vec![31, 32]]);
+    assert_eq!(t.discards[1], [30]);
+    let pile = pile_of(&t, 1);
+    assert_eq!(
+        pile.len(),
+        1,
+        "Two's deck holds one card in its pile: {pile:?}"
+    );
+    let two_hand = t.hands[1][0];
+    let own_hand = *plays(&legal(&t.game)).last().unwrap();
+    let before = t.game.legal_actions_json().unwrap();
+    assert_eq!(targets_of(&legal(&t.game), 0), [creature(31)]);
+    let mut twin = t.fork();
+
+    // The hero and a plain creature are forbidden: one identifiable code, whoever attacks.
+    let mut forbidden = Vec::new();
+    for attacker in [0, 1] {
+        for target in [json!("hero"), creature(32)] {
+            let action = json!({"attack": {"attacker": attacker, "target": target}});
+            let err = t.game.apply_json(&action.to_string()).unwrap_err();
+            assert_eq!(
+                error_code(&err),
+                "target_forbidden_by_provocation",
+                "{action}"
+            );
+            forbidden.push(err);
+        }
+    }
+    assert!(forbidden.windows(2).all(|w| w[0] == w[1]));
+
+    // Everything that is not a creature of the opposing board keeps `target_not_on_board`,
+    // although a provocateur is in play: a dead provocateur, a creature of its own side,
+    // cards of either hand, the pile, unknown ids.
+    let hostile = [
+        ("a dead provocateur", 30),
+        ("its own other creature", 1),
+        ("itself", 0),
+        ("a card of its own hand", own_hand),
+        ("a card of the opponent's hand", two_hand),
+        ("a card of the opponent's pile", pile[0]),
+        ("an unknown id", 9999),
+        ("u32::MAX", u64::from(u32::MAX)),
+    ];
+    let mut hidden = Vec::new();
+    for (what, id) in hostile {
+        let err = t.game.apply_json(&strike(0, id).to_string()).unwrap_err();
+        assert_eq!(error_code(&err), "target_not_on_board", "{what}");
+        hidden.push(err);
+    }
+    // Sweep of every id but the two live opposing creatures: still no oracle on any zone.
+    for id in (0..200u64).filter(|id| ![31, 32].contains(id)) {
+        let err = t.game.apply_json(&strike(1, id).to_string()).unwrap_err();
+        assert_eq!(error_code(&err), "target_not_on_board", "id {id}");
+        hidden.push(err);
+    }
+    assert!(
+        hidden.windows(2).all(|w| w[0] == w[1]),
+        "refusals differ by zone"
+    );
+    assert_ne!(hidden[0], forbidden[0], "the two refusals are told apart");
+
+    // An absent attacker comes first, even for a forbidden target, a hidden one or both.
+    // (a dead creature, the opponent's creature, a card of either hand, an unknown id)
+    for attacker in [30, 31, two_hand, own_hand, 9999] {
+        for target in [json!("hero"), creature(32), creature(9999)] {
+            let action = json!({"attack": {"attacker": attacker, "target": target}});
+            assert_eq!(
+                refusal(&mut t.game, &action),
+                "attacker_not_on_board",
+                "{action}"
+            );
+        }
+    }
+    // Nothing moved: the same actions are offered, and the twin that never saw any of this
+    // answers the next moves identically.
+    assert_eq!(t.game.legal_actions_json().unwrap(), before);
+    assert_twins_agree(&mut t.game, &mut twin.game, 8);
+
+    // The provocateur itself is a valid target.
+    let events = twin.act(&strike(0, 31));
+    assert_eq!(kind(&events[0]), "attacked");
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 24: the targets are recomputed after every action
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn killing_the_provocateur_between_two_attacks_gives_the_hero_back() {
+    for seed in 0..4 {
+        let setup = arena(vec![plain(5), plain(5)], vec![taunt(1), plain(5)]);
+        let mut t = deploy_ids(&setup, seed, &[0, 1], &[30, 31]);
+        assert_eq!(
+            attacks(&legal(&t.game)),
+            [(0, creature(30)), (1, creature(30))],
+            "seed {seed}: the provocateur shields the hero and the other creature"
+        );
+        assert_eq!(
+            refusal(&mut t.game, &strike_hero(0)),
+            "target_forbidden_by_provocation"
+        );
+
+        let events = t.act(&strike(0, 30));
+        assert_eq!(
+            find(&events, "died"),
+            Some(&json!({"player": "Two", "creature": 30}))
+        );
+        // Two's turn: One holds no provocateur, so its own attackers see the hero.
+        assert_eq!(
+            attacks(&legal(&t.game)),
+            [(31, json!("hero")), (31, creature(0)), (31, creature(1))]
+        );
+        pass(&mut t);
+        let filler_id = t.boards[1][1];
+        let offered = legal(&t.game);
+        for attacker in [0, 1] {
+            assert_eq!(
+                targets_of(&offered, attacker),
+                [json!("hero"), creature(31), creature(filler_id)],
+                "seed {seed}: the hero is offered again"
+            );
+        }
+        assert_eq!(attacks(&offered), expected_attacks(&t.setup, 0, &t.boards));
+        let events = t.act(&strike_hero(1));
+        assert_eq!(kinds(&events)[..2], ["attacked", "damaged"]);
+    }
+}
+
+#[test]
+fn summoning_a_provocateur_between_two_attacks_restricts_the_targets_at_once() {
+    for seed in 0..4 {
+        let setup = arena(vec![plain(5), plain(5)], vec![plain(5), taunt(5)]);
+        let mut t = deploy_ids(&setup, seed, &[0, 1], &[30]);
+        let filler_id = t.boards[1][1];
+        assert_eq!(
+            targets_of(&legal(&t.game), 0),
+            [json!("hero"), creature(30), creature(filler_id)]
+        );
+        let events = t.act(&strike_hero(0));
+        assert_eq!(kinds(&events)[..2], ["attacked", "damaged"]);
+
+        t.act(&play(31)); // Two summons its provocateur
+        let offered = legal(&t.game);
+        for attacker in [0, 1] {
+            assert_eq!(
+                targets_of(&offered, attacker),
+                [creature(31)],
+                "seed {seed}"
+            );
+        }
+        assert_eq!(
+            refusal(&mut t.game, &strike_hero(0)),
+            "target_forbidden_by_provocation"
+        );
+        assert_eq!(
+            refusal(&mut t.game, &strike(1, 30)),
+            "target_forbidden_by_provocation"
+        );
+        assert_eq!(
+            refusal(&mut t.game, &strike(1, filler_id)),
+            "target_forbidden_by_provocation"
+        );
+    }
+}
+
+#[test]
+fn each_side_aims_only_at_the_provocateurs_of_the_other() {
+    let setup = arena(vec![taunt(5), plain(5)], vec![taunt(5), plain(5)]);
+    let mut t = deploy_ids(&setup, 2, &[0, 1], &[30, 31]);
+    assert_eq!(
+        attacks(&legal(&t.game)),
+        [(0, creature(30)), (1, creature(30))],
+        "One's attackers, its own provocateur included, aim at Two's"
+    );
+    assert_eq!(
+        refusal(&mut t.game, &strike_hero(0)),
+        "target_forbidden_by_provocation"
+    );
+    t.act(&strike(0, 30));
+    assert_eq!(
+        attacks(&legal(&t.game)),
+        [(30, creature(0)), (31, creature(0))],
+        "Two's attackers aim at One's provocateur and neither at its other creature nor the hero"
+    );
+    assert_eq!(
+        refusal(&mut t.game, &strike(30, 1)),
+        "target_forbidden_by_provocation"
+    );
+    assert_eq!(
+        refusal(&mut t.game, &strike_hero(31)),
+        "target_forbidden_by_provocation"
+    );
+}
+
+#[test]
+fn a_provocateur_attacks_freely_when_the_opponent_has_none() {
+    let setup = arena(vec![taunt(5)], vec![plain(5)]);
+    let mut t = deploy_ids(&setup, 3, &[0], &[30]);
+    assert_eq!(
+        attacks(&legal(&t.game)),
+        [(0, json!("hero")), (0, creature(30))]
+    );
+    let events = t.act(&strike_hero(0));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "damaged",
+            "token_moved",
+            "active_player_changed"
+        ]
+    );
+    // Its own provocation shields it from Two, though: only 0 may be hit.
+    assert_eq!(attacks(&legal(&t.game)), [(30, creature(0))]);
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 25: a riposte that does not kill
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn a_ripostant_hits_back_in_the_journal_and_the_attacker_dies_of_a_later_riposte() {
+    // A (id 0): 5 health. X (id 30): 5 health, riposte 2. Z (id 31): riposte 0.
+    let setup = arena(vec![plain(5)], vec![riposter(5, 2), plain(9)]);
+    let mut t = deploy_ids(&setup, 5, &[0], &[30, 31]);
+    let zero = t.fork();
+    let mut hero = t.fork();
+
+    let events = t.act(&strike(0, 30));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "creature_damaged",
+            "riposted",
+            "token_moved",
+            "active_player_changed"
+        ]
+    );
+    assert_eq!(
+        events[0],
+        json!({"attacked": {"player": "One", "attacker": 0, "cost": 1}})
+    );
+    assert_eq!(
+        events[1],
+        json!({"creature_damaged": {"player": "Two", "creature": 30, "amount": 1}})
+    );
+    assert_eq!(
+        events[2],
+        json!({"riposted": {"player": "One", "creature": 0, "amount": 2}}),
+        "the riposte hits the attacker, its owner is named"
+    );
+    assert_eq!(
+        events[3],
+        json!({"token_moved": {"player": "Two", "budget": 1}})
+    );
+    assert_eq!(
+        events[4],
+        json!({"active_player_changed": {"player": "Two"}})
+    );
+    assert_eq!(t.boards[0][0], 0, "the attacker survived the first riposte");
+
+    // Second hit: still alive (5 - 2 - 2 = 1), the log is the same.
+    pass(&mut t);
+    let events = t.act(&strike(0, 30));
+    assert_eq!(count(&events, "riposted"), 1);
+    assert_eq!(count(&events, "died"), 0);
+    pass(&mut t);
+    assert!(attacks(&legal(&t.game)).contains(&(0, creature(30))));
+
+    // Third hit: 1 health left, the riposte (2, nominal) kills the attacker.
+    let events = t.act(&strike(0, 30));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "creature_damaged",
+            "riposted",
+            "died",
+            "token_moved",
+            "active_player_changed"
+        ]
+    );
+    assert_eq!(
+        find(&events, "riposted"),
+        Some(&json!({"player": "One", "creature": 0, "amount": 2}))
+    );
+    assert_eq!(
+        find(&events, "died"),
+        Some(&json!({"player": "One", "creature": 0}))
+    );
+    assert_eq!(t.discards[0], [0]);
+
+    // The dead attacker acts no more; the target, hit three times for 1, is alive.
+    assert_eq!(
+        refusal(&mut t.game, &strike(0, 30)),
+        "attacker_not_on_board"
+    );
+    assert_eq!(
+        refusal(&mut t.game, &strike_hero(0)),
+        "attacker_not_on_board"
+    );
+    assert!(t.boards[1].contains(&30));
+
+    // Riposte 0: no `riposted`, however often, and the attacker is left untouched.
+    let mut zero = zero;
+    for hit in 0..5 {
+        let events = zero.act(&strike(0, 31));
+        assert_eq!(
+            kinds(&events),
+            [
+                "attacked",
+                "creature_damaged",
+                "token_moved",
+                "active_player_changed"
+            ],
+            "hit {hit}"
+        );
+        pass(&mut zero);
+    }
+    assert!(attacks(&legal(&zero.game)).iter().any(|(a, _)| *a == 0));
+
+    // An attack on the hero is never riposted, though ripostants stand on the board.
+    let events = hero.act(&strike_hero(0));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "damaged",
+            "token_moved",
+            "active_player_changed"
+        ]
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 26: a target killed by the attack still ripostes
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn a_target_killed_by_the_attack_ripostes_and_the_wounds_add_up() {
+    // A (id 0): 5 health. X (30): 1 health, riposte 2. Y1 (31) and Y2 (32): 9 health, riposte 2.
+    let setup = arena(
+        vec![plain(5)],
+        vec![riposter(1, 2), riposter(9, 2), riposter(9, 2)],
+    );
+    let mut t = deploy_ids(&setup, 7, &[0], &[30, 31, 32]);
+
+    let events = t.act(&strike(0, 30));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "creature_damaged",
+            "riposted",
+            "died",
+            "token_moved",
+            "active_player_changed"
+        ],
+        "the riposte comes before the death of its author"
+    );
+    assert_eq!(
+        find(&events, "riposted"),
+        Some(&json!({"player": "One", "creature": 0, "amount": 2}))
+    );
+    assert_eq!(
+        find(&events, "died"),
+        Some(&json!({"player": "Two", "creature": 30}))
+    );
+
+    // The wound is real: A has 3 left, so the next riposte leaves 1 and the one after kills it.
+    pass(&mut t);
+    let events = t.act(&strike(0, 31));
+    assert_eq!(count(&events, "riposted"), 1);
+    assert_eq!(count(&events, "died"), 0);
+    pass(&mut t);
+    let events = t.act(&strike(0, 32));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "creature_damaged",
+            "riposted",
+            "died",
+            "token_moved",
+            "active_player_changed"
+        ]
+    );
+    assert_eq!(
+        find(&events, "died"),
+        Some(&json!({"player": "One", "creature": 0}))
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 27: simultaneous deaths
+// ---------------------------------------------------------------------------------------
+
+/// A 1-health creature of riposte 1 on each side: any attack on the other kills both.
+fn mutual_kill_setup() -> Value {
+    arena(vec![riposter(1, 1)], vec![riposter(1, 1)])
+}
+
+fn assert_neither_is_ever_offered_nor_accepted(t: &mut Table, dead: [u64; 2]) {
+    let mut checked = 0;
+    while checked < 2 {
+        // A player without a creature has no attack to examine: it summons a filler.
+        if t.boards[t.active].is_empty() {
+            pass(t);
+            continue;
+        }
+        let offered = legal(&t.game);
+        assert!(!attacks(&offered).is_empty());
+        for (attacker, target) in attacks(&offered) {
+            assert!(
+                !dead.contains(&attacker),
+                "a dead creature attacks: {attacker}"
+            );
+            assert!(target == "hero" || !dead.iter().any(|d| target == creature(*d)));
+        }
+        // The refusals go to one twin only; both then play on identically.
+        let (mut refused, mut spared) = (t.fork(), t.fork());
+        let own = t.boards[t.active][0];
+        for d in dead {
+            assert_eq!(
+                refusal(&mut refused.game, &strike(d, own)),
+                "attacker_not_on_board"
+            );
+            assert_eq!(
+                refusal(&mut refused.game, &strike_hero(d)),
+                "attacker_not_on_board"
+            );
+            assert_eq!(
+                refusal(&mut refused.game, &strike(own, d)),
+                "target_not_on_board"
+            );
+        }
+        assert_twins_agree(&mut refused.game, &mut spared.game, 6);
+        checked += 1;
+        pass(t);
+    }
+}
+
+#[test]
+fn an_attacker_and_its_target_that_die_together_are_buried_in_id_order_both_ways() {
+    // The attacker has the smaller id: One's 0 attacks Two's 30.
+    let mut t = deploy_ids(&mutual_kill_setup(), 1, &[0], &[30]);
+    let events = t.act(&strike(0, 30));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "creature_damaged",
+            "riposted",
+            "died",
+            "died",
+            "token_moved",
+            "active_player_changed"
+        ]
+    );
+    assert_eq!(events[3], json!({"died": {"player": "One", "creature": 0}}));
+    assert_eq!(
+        events[4],
+        json!({"died": {"player": "Two", "creature": 30}})
+    );
+    assert_eq!(
+        (t.discards[0].clone(), t.discards[1].clone()),
+        (vec![0], vec![30])
+    );
+    assert_neither_is_ever_offered_nor_accepted(&mut t, [0, 30]);
+
+    // The attacker has the larger id: Two's 30 attacks One's 0; the target is buried first.
+    let mut t = deploy_ids(&mutual_kill_setup(), 1, &[0], &[30]);
+    pass(&mut t); // One gives the token to Two
+    assert_eq!(t.active, 1);
+    let events = t.act(&strike(30, 0));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "creature_damaged",
+            "riposted",
+            "died",
+            "died",
+            "token_moved",
+            "active_player_changed"
+        ]
+    );
+    assert_eq!(
+        events[0],
+        json!({"attacked": {"player": "Two", "attacker": 30, "cost": 1}})
+    );
+    assert_eq!(
+        events[2],
+        json!({"riposted": {"player": "Two", "creature": 30, "amount": 1}})
+    );
+    assert_eq!(events[3], json!({"died": {"player": "One", "creature": 0}}));
+    assert_eq!(
+        events[4],
+        json!({"died": {"player": "Two", "creature": 30}})
+    );
+    assert_neither_is_ever_offered_nor_accepted(&mut t, [0, 30]);
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 28: the time rule on a ripostable attack
+// ---------------------------------------------------------------------------------------
+
+/// One (id 0: cost 3, `attack_cost`, `health`) holds 3 time units when its turn comes again,
+/// against Two's ripostant (id 30: 9 health, riposte 1; Two caps at 5).
+fn timing_arena(attack_cost: u32, health: u32) -> Table {
+    let mut setup = arena(
+        vec![stats_json(3, 1, attack_cost, health, false, 0)],
+        vec![stats_json(3, 1, 1, 9, false, 1)],
+    );
+    setup["one"]["hero"]["start_budget"] = 3.into();
+    setup["two"]["hero"]["max_time"] = 5.into();
+    let mut t = Table::new(&setup, 8);
+    t.act(&play(0)); // 3 = 3: the token crosses, Two holds 1
+    let events = t.act(&play(30)); // 3 > 1: One gets 3 - 1 + 1
+    assert_eq!(token(&events), ("One".into(), 3));
+    t
+}
+
+#[test]
+fn a_riposted_attack_pays_its_time_whether_or_not_the_attacker_dies() {
+    for health in [1u32, 9] {
+        for (attack_cost, (receiver, budget)) in [
+            (1u32, ("One", 2u64)), // c < b: One keeps the token with 3 - 1
+            (3, ("Two", 1)),       // c = b: the token crosses
+            (5, ("Two", 3)),       // c > b: 5 - 3 + 1
+            (9, ("Two", 5)),       // c > b: 9 - 3 + 1 = 7, capped by Two's max_time
+        ] {
+            let what = format!("attack cost {attack_cost}, attacker health {health}");
+            let mut t = timing_arena(attack_cost, health);
+            let events = t.act(&strike(0, 30));
+            let mut expected = vec!["attacked", "creature_damaged", "riposted"];
+            if health == 1 {
+                expected.push("died");
+            }
+            expected.push("token_moved");
+            if receiver == "Two" {
+                expected.push("active_player_changed");
+            }
+            assert_eq!(kinds(&events), expected, "{what}");
+            assert_eq!(
+                find(&events, "attacked").unwrap()["cost"],
+                attack_cost,
+                "{what}"
+            );
+            assert_eq!(token(&events), (receiver.to_owned(), budget), "{what}");
+            assert_eq!(SIDES[t.active], receiver, "{what}");
+            if health == 1 {
+                assert_eq!(
+                    find(&events, "died"),
+                    Some(&json!({"player": "One", "creature": 0})),
+                    "{what}"
+                );
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 29: exhaustion by riposte
+// ---------------------------------------------------------------------------------------
+
+/// One holds `one_hand` cards, all the same (cost 1, force 1, 1 health, `attack_cost`), and no
+/// effect; Two's chosen cards come in `two_deck`, `two_hand` of them in hand (no effect either).
+/// One summons its first card (Two holds 1 unit), Two answers with a card of cost 3 (id 30 when
+/// its whole deck is in hand, whose id is returned): One then holds 3 units and is to move.
+fn exhaustion_table(
+    one_hand: u32,
+    attack_cost: u32,
+    two_deck: Vec<Value>,
+    two_hand: u32,
+) -> (Table, u64) {
+    let mut setup = arena(vec![], vec![]);
+    set_side_cards(
+        &mut setup,
+        "one",
+        vec![stats_json(1, 1, attack_cost, 1, false, 0); 30],
+    );
+    set_side_cards(&mut setup, "two", two_deck);
+    setup["one"]["hero"]["starting_hand"] = one_hand.into();
+    setup["two"]["hero"]["starting_hand"] = two_hand.into();
+    let mut t = Table::new(&setup, 3);
+    t.summon();
+    // With the whole deck in hand the card is the one at 30; else the only one there is.
+    let x = if two_hand == 30 {
+        30
+    } else {
+        plays(&legal(&t.game))[0]
+    };
+    let events = t.act(&play(x));
+    assert_eq!(token(&events), ("One".into(), 3));
+    (t, x)
+}
+
+/// A big ripostant at 30, then fillers.
+fn big_ripostant_deck() -> Vec<Value> {
+    roster(vec![stats_json(3, 1, 1, 9, false, 1)])
+}
+
+/// Two's only card type: dies to any hit, ripostes 1.
+fn glass_deck() -> Vec<Value> {
+    vec![stats_json(3, 1, 1, 1, false, 1); 30]
+}
+
+#[test]
+fn a_riposte_that_kills_the_last_creature_of_the_player_who_stays_active_ends_the_game() {
+    // One's only card dies of the riposte; One keeps the token (1 < 3) with nothing to do.
+    let (mut t, x) = exhaustion_table(1, 1, big_ripostant_deck(), 30);
+    let a = t.boards[0][0];
+    let events = t.act(&strike(a, x));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "creature_damaged",
+            "riposted",
+            "died",
+            "token_moved",
+            "game_won"
+        ]
+    );
+    assert_eq!(
+        events[4],
+        json!({"token_moved": {"player": "One", "budget": 2}})
+    );
+    assert_eq!(
+        events.last(),
+        Some(&json!({"game_won": {"winner": "Two", "reason": "exhaustion"}}))
+    );
+    every_action_is_refused_as_game_over(&mut t.game);
+
+    // Mutual death, the attacker stays active: it is its own exhaustion that counts.
+    let (mut t, x) = exhaustion_table(1, 1, glass_deck(), 1);
+    let a = t.boards[0][0];
+    let events = t.act(&strike(a, x));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "creature_damaged",
+            "riposted",
+            "died",
+            "died",
+            "token_moved",
+            "game_won"
+        ]
+    );
+    assert_eq!(
+        events.last(),
+        Some(&json!({"game_won": {"winner": "Two", "reason": "exhaustion"}}))
+    );
+    every_action_is_refused_as_game_over(&mut t.game);
+}
+
+#[test]
+fn with_a_handover_the_exhaustion_is_the_receivers() {
+    // The attacker dies of the riposte but the token crosses (3 = 3) to Two, which has its
+    // ripostant and its hand: nobody is exhausted, the game goes on.
+    let (mut t, x) = exhaustion_table(1, 3, big_ripostant_deck(), 30);
+    let a = t.boards[0][0];
+    let events = t.act(&strike(a, x));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "creature_damaged",
+            "riposted",
+            "died",
+            "token_moved",
+            "active_player_changed"
+        ]
+    );
+    assert_eq!(t.active, 1);
+    assert!(!legal(&t.game).is_empty());
+    assert!(attacks(&legal(&t.game)).iter().any(|(att, _)| *att == 30));
+
+    // Both die and the token crosses to Two, now with no card and no creature: its defeat.
+    let (mut t, x) = exhaustion_table(1, 3, glass_deck(), 1);
+    let a = t.boards[0][0];
+    let events = t.act(&strike(a, x));
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "creature_damaged",
+            "riposted",
+            "died",
+            "died",
+            "token_moved",
+            "active_player_changed",
+            "game_won"
+        ]
+    );
+    assert_eq!(
+        events[5],
+        json!({"token_moved": {"player": "Two", "budget": 1}})
+    );
+    assert_eq!(
+        events.last(),
+        Some(&json!({"game_won": {"winner": "One", "reason": "exhaustion"}}))
+    );
+    every_action_is_refused_as_game_over(&mut t.game);
+}
+
+#[test]
+fn a_card_in_hand_or_another_creature_keeps_the_player_in_the_game() {
+    // A card left in hand: One can still summon.
+    let (mut t, x) = exhaustion_table(2, 1, big_ripostant_deck(), 30);
+    let a = t.boards[0][0];
+    let events = t.act(&strike(a, x));
+    assert_eq!(count(&events, "died"), 1);
+    assert_eq!(count(&events, "game_won"), 0);
+    assert_eq!(t.active, 0);
+    assert_eq!(plays(&legal(&t.game)).len(), 1);
+
+    // Another creature on the board: One can still attack with it.
+    let (mut t, x) = exhaustion_table(2, 1, big_ripostant_deck(), 30);
+    let (a, b) = (t.boards[0][0], t.summon()); // the second summoning costs 1 of the 3 units
+    assert_eq!(t.active, 0);
+    let events = t.act(&strike(a, x));
+    assert_eq!(count(&events, "died"), 1, "a dies of the riposte");
+    assert_eq!(count(&events, "game_won"), 0);
+    assert_eq!(t.active, 0);
+    assert!(attacks(&legal(&t.game)).iter().any(|(att, _)| *att == b));
+    assert!(
+        plays(&legal(&t.game)).is_empty(),
+        "the hand is empty: only the board keeps it alive"
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 30: whole duels with provocation and riposte
+// ---------------------------------------------------------------------------------------
+
+/// 30 different creatures: costs, forces and attack costs from 1 to 3, health from 1 to 6, a
+/// provocateur every fourth card, riposte from 0 to 3. `salt` shifts the pattern.
+fn mixed_deck(salt: u32) -> Vec<Value> {
+    (0..30u32)
+        .map(|i| {
+            let n = i + salt;
+            stats_json(
+                1 + n % 3,
+                1 + (n / 2) % 3,
+                1 + (n / 3) % 3,
+                1 + (n * 7) % 6,
+                n % 4 == 1,
+                (n / 5 + n) % 4,
+            )
+        })
+        .collect()
+}
+
+/// The fixture's heroes (their draw effects, their health) around two mixed decks.
+fn mixed_setup(one_starts: bool) -> Value {
+    let mut setup = fixture();
+    set_side_cards(&mut setup, "one", mixed_deck(0));
+    set_side_cards(&mut setup, "two", mixed_deck(11));
+    if !one_starts {
+        setup["one"]["hero"]["initiative"] = 1.into();
+        setup["two"]["hero"]["initiative"] = 2.into();
+    }
+    setup
+}
+
+/// What a finished duel taught about provocation and riposte.
+#[derive(Default)]
+struct Observed {
+    ripostes: usize,
+    deaths: usize,
+    /// Steps where a provocateur hid the hero from an attacker.
+    shielded: usize,
+    hero_down: usize,
+    exhaustion: usize,
+}
+
+/// Replays a journal from the events alone (boards rebuilt from `played` and `died`) and checks
+/// every step against the rules of provocation and riposte.
+fn assert_a_provocation_duel_is_sound(what: &str, setup: &Value, journal: &[Step]) -> Observed {
+    let initiative = |side: &str| setup[side]["hero"]["initiative"].as_u64().unwrap();
+    let mut active = usize::from(initiative("one") < initiative("two"));
+    let mut boards: [Vec<u64>; 2] = Default::default();
+    let mut dead: Vec<u64> = Vec::new();
+    let mut seen = Observed::default();
+    for (i, (offered, action, events)) in journal.iter().enumerate() {
+        let actions: Vec<Value> = serde_json::from_str(offered).unwrap();
+        assert!(actions.contains(action), "{what} step {i}: not offered");
+        assert_ne!(action, &json!("concede"), "{what} step {i}: no concession");
+
+        // An offered attack never contravenes provocation: the offer is exactly the model's.
+        let wanted = expected_attacks(setup, active, &boards);
+        assert_eq!(
+            attacks(&actions),
+            wanted,
+            "{what} step {i}: offered attacks"
+        );
+        let foe_taunts = boards[1 - active]
+            .iter()
+            .any(|id| is_provocateur(setup, *id));
+        if foe_taunts && !boards[active].is_empty() {
+            seen.shielded += 1;
+        }
+        // No dead creature is offered again, to attack, to be attacked or to be played.
+        for offered_action in &actions {
+            let ids: Vec<u64> = match kind(offered_action).as_str() {
+                "play" => vec![offered_action["play"]["card"].as_u64().unwrap()],
+                "attack" => {
+                    let attack = &offered_action["attack"];
+                    let mut ids = vec![attack["attacker"].as_u64().unwrap()];
+                    ids.extend(attack["target"].get("creature").and_then(Value::as_u64));
+                    ids
+                }
+                _ => vec![],
+            };
+            assert!(
+                ids.iter().all(|id| !dead.contains(id)),
+                "{what} step {i}: a dead creature is offered in {offered_action}"
+            );
+        }
+
+        // The attack taken: a riposte exactly when it aims at a creature with riposte >= 1,
+        // damage and cost read straight from the data.
+        if kind(action) == "attack" {
+            let attacker = action["attack"]["attacker"].as_u64().unwrap();
+            let target = action["attack"]["target"]
+                .get("creature")
+                .and_then(Value::as_u64);
+            let riposte = target.map_or(0, |t| card_of(setup, t)["riposte"].as_u64().unwrap());
+            assert_eq!(
+                count(events, "riposted"),
+                usize::from(riposte >= 1),
+                "{what} step {i}"
+            );
+            assert_eq!(
+                events[0]["attacked"]["cost"],
+                card_of(setup, attacker)["attack_cost"],
+                "{what} step {i}"
+            );
+            if let Some(riposted) = find(events, "riposted") {
+                assert_eq!(riposted["creature"], attacker, "{what} step {i}");
+                assert_eq!(riposted["amount"], riposte, "{what} step {i}");
+                assert_eq!(side_of(&riposted["player"]), active, "{what} step {i}");
+                seen.ripostes += 1;
+            }
+        }
+
+        // The journal: deaths in id order, each preceded by the damage that caused it, time last.
+        let mut last_death: Option<u64> = None;
+        for (at, event) in events.iter().enumerate() {
+            match kind(event).as_str() {
+                "played" => {
+                    assert_eq!(side_of(&event["played"]["player"]), active);
+                    boards[active].push(event["played"]["card"].as_u64().unwrap());
+                }
+                "died" => {
+                    let id = event["died"]["creature"].as_u64().unwrap();
+                    let side = side_of(&event["died"]["player"]);
+                    assert!(
+                        boards[side].contains(&id),
+                        "{what} step {i}: died off the board"
+                    );
+                    assert!(
+                        last_death.is_none_or(|d| d < id),
+                        "{what} step {i}: death order"
+                    );
+                    last_death = Some(id);
+                    boards[side].retain(|c| *c != id);
+                    dead.push(id);
+                    seen.deaths += 1;
+                    let wounded = events[..at].iter().any(|e| {
+                        ["creature_damaged", "riposted"].iter().any(|k| {
+                            kind(e) == *k && e[*k]["creature"] == event["died"]["creature"]
+                        })
+                    });
+                    assert!(wounded, "{what} step {i}: died without a wound");
+                    assert!(!kinds(&events[..at]).contains(&"token_moved".to_owned()));
+                }
+                "token_moved" => active = side_of(&event["token_moved"]["player"]),
+                _ => {}
+            }
+        }
+        if i + 1 < journal.len() {
+            assert_eq!(count(events, "game_won"), 0, "{what} step {i}: ended early");
+        }
+    }
+    let (_, _, last) = journal.last().expect("a duel has moves");
+    let won = last.last().unwrap();
+    assert_eq!(kind(won), "game_won", "{what}");
+    match won["game_won"]["reason"].as_str().unwrap() {
+        "hero_down" => seen.hero_down += 1,
+        "exhaustion" => seen.exhaustion += 1,
+        other => panic!("{what}: ended by {other}"),
+    }
+    seen
+}
+
+#[test]
+fn provocation_and_riposte_duels_are_deterministic_end_by_themselves_and_respect_the_rules() {
+    type Policy = (&'static str, fn(u32) -> Box<dyn FnMut(&[Value]) -> Value>);
+    let policies: [Policy; 3] = [
+        ("creatures first", |_| Box::new(creature_first)),
+        ("hero first", |_| Box::new(pick)),
+        ("pseudo-random", |seed| Box::new(pseudo_random(seed))),
+    ];
+    let mut total = Observed::default();
+    let mut duels = 0;
+    for (starter, one_starts) in [("One", true), ("Two", false)] {
+        let setup = mixed_setup(one_starts);
+        for (policy, make) in &policies {
+            for seed in 0..25 {
+                let what = format!("{starter} starts, {policy}, seed {seed}");
+                let journal = run_policy(&setup, seed, make(seed));
+                assert_eq!(
+                    journal,
+                    run_policy(&setup, seed, make(seed)),
+                    "{what}: not deterministic"
+                );
+                let seen = assert_a_provocation_duel_is_sound(&what, &setup, &journal);
+                total.ripostes += seen.ripostes;
+                total.deaths += seen.deaths;
+                total.shielded += seen.shielded;
+                total.hero_down += seen.hero_down;
+                total.exhaustion += seen.exhaustion;
+                duels += 1;
+            }
+        }
+    }
+    assert_eq!(duels, 150);
+    assert!(total.ripostes > 0, "no riposte ever happened");
+    assert!(total.deaths > 0);
+    assert!(total.shielded > 0, "no provocateur ever shielded a hero");
+    assert_eq!(total.hero_down + total.exhaustion, duels);
+}
+
+#[test]
+fn creature_first_duels_with_ripostants_always_see_a_riposte() {
+    let setup = mixed_setup(true);
+    for seed in 0..25 {
+        let journal = run_policy(&setup, seed, creature_first);
+        let ripostes: usize = journal.iter().map(|(_, _, e)| count(e, "riposted")).sum();
+        assert!(ripostes > 0, "seed {seed}: no riposte");
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Case 31: S1 and S2a are unchanged
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn the_fixture_decks_never_riposte_nor_meet_provocation() {
+    // The fixture has neither: no `riposted`, and every attack offered is the S2a one (the hero,
+    // then the whole opposing board). Cases 1 to 20 above run untouched, as the regression.
+    for (name, setup) in [("fixture", fixture()), ("swapped", swapped_fixture())] {
+        for seed in 0..10 {
+            for journal in [
+                run_policy(&setup, seed, creature_first),
+                run_policy(&setup, seed, pseudo_random(seed)),
+            ] {
+                let initiative = |side: &str| setup[side]["hero"]["initiative"].as_u64().unwrap();
+                let mut active = usize::from(initiative("one") < initiative("two"));
+                let mut boards: [Vec<u64>; 2] = Default::default();
+                for (offered, _, events) in &journal {
+                    let actions: Vec<Value> = serde_json::from_str(offered).unwrap();
+                    assert_eq!(
+                        attacks(&actions),
+                        expected_attacks(&setup, active, &boards),
+                        "{name} seed {seed}"
+                    );
+                    assert_eq!(count(events, "riposted"), 0, "{name} seed {seed}");
+                    for event in events {
+                        match kind(event).as_str() {
+                            "played" => {
+                                boards[active].push(event["played"]["card"].as_u64().unwrap())
+                            }
+                            "died" => {
+                                let side = side_of(&event["died"]["player"]);
+                                let id = event["died"]["creature"].as_u64().unwrap();
+                                boards[side].retain(|c| *c != id);
+                            }
+                            "token_moved" => active = side_of(&event["token_moved"]["player"]),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
     }
 }
