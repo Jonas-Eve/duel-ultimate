@@ -131,3 +131,91 @@ pub(crate) fn bury_dead(state: &mut GameState, events: &mut Vec<Event>) {
         state.player_mut(player).discard.push(card);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::new_game;
+    use crate::state::CardInstance;
+    use crate::testing::{draw, hero, setup, stats_with};
+
+    /// A running game with `attacker` (id 100, on One's board) and `target` (id 101, on Two's).
+    fn facing(attacker: (u32, u32, u32), target: (u32, u32, u32)) -> GameState {
+        let (mut state, _) = new_game(
+            setup(
+                hero(2, 8, 8, vec![draw(1, 1)]),
+                hero(1, 2, 5, vec![draw(1, 1)]),
+            ),
+            3,
+        )
+        .unwrap();
+        let card = |id, (force, health, riposte)| CardInstance {
+            id: CardInstanceId(id),
+            stats: stats_with(1, force, 1, health, false, riposte),
+        };
+        state.one.board = vec![card(100, attacker)];
+        state.two.board = vec![card(101, target)];
+        state
+    }
+
+    #[test]
+    fn plan_damage_reads_force_and_riposte_nominally_and_never_touches_the_state() {
+        // (attacker force, attacker health, target health, target riposte) -> (on_target, on_attacker)
+        let table = [
+            (1, 1, 1, 0, 1, 0),
+            (2, 5, 5, 3, 2, 3),
+            (3, 2, 1, 4, 3, 4), // excess on both sides stays nominal
+            (4, 1, 9, 0, 4, 0),
+            (1, 3, 3, 9, 1, 9),
+        ];
+        for (force, own, theirs, riposte, on_target, on_attacker) in table {
+            let state = facing((force, own, 0), (1, theirs, riposte));
+            let before = state.clone();
+            let plan = plan_damage(
+                &state,
+                PlayerId::One,
+                CardInstanceId(100),
+                Target::Creature(CardInstanceId(101)),
+            );
+            assert_eq!(state, before, "planning must not mutate the state");
+            assert_eq!(
+                plan,
+                AttackDamage {
+                    player: PlayerId::One,
+                    attacker: CardInstanceId(100),
+                    target: Target::Creature(CardInstanceId(101)),
+                    on_target,
+                    on_attacker,
+                },
+                "force {force}, riposte {riposte}"
+            );
+        }
+    }
+
+    #[test]
+    fn plan_damage_against_a_hero_has_no_riposte_even_with_ripostants_on_the_board() {
+        let state = facing((2, 5, 0), (1, 5, 7));
+        let before = state.clone();
+        let plan = plan_damage(&state, PlayerId::One, CardInstanceId(100), Target::Hero);
+        assert_eq!(state, before);
+        assert_eq!((plan.on_target, plan.on_attacker), (2, 0));
+    }
+
+    #[test]
+    fn apply_damage_applies_the_plan_it_is_given_not_a_recomputed_one() {
+        // A hand-made plan: the damage comes from the plan alone.
+        let mut state = facing((2, 5, 0), (1, 5, 7));
+        let plan = AttackDamage {
+            player: PlayerId::One,
+            attacker: CardInstanceId(100),
+            target: Target::Creature(CardInstanceId(101)),
+            on_target: 1,
+            on_attacker: 2,
+        };
+        let mut events = Vec::new();
+        apply_damage(&mut state, plan, &mut events);
+        assert_eq!(state.creature_health(CardInstanceId(101)), Some(4));
+        assert_eq!(state.creature_health(CardInstanceId(100)), Some(3));
+        assert_eq!(events.len(), 2);
+    }
+}

@@ -169,7 +169,7 @@ impl GameState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{draw, hero, potential, setup, stats};
+    use crate::testing::{draw, hero, potential, setup, stats, stats_with};
     use crate::{Action, Event, RuleError, apply, legal_actions, new_game};
     use rand::{Rng, SeedableRng};
     use rand_chacha::ChaCha8Rng;
@@ -651,5 +651,289 @@ mod tests {
                 },
             ]
         );
+    }
+
+    // ---- riposte (S2b-T3) ---------------------------------------------------------------
+
+    /// A creature of id `id` with `force`, `health`, `riposte` and `attack_cost`.
+    fn riposter(id: u32, force: u32, health: u32, riposte: u32, attack_cost: u32) -> CardInstance {
+        CardInstance {
+            id: CardInstanceId(id),
+            stats: stats_with(1, force, attack_cost, health, false, riposte),
+        }
+    }
+
+    fn died(player: PlayerId, id: u32) -> Event {
+        Event::Died {
+            player,
+            creature: CardInstanceId(id),
+        }
+    }
+
+    /// `running` (One active with 8 time units, a draw effect) with One's hand and pile
+    /// emptied, `attacker` on One's board and `target` on Two's, Two's hand and pile emptied.
+    fn riposte_scene(attacker: CardInstance, target: CardInstance) -> GameState {
+        let mut state = running(vec![draw(1, 1)]);
+        state.one.hand.clear();
+        state.one.deck.clear();
+        state.one.board = vec![attacker];
+        state.two.hand.clear();
+        state.two.deck.clear();
+        state.two.board = vec![target];
+        state
+    }
+
+    /// The attacker (id 100, 1 health, attack cost `attack_cost`) dies of the riposte of the
+    /// target (id 101, 5 health).
+    fn doomed_attacker(attack_cost: u32) -> GameState {
+        riposte_scene(
+            riposter(100, 1, 1, 0, attack_cost),
+            riposter(101, 1, 5, 1, 1),
+        )
+    }
+
+    fn doomed_strike() -> Action {
+        strike(CardInstanceId(100), CardInstanceId(101))
+    }
+
+    #[test]
+    fn a_riposte_killing_the_last_creature_of_a_player_who_stays_active_exhausts_them() {
+        // c < b (1 < 8): One stays active with no card, no creature and an effect that
+        // cannot be activated (empty pile).
+        let mut state = doomed_attacker(1);
+        let events = apply(&mut state, doomed_strike()).unwrap();
+        assert_eq!(state.winner(), Some((PlayerId::Two, WinReason::Exhaustion)));
+        assert_eq!((state.active(), state.budget()), (PlayerId::One, 7));
+        let tail: Vec<_> = events.iter().rev().take(3).rev().cloned().collect();
+        assert_eq!(
+            tail,
+            vec![
+                died(PlayerId::One, 100),
+                Event::TokenMoved {
+                    player: PlayerId::One,
+                    budget: 7
+                },
+                Event::GameWon {
+                    winner: PlayerId::Two,
+                    reason: WinReason::Exhaustion
+                },
+            ]
+        );
+        assert!(legal_actions(&state).is_empty());
+    }
+
+    #[test]
+    fn a_riposte_killing_the_last_creature_does_not_exhaust_a_player_with_a_card_in_hand() {
+        let mut state = doomed_attacker(1);
+        let extra = running(vec![draw(1, 1)]).one.hand.remove(0);
+        state.one.hand.push(extra);
+        apply(&mut state, doomed_strike()).unwrap();
+        assert_eq!(state.winner(), None);
+        assert_eq!(state.active(), PlayerId::One);
+    }
+
+    #[test]
+    fn a_riposte_killing_the_last_creature_does_not_exhaust_a_player_with_another_creature() {
+        let mut state = doomed_attacker(1);
+        state.one.board.push(riposter(102, 1, 4, 0, 1));
+        apply(&mut state, doomed_strike()).unwrap();
+        assert_eq!(state.winner(), None);
+        assert_eq!(state.active(), PlayerId::One);
+    }
+
+    #[test]
+    fn a_riposte_killing_the_last_creature_does_not_exhaust_a_player_whose_effect_applies() {
+        // The hero can still draw: the pile is not empty.
+        let mut state = doomed_attacker(1);
+        let extra = running(vec![draw(1, 1)]).one.hand.remove(0);
+        state.one.deck.push(extra);
+        apply(&mut state, doomed_strike()).unwrap();
+        assert_eq!(state.winner(), None);
+        assert_eq!(state.active(), PlayerId::One);
+        assert!(legal_actions(&state).contains(&Action::Activate { effect: 0 }));
+    }
+
+    /// Both creatures die (force 1 against 1 health, riposte 1 against 1 health), the attack
+    /// costing the whole budget: the token crosses to Two, whose board is now empty.
+    fn mutual_kill_handing_over() -> GameState {
+        riposte_scene(riposter(100, 1, 1, 0, 8), riposter(101, 1, 1, 1, 1))
+    }
+
+    #[test]
+    fn a_handover_after_a_mutual_kill_to_a_receiver_left_with_nothing_ends_the_game() {
+        let mut state = mutual_kill_handing_over();
+        let events = apply(&mut state, doomed_strike()).unwrap();
+        assert_eq!(state.winner(), Some((PlayerId::One, WinReason::Exhaustion)));
+        assert_eq!(state.active(), PlayerId::Two);
+        let tail: Vec<_> = events.iter().rev().take(5).rev().cloned().collect();
+        assert_eq!(
+            tail,
+            vec![
+                died(PlayerId::One, 100),
+                died(PlayerId::Two, 101),
+                Event::TokenMoved {
+                    player: PlayerId::Two,
+                    budget: 1
+                },
+                Event::ActivePlayerChanged {
+                    player: PlayerId::Two
+                },
+                Event::GameWon {
+                    winner: PlayerId::One,
+                    reason: WinReason::Exhaustion
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_handover_after_a_mutual_kill_to_a_receiver_with_a_card_does_not_end_the_game() {
+        let mut state = mutual_kill_handing_over();
+        let extra = running(vec![draw(1, 1)]).one.hand.remove(0);
+        state.two.hand.push(extra);
+        apply(&mut state, doomed_strike()).unwrap();
+        assert_eq!(state.winner(), None);
+        assert_eq!(state.active(), PlayerId::Two);
+    }
+
+    /// One and Two each have one creature that kills the other, ids as given; `attacker_side`
+    /// is the side that attacks. Returns the log of the attack and the final state.
+    fn mutual_kill(attacker_side: PlayerId, attacker: u32, target: u32) -> (Vec<Event>, GameState) {
+        let mut state = running(vec![draw(1, 1)]);
+        let (a, t) = (riposter(attacker, 2, 2, 2, 1), riposter(target, 2, 2, 2, 1));
+        let (mine, theirs) = match attacker_side {
+            PlayerId::One => (&mut state.one, &mut state.two),
+            PlayerId::Two => (&mut state.two, &mut state.one),
+        };
+        mine.board = vec![a];
+        theirs.board = vec![t];
+        state.active = attacker_side;
+        state.budget = 3; // within both heroes' max_time; an attack costs 1
+        let events = apply(
+            &mut state,
+            strike(CardInstanceId(attacker), CardInstanceId(target)),
+        )
+        .unwrap();
+        (events, state)
+    }
+
+    fn assert_deaths_in_id_order(attacker_side: PlayerId, attacker: u32, target: u32) {
+        let (events, state) = mutual_kill(attacker_side, attacker, target);
+        let deaths: Vec<Event> = events
+            .into_iter()
+            .filter(|e| matches!(e, Event::Died { .. }))
+            .collect();
+        let (low, high) = (attacker.min(target), attacker.max(target));
+        let owner = |id| {
+            if id == attacker {
+                attacker_side
+            } else {
+                attacker_side.opponent()
+            }
+        };
+        assert_eq!(deaths, vec![died(owner(low), low), died(owner(high), high)]);
+        for side in [PlayerId::One, PlayerId::Two] {
+            assert!(state.board(side).is_empty());
+        }
+        assert_eq!(state.discard(attacker_side), vec![CardInstanceId(attacker)]);
+        assert_eq!(
+            state.discard(attacker_side.opponent()),
+            vec![CardInstanceId(target)]
+        );
+    }
+
+    #[test]
+    fn simultaneous_deaths_follow_the_id_order_when_the_attacker_has_the_lower_id() {
+        // Side order (One, Two) and id order disagree for the second case.
+        assert_deaths_in_id_order(PlayerId::One, 5, 40);
+        assert_deaths_in_id_order(PlayerId::Two, 5, 40);
+    }
+
+    #[test]
+    fn simultaneous_deaths_follow_the_id_order_when_the_attacker_has_the_higher_id() {
+        assert_deaths_in_id_order(PlayerId::One, 40, 5);
+        assert_deaths_in_id_order(PlayerId::Two, 40, 5);
+    }
+
+    /// Random games with ripostes of 0..=4 and about a third of provocateurs, on both sides.
+    fn riposting_game(seed: u64) -> GameState {
+        let mut s = setup(
+            hero(1 + (seed % 2) as u32, 3, 8, vec![draw(1, 1), draw(4, 3)]),
+            hero(1, 2, 6, vec![draw(2, 2)]),
+        );
+        let cards = |offset: u32| {
+            (0..30u32)
+                .map(|n| {
+                    let n = n + offset;
+                    stats_with(
+                        1 + n % 3,
+                        1 + n % 3,
+                        1 + n % 2,
+                        1 + n % 4,
+                        n.is_multiple_of(3),
+                        n % 5,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        s.one.cards = cards(0);
+        s.two.cards = cards(2);
+        new_game(s, seed).unwrap().0
+    }
+
+    #[test]
+    fn the_potential_strictly_decreases_at_every_action_with_ripostes_and_provocation() {
+        let (mut ripostes, mut riposte_deaths, mut mutual_deaths) = (0, 0, 0);
+        for seed in 0..250u64 {
+            let mut state = riposting_game(seed);
+            let mut policy = ChaCha8Rng::seed_from_u64(seed ^ 0xB10C);
+            let mut steps = 0;
+            while state.winner.is_none() {
+                let playable: Vec<Action> = legal_actions(&state)
+                    .into_iter()
+                    .filter(|a| *a != Action::Concede)
+                    .collect();
+                assert!(!playable.is_empty(), "seed {seed}: exhausted yet not over");
+                let pick = playable[policy.next_u32() as usize % playable.len()];
+                let before = potential(&state);
+                let events = apply(&mut state, pick).unwrap();
+                assert!(
+                    potential(&state) < before,
+                    "seed {seed}: {pick:?} did not decrease the potential"
+                );
+                ripostes += events
+                    .iter()
+                    .filter(|e| matches!(e, Event::Riposted { .. }))
+                    .count();
+                let deaths: Vec<&Event> = events
+                    .iter()
+                    .filter(|e| matches!(e, Event::Died { .. }))
+                    .collect();
+                for e in &events {
+                    if let Event::Riposted {
+                        player, creature, ..
+                    } = e
+                        && deaths.contains(&&Event::Died {
+                            player: *player,
+                            creature: *creature,
+                        })
+                    {
+                        riposte_deaths += 1;
+                    }
+                }
+                if deaths.len() >= 2 && events.iter().any(|e| matches!(e, Event::Riposted { .. })) {
+                    mutual_deaths += 1;
+                }
+                steps += 1;
+                assert!(steps < 2000, "seed {seed}: the game does not end");
+            }
+        }
+        // Not vacuous.
+        assert!(ripostes > 0, "ripostes: {ripostes}");
+        assert!(
+            riposte_deaths > 0,
+            "attackers killed by a riposte: {riposte_deaths}"
+        );
+        assert!(mutual_deaths > 0, "simultaneous deaths: {mutual_deaths}");
     }
 }
