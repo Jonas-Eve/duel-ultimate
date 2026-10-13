@@ -8,6 +8,8 @@ fn creature_stats_round_trip_through_json() {
         force: 3,
         attack_cost: 4,
         health: 5,
+        provocation: false,
+        riposte: 0,
     };
     let json = serde_json::to_string(&stats).unwrap();
     assert_eq!(serde_json::from_str::<CreatureStats>(&json).unwrap(), stats);

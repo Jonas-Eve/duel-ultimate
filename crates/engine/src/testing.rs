@@ -29,15 +29,35 @@ pub(crate) fn hero(
     }
 }
 
+/// Stats of a creature without `provocation` or `riposte` (what every S1/S2a card is).
+pub(crate) fn stats(cost: u32, force: u32, attack_cost: u32, health: u32) -> CreatureStats {
+    stats_with(cost, force, attack_cost, health, false, 0)
+}
+
+/// Stats of a creature, `provocation` and `riposte` included (read by the engine from S2b-T2/T3).
+#[allow(dead_code)] // reused by S2b-T2 and S2b-T3
+pub(crate) fn stats_with(
+    cost: u32,
+    force: u32,
+    attack_cost: u32,
+    health: u32,
+    provocation: bool,
+    riposte: u32,
+) -> CreatureStats {
+    CreatureStats {
+        cost,
+        force,
+        attack_cost,
+        health,
+        provocation,
+        riposte,
+    }
+}
+
 /// 30 distinguishable cards.
 pub(crate) fn deck() -> Vec<CreatureStats> {
     (1..=30)
-        .map(|n| CreatureStats {
-            cost: n,
-            force: 1 + n % 3,
-            attack_cost: 1 + n % 2,
-            health: 1 + n % 4,
-        })
+        .map(|n| stats(n, 1 + n % 3, 1 + n % 2, 1 + n % 4))
         .collect()
 }
 

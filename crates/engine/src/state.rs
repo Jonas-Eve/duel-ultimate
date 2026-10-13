@@ -169,9 +169,8 @@ impl GameState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{draw, hero, potential, setup};
+    use crate::testing::{draw, hero, potential, setup, stats};
     use crate::{Action, Event, RuleError, apply, legal_actions, new_game};
-    use duel_cards::CreatureStats;
     use rand::{Rng, SeedableRng};
     use rand_chacha::ChaCha8Rng;
 
@@ -410,12 +409,7 @@ mod tests {
     fn creature(id: u32, health: u32) -> CardInstance {
         CardInstance {
             id: CardInstanceId(id),
-            stats: CreatureStats {
-                cost: 1,
-                force: 1,
-                attack_cost: 1,
-                health,
-            },
+            stats: stats(1, 1, 1, health),
         }
     }
 

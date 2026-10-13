@@ -11,6 +11,10 @@ pub enum Card {
         force: u32,
         attack_cost: u32,
         health: u32,
+        #[serde(default)]
+        provocation: bool,
+        #[serde(default)]
+        riposte: u32,
     },
 }
 
@@ -29,12 +33,16 @@ impl Card {
                 force,
                 attack_cost,
                 health,
+                provocation,
+                riposte,
                 ..
             } => CreatureStats {
                 cost: *cost,
                 force: *force,
                 attack_cost: *attack_cost,
                 health: *health,
+                provocation: *provocation,
+                riposte: *riposte,
             },
         }
     }
@@ -48,4 +56,8 @@ pub struct CreatureStats {
     pub force: u32,
     pub attack_cost: u32,
     pub health: u32,
+    #[serde(default)]
+    pub provocation: bool,
+    #[serde(default)]
+    pub riposte: u32,
 }
