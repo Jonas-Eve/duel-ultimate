@@ -25,6 +25,12 @@ impl Card {
         }
     }
 
+    pub fn name(&self) -> &str {
+        match self {
+            Card::Creature { name, .. } => name,
+        }
+    }
+
     /// The numeric stats of the card, as the engine consumes them.
     pub fn stats(&self) -> CreatureStats {
         match self {

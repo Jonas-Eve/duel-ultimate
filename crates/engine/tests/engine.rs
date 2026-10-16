@@ -40,10 +40,12 @@ fn setup(one: Hero, two: Hero) -> GameSetup {
         one: PlayerSetup {
             hero: one,
             cards: cards(),
+            card_names: Vec::new(),
         },
         two: PlayerSetup {
             hero: two,
             cards: cards(),
+            card_names: Vec::new(),
         },
         data_versions: vec!["fixture@1.0.0".into()],
     }

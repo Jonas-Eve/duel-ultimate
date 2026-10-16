@@ -16,8 +16,8 @@ pub use batch::{
 pub use report::{Kind, MatchupReport, Report};
 pub use stats::{fmt_mean, fmt_share, percent, wilson_95};
 
-use duel_cards::{parse_cards, parse_decks, resolve_deck};
-use duel_engine::{GameSetup, PlayerSetup};
+use duel_cards::{parse_cards, parse_decks};
+use duel_engine::{GameSetup, PlayerSetup, player_setup};
 
 /// The first deck of `decks` as player One and the second as player Two, with `cards` resolving
 /// their card ids, and `data_versions` recorded in the game. Pure: nothing is read from disk;
@@ -33,10 +33,7 @@ pub fn setup_from(
         let deck = decks
             .get(index)
             .ok_or_else(|| format!("a set needs two decks, found {}", decks.len()))?;
-        Ok(PlayerSetup {
-            hero: deck.hero.clone(),
-            cards: resolve_deck(deck, &cards).map_err(|error| error.to_string())?,
-        })
+        player_setup(deck, &cards).map_err(|error| error.to_string())
     };
     Ok(GameSetup {
         one: side(0)?,

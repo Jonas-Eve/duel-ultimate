@@ -8,6 +8,9 @@ pub const MAX_STAT: u32 = 10_000;
 /// Maximum number of effects a hero can have (bounds hostile data, like [`MAX_STAT`]).
 pub const MAX_HERO_EFFECTS: usize = 8;
 
+/// Maximum length of a card name, in characters (untrusted text shown by clients).
+pub const MAX_NAME_LEN: usize = 64;
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum CardsError {
     #[error("invalid JSON: {0}")]
@@ -49,6 +52,12 @@ pub enum CardsError {
         value: u32,
         max: u32,
     },
+    #[error(
+        "`card_names` has {names} entries but the deck has {cards} cards (empty, or one per card)"
+    )]
+    CardNamesMismatch { names: usize, cards: usize },
+    #[error("a card name is {len} characters long, above the maximum of {max}")]
+    NameTooLong { len: usize, max: usize },
     #[error("card `{id}`: {source}")]
     InvalidCard { id: String, source: Box<CardsError> },
     #[error("deck `{id}`: {source}")]
@@ -207,9 +216,39 @@ pub fn validate_deck_shape(hero: &Hero, deck_len: usize) -> Result<(), CardsErro
     Ok(())
 }
 
+/// Checks the optional display names of a deck: none at all, or exactly one per card, each at
+/// most [`MAX_NAME_LEN`] characters (`chars().count()`, not bytes).
+pub fn validate_card_names(names: &[String], cards_len: usize) -> Result<(), CardsError> {
+    if !names.is_empty() && names.len() != cards_len {
+        return Err(CardsError::CardNamesMismatch {
+            names: names.len(),
+            cards: cards_len,
+        });
+    }
+    for name in names {
+        let len = name.chars().count();
+        if len > MAX_NAME_LEN {
+            return Err(CardsError::NameTooLong {
+                len,
+                max: MAX_NAME_LEN,
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Validates a deck (hero, shape, card references, stats) and returns the resolved
 /// stats of its cards, in deck order.
 pub fn resolve_deck(deck: &Deck, cards: &[Card]) -> Result<Vec<CreatureStats>, CardsError> {
+    resolve_deck_named(deck, cards).map(|(stats, _)| stats)
+}
+
+/// The single resolution path: like [`resolve_deck`], and also returns the names of the
+/// cards, parallel to the stats (deck order). The names are presentation only.
+pub fn resolve_deck_named(
+    deck: &Deck,
+    cards: &[Card],
+) -> Result<(Vec<CreatureStats>, Vec<String>), CardsError> {
     validate_hero(&deck.hero)?;
     validate_deck_shape(&deck.hero, deck.cards.len())?;
     let by_id: BTreeMap<&str, &Card> = cards.iter().map(|c| (c.id(), c)).collect();
@@ -227,7 +266,7 @@ pub fn resolve_deck(deck: &Deck, cards: &[Card]) -> Result<Vec<CreatureStats>, C
                 id: id.clone(),
                 source: Box::new(e),
             })?;
-            Ok(stats)
+            Ok((stats, card.name().to_owned()))
         })
         .collect()
 }

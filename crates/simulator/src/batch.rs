@@ -4,9 +4,10 @@
 //! `HashMap`): the same batch always gives the same [`Report`].
 
 use crate::report::{Kind, MatchupReport, Report};
-use duel_cards::{parse_cards, parse_decks, resolve_deck};
+use duel_cards::{parse_cards, parse_decks};
 use duel_engine::{
     Action, Event, GameSetup, PlayerId, PlayerSetup, WinReason, apply, legal_actions, new_game,
+    player_setup,
 };
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -47,10 +48,7 @@ pub fn contenders_from(cards: &str, decks: &str) -> Result<Vec<Contender>, Strin
         .map(|deck| {
             Ok(Contender {
                 id: deck.id.clone(),
-                player: PlayerSetup {
-                    hero: deck.hero.clone(),
-                    cards: resolve_deck(deck, &cards).map_err(|error| error.to_string())?,
-                },
+                player: player_setup(deck, &cards).map_err(|error| error.to_string())?,
             })
         })
         .collect()

@@ -22,6 +22,7 @@ pub use card::{Card, CreatureStats};
 pub use deck::Deck;
 pub use hero::{Effect, Hero, HeroEffect};
 pub use validate::{
-    CardsError, DECK_SIZE, MAX_HERO_EFFECTS, MAX_STAT, parse_cards, parse_decks, resolve_deck,
-    validate_creature, validate_deck_shape, validate_hero,
+    CardsError, DECK_SIZE, MAX_HERO_EFFECTS, MAX_NAME_LEN, MAX_STAT, parse_cards, parse_decks,
+    resolve_deck, resolve_deck_named, validate_card_names, validate_creature, validate_deck_shape,
+    validate_hero,
 };
