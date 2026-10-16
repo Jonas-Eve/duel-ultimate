@@ -322,18 +322,18 @@ describe("dispose", () => {
     const scheduler = { yield: () => new Promise<void>((r) => gates.push(r)) };
     const c = GameController.create(
       config("computer", "bulwark", "rush", 3),
-      realDeps({ createSession: () => session, scheduler, now: () => (clock += 5) }),
+      realDeps({ createSession: () => session, scheduler, now: () => (clock += 20) }),
     );
     const fn = vi.fn();
     c.subscribe(fn);
     c.start();
-    // Let the chain run a few slices, then dispose while a yield is pending.
-    for (let i = 0; i < 3; i++) {
-      await Promise.resolve();
-      await Promise.resolve();
-      gates.splice(0).forEach((g) => g());
-    }
+    // Release the first yield: the chain plays one action (the slow clock cuts a slice right
+    // after it) and waits at the next yield, which stays pending while we dispose.
     await Promise.resolve();
+    gates.splice(0).forEach((g) => g());
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(gates).toHaveLength(1);
+    expect(probe.calls.apply).toBeGreaterThanOrEqual(1);
     expect(c.getSnapshot().phase).toBe("computer-turn");
     const applied = probe.calls.apply;
     const listed = probe.calls.legalActions;
