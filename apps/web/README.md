@@ -10,6 +10,7 @@ aucune interaction qui dépende du survol. Il appelle le moteur de règles compi
   téléphone du réseau local (un build ne s'ouvre pas en `file://` : modules et `.wasm` ; hors réseau
   local, voir #54)
 - `npm test` — tests (Vitest + Testing Library + `user-event`), dont un test de fumée contre le vrai `.wasm`
+- `npm run e2e` — tests de bout en bout (Playwright) contre le build de production : voir « Tests de bout en bout »
 
 ## Moteur WASM
 
@@ -283,3 +284,47 @@ même, alimenté par `toScreenModel` :
   recherche bornée : provocateur adverse, riposte du Loup hérissé, attaque létale, deux camps ; la
   session jumelle rejoue `probe.applied` pour comparer coût et passation). Vérifié aussi dans Chromium
   à 360 px (pas de défilement horizontal de la page, tous les boutons >= 44 px).
+
+## Tests de bout en bout
+
+`npm run e2e` (#68) : `pree2e` refait le build de production, puis Playwright lance Chromium sur
+`vite preview --host 127.0.0.1 --port 4173 --strictPort` (jamais `0.0.0.0`, jamais le serveur de dev :
+c'est le build qui porte la CSP et les `.wasm` hachés). Un worker, un seul projet `chromium`, 360 x 740
+tactile par défaut (`apps/web/playwright.config.ts`), interactions par `tap()`. Les fichiers sont
+`e2e/*.e2e.ts` (le suffixe évite que Vitest les ramasse) ; `e2e/support.ts` en tient les aides.
+
+- **Rien n'est simulé** : vrai moteur WASM, vrai ordinateur, vrai build. Les tests lisent les libellés
+  que le joueur voit (rôles, noms accessibles, textes français) et ne recalculent jamais un coût, une
+  cible ou une règle : ils comparent une annonce lue avant une action à ce qu'on lit après.
+- **Fichiers** : `computer.e2e.ts` (cas 1 à 3 : duel entier contre l'ordinateur, humain Rempart, temps
+  annoncé et payé), `two-camps.e2e.ts` (cas 4 à 6 : provocation, riposte, deux camps, les trois fins),
+  `layout.e2e.ts` (cas 7 et 8 : 360 px, CSP du build, 1280 px).
+- **Graine fixe** : 42 (`SEED`, saisie dans le champ d'accueil), notée dans les tests. Une situation
+  voulue (provocation, riposte) est **cherchée** par une boucle bornée (`playUntil`, au plus 40 à 60
+  actions) plutôt que supposée ; si les données `starter` changent et que la graine ne la produit plus,
+  le test échoue bruyamment en nommant la situation et la borne.
+- **Robot d'usure** (cas « exhaustion ») : l'épuisement n'arrive jamais au hasard, donc un robot piloté
+  par le DOM seul (aucun accès au moteur) joue les deux camps : effet de héros, puis première carte de
+  la main, puis attaque d'une créature adverse (attaquant suivant si aucune cible créature), en dernier
+  recours le héros ; jamais « Abandonner ». Ruée contre Rempart, graine 2 : 220 actions, environ 40 s
+  (`timeout` de 180 s pour ce seul test, au plus 700 pas).
+- **Sans bruit** : une fixture automatique (`guard`) échoue tout test dont la page a produit une
+  violation de CSP (`securitypolicyviolation`), une erreur de console, une `pageerror` ou une requête
+  hors de l'origine (S1 et S3 de #64). Chaque écran mobile passe `expectMobileSound` : pas de défilement
+  horizontal de la page, toute cible tactile >= 44 x 44 px (un bouton radio est jugé par son libellé,
+  le rond de 22 px n'est que le dessin), axe (`wcag2a`, `wcag2aa`, `wcag22aa`) sans violation.
+- **Diagnostic sans artefact** : la CI n'archive rien. Sur échec, la fixture imprime
+  `ariaSnapshot()` de `<main>` et la liste des messages de console et violations : tout est dans le
+  journal de la CI.
+- **Non atteignable par l'interface, donc absent ici** : le filet de sécurité « action refusée »
+  (couvert en #63 et #64 par injection) et `entropy_unavailable` (Chromium a `crypto.getRandomValues`
+  même hors contexte sécurisé ; couvert en #64 par un `crypto` factice). `eval` ne peut pas être sondé
+  non plus (le code lancé par le protocole DevTools n'est pas soumis à sa restriction) : la politique de
+  la balise `<meta>` est lue en toutes lettres.
+- **Chromium** : en local `npx playwright install chromium` ; dans l'environnement des agents le
+  Chromium 141 est préinstallé (`PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`), ne jamais y lancer
+  `playwright install`. `@playwright/test` est donc épinglé à **1.56.1** (dérogation à « dernière version
+  stable » du `CLAUDE.md` racine, validée par le propriétaire), `playwright-core` aussi (pair de
+  `@axe-core/playwright` 4.14.0, qui sinon en installerait une seconde copie).
+- **CI** : après `npm test`, `npx playwright install --with-deps chromium` (CLI local, version du lock)
+  puis `npm run e2e`, dans le job existant.

@@ -99,7 +99,7 @@ test.describe("7b. CSP du build (S3 de #64)", () => {
     await openHome(page); // the engine loaded: the page is playable, so 'wasm-unsafe-eval' lets the WASM run
     const csp = await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute("content");
     expect(csp, "the build carries its CSP").not.toBeNull();
-    expect(csp).not.toMatch(/unsafe-inline|unsafe-eval(?!')/);
+    expect(csp).not.toMatch(/unsafe-inline|(?<!wasm-)unsafe-eval/);
     expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval'");
 
     // Probes: what an injected script, an inline handler and a style attribute would do. All must be

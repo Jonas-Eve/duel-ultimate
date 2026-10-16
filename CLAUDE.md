@@ -67,9 +67,20 @@ Règles propres à ce repo :
   contrat JSON (`src/engine/types.ts`, `EVENT_KINDS`) est gardé par `tests/wasm.contract.test.ts`.
   Contre l'ordinateur, la confidentialité de sa main n'est qu'un choix d'affichage local.
   Partie locale (`apps/web/src/game/`, #63) : le contrôleur ne calcule ni coût, ni cible, ni fin de partie ; l'ordinateur ne reçoit jamais l'abandon ; le journal contre l'ordinateur est écrit d'après la seule vue du siège humain. Le contrôleur (`GameController`) est créé par l'appelant dans un gestionnaire d'événement, jamais dans un `useEffect` ; `dispose()` annule le pilote et libère la session une fois ; une session qui a levé une erreur fatale (throw non JSON) est morte, plus aucun appel n'atteint le WASM. Interface (`apps/web/src/ui/`, #64) : `App` est le seul lecteur de `data/starter` et de `engine/load` (`ui/` n'importe ni l'un ni l'autre, gardé par `tests/architecture.test.ts`) ; il charge le moteur pendant l'écran de chargement, assemble la session de façon synchrone (`createWasmSession`) puis crée le contrôleur par `startGame(...)` **dans le gestionnaire du clic** « Lancer la partie » / « Rejouer » (jamais dans un `useEffect`, gardé par le scan de source `tests/controller-creation-policy.test.ts` ; le test de montage StrictMode garde le cleanup qui libère), appelle `controller.start()`, et libère l'ancien contrôleur avant d'en créer un autre, au retour à l'accueil et au démontage. `startGame` ne lève jamais : `entropy_unavailable` (graine manuelle proposée, jamais `Math.random`), `invalid_seed` et `engine` ont chacun leur affichage français (`ui/fr.ts`, `ui/errors.fr.ts`). Coût, « passe la main » et fin de partie affichés viennent de l'aperçu du moteur (`ui/consequence.ts`, aucun calcul côté client) ; les contrôles sont de vrais `<button>` de 44 px, inactifs pendant le tour de l'ordinateur et après la fin ; `Dialog` (piège à focus, Échap, focus rendu) est générique et réutilisé par #65 et #66. Aucun attribut `style=` ni `<style>` (classes CSS seulement) ; la CSP est injectée au **build seulement** par `vite/csp-plugin.ts` (`'wasm-unsafe-eval'`, ni `'unsafe-inline'` ni `'unsafe-eval'`), gardée par `tests/csp.test.ts`. Test de l'interface : `App({ deps })` reçoit le vrai moteur par prop (jamais de mock), `tests/support/{ui,app}.tsx`, `playUntil` dans `tests/support/policies.ts`. Journal et défausses (#65) : `ui/log-format.ts` (pur) formate les `StepRecord` ; `switch` exhaustif sur `eventKind`, un test lit `enum Event` de `crates/engine/src/rules.rs` (une variante ajoutée casse la compilation puis le test) ; contre l'ordinateur la pioche adverse n'a pas de nom parce que l'enregistrement vient de la seule vue du siège humain (jamais de table globale id -> nom ; choix d'affichage, pas une garantie) ; `LogBar` est un `role="log"` poli sauf pendant le tour de l'ordinateur (`off`, une seule annonce de fin de chaîne), le tiroir et le journal de l'écran de fin ne sont pas vifs ; défausses publiques des deux camps (« Détruite », jamais « PV 0 »), le journal et les défausses restent consultables pendant le tour de l'ordinateur. Flux d'attaque (#66) : `selectedAttacker` est un état local de `GameScreen`, **dérivé** par `ui/attack-state.ts` (pur) des aperçus `snapshot.legal` (cibles = les aperçus `isAttackBy`, jamais une liste construite par le client ; la provocation n'est pas recalculée : un héros ou une créature absents des aperçus sont `aria-disabled` « Cible non disponible ») ; une sélection ou une feuille que plus aucun aperçu ne soutient est abandonnée pendant le rendu (jamais par un `useEffect`) ; `AttackSheet` (confirmation, coût « Coût d'attaque », passation, fin de partie, via `describeConsequence`, aucun dégât annoncé) appelle `controller.submit(aperçu)` ; états signalés par bordure et texte.
+- **Tests de bout en bout** (`apps/web/e2e/*.e2e.ts`, Playwright, #68) : ils jouent le **build de
+  production** (CSP, `.wasm` hachés) servi par `vite preview` sur `127.0.0.1:4173`, avec le vrai
+  moteur et le vrai ordinateur, sans rien simuler ; ils lisent les libellés du DOM et ne recalculent
+  jamais un coût ni une règle. **Dérogation à « dernière version stable » (§3), consignée et validée
+  par le propriétaire** : `@playwright/test` est épinglé à **1.56.1** (avec `playwright-core` 1.56.1,
+  pair de `@axe-core/playwright`), la dernière version exécutable avec le Chromium 141 préinstallé
+  dans les environnements d'agents (`/opt/pw-browsers`, aucun téléchargement possible) : chaque version
+  de Playwright exige une révision précise de Chromium. En CI, `npx playwright install` à la version du
+  lock installe ce même Chromium 141 : un e2e identique partout. **Remonter la version quand
+  `/opt/pw-browsers` est rafraîchi** (ticket `type:tech` à ce moment-là).
 - **CI** (`.github/workflows/ci.yml`, sur `pull_request` et `push` vers `main`) : `fmt`, `clippy`,
   tests Rust, build WASM, contrôle de non-entropie, puis `npm ci`, `npm run build` et `npm test`
-  dans `apps/web`. Permissions `contents: read`, actions épinglées par SHA, aucun secret ; sa
+  dans `apps/web`, puis les tests de bout en bout (`npx playwright install --with-deps chromium`,
+  `npm run e2e`). Permissions `contents: read`, actions épinglées par SHA, aucun secret ; sa
   politique est gardée par `apps/web/tests/ci-policy.test.ts`.
 - Une nouvelle mécanique ajoute une brique au moteur sans modifier le comportement des decks
   qui ne l'utilisent pas (à vérifier par le simulateur).
@@ -95,6 +106,12 @@ Règles propres à ce repo :
   `pretest` échouent avec un message qui donne la commande à lancer.
 - **Web :** `cd apps/web && npm ci && npm run dev` ; `npm run build` ; `npm test` (chacun régénère
   d'abord `apps/web/src/wasm/` via `scripts/build-wasm.mjs`)
+- **E2E web :** `cd apps/web && npm run e2e` (construit d'abord le build de production, puis lance
+  Chromium sur `vite preview`, environ 1 à 2 minutes dont ~40 s pour le cas « épuisement »). Chromium
+  requis : en local `npx playwright install chromium` ; dans l'environnement des agents le Chromium 141
+  est préinstallé (`PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`, ne jamais lancer `playwright install`
+  là) et la version de Playwright est épinglée à 1.56.1 pour cette raison. La CI les lance après
+  `npm test`.
 - **Tester à la main :** `cd apps/web && npm run dev`. Un build ne s'ouvre pas en `file://` (modules et
   `.wasm`) : `npm run build && npm run preview -- --host` le sert sur le réseau local (le build porte la
   CSP, pas le serveur de dev). Sur un téléphone hors réseau local : voir #54.
