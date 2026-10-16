@@ -94,6 +94,43 @@ test.describe("7. Mobile 360 px", () => {
   });
 });
 
+test.describe("7b. CSP du build (S3 de #64)", () => {
+  test("la politique refuse un script en ligne, un gestionnaire en ligne et un attribut style, et le WASM s'exécute quand même", async ({ page, guard }) => {
+    await openHome(page); // the engine loaded: the page is playable, so 'wasm-unsafe-eval' lets the WASM run
+    const csp = await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute("content");
+    expect(csp, "the build carries its CSP").not.toBeNull();
+    expect(csp).not.toMatch(/unsafe-inline|unsafe-eval(?!')/);
+    expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval'");
+
+    // Probes: what an injected script, an inline handler and a style attribute would do. All must be
+    // blocked. (`eval` cannot be probed from here: code run through the DevTools protocol is not
+    // subject to the page's eval restriction, so the policy text above is what guards it.)
+    const probe = await page.evaluate(
+      () =>
+        new Promise<{ violated: string[]; inlineRan: boolean; handlerRan: boolean }>((resolve) => {
+          const violated: string[] = [];
+          document.addEventListener("securitypolicyviolation", (e) => violated.push(e.violatedDirective));
+          const script = document.createElement("script");
+          script.textContent = "window.__inlineRan = true";
+          document.head.append(script);
+          const el = document.createElement("button");
+          el.setAttribute("onclick", "window.__handlerRan = true");
+          el.setAttribute("style", "color: red");
+          document.body.append(el);
+          el.click();
+          setTimeout(() => resolve({ violated, inlineRan: "__inlineRan" in window, handlerRan: "__handlerRan" in window }), 100);
+        }),
+    );
+    expect(probe.inlineRan, "an inline script must not run").toBe(false);
+    expect(probe.handlerRan, "an inline handler must not run").toBe(false);
+    expect(probe.violated).toEqual(expect.arrayContaining(["script-src-elem", "script-src-attr", "style-src-attr"]));
+    // These violations are the point of this test: the guard must not count them as a defect.
+    // (The browser also logs each violation as a console error.)
+    expect(guard.problems.every((p) => p.startsWith("csp:") || /Content Security Policy/.test(p))).toBe(true);
+    guard.problems.length = 0;
+  });
+});
+
 test.describe("8. Viewport large 1280 px", () => {
   // Still a touch-capable context (the helpers tap); only the size and the mobile emulation change.
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
