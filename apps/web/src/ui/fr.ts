@@ -55,6 +55,16 @@ export const fr = {
   provocation: "Provocation",
   riposte: (n: number) => `Riposte ${n}`,
   noCreature: "Aucune créature",
+
+  selected: "Sélectionnée",
+  targetPossible: "Cible possible",
+  targetUnavailable: "Cible non disponible",
+  cancelSelection: "Annuler la sélection",
+  attackTitle: "Confirmer l'attaque",
+  attackSummary: (attacker: string, target: string) => `${attacker} attaque ${target}`,
+  heroAsTarget: (name: string) => `le héros ${name}`,
+  confirm: "Confirmer",
+  cancel: "Annuler",
   emptyHand: "Aucune carte en main",
 
   yourHero: "Ton héros",

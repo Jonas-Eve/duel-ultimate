@@ -1,7 +1,10 @@
 import type { CardView } from "../engine/types";
 import { fr } from "./fr";
 
-interface CardTileProps {
+/** The attack flow's state of a tile, always written as text as well as drawn as a border. */
+export type CardMark = "selected" | "target" | "unavailable";
+
+export interface CardTileProps {
   card: CardView;
   /** Hand cards: the cost comes from the engine preview, not from the card (shown as "Coût N"). */
   cost?: number;
@@ -11,6 +14,11 @@ interface CardTileProps {
   /** A real `<button>` only when given (the attack flow of #66 adds the selection); else a plain element. */
   onPress?: () => void;
   disabled?: boolean;
+  /** `aria-disabled` instead of `disabled`: still focusable and announced, a press does nothing. */
+  inactive?: boolean;
+  /** `aria-pressed` (a toggle) when defined. */
+  pressed?: boolean;
+  mark?: CardMark;
 }
 
 /** The complete accessible name of a card: "Pillard, coût 2, force 3, coût d'attaque 1, PV 2, passe la main, provocation, riposte 1". */
@@ -23,6 +31,8 @@ export function cardLabel(card: CardView, cost: number, handsOver: boolean): str
   );
 }
 
+const markText: Record<CardMark, string> = { selected: fr.selected, target: fr.targetPossible, unavailable: fr.targetUnavailable };
+
 function ShieldIcon() {
   return (
     <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" className="icon">
@@ -31,8 +41,9 @@ function ShieldIcon() {
   );
 }
 
-export function CardTile({ card, cost, notes = [], handsOver = false, onPress, disabled = false }: CardTileProps) {
-  const label = cardLabel(card, cost ?? card.cost, handsOver);
+export function CardTile({ card, cost, notes = [], handsOver = false, onPress, disabled = false, inactive = false, pressed, mark }: CardTileProps) {
+  // The visible mark is part of the accessible name too (label in name).
+  const label = cardLabel(card, cost ?? card.cost, handsOver) + (mark === undefined ? "" : `, ${markText[mark].toLowerCase()}`);
   const body = (
     <>
       <span className="card-name">{card.name ?? fr.unknownCard}</span>
@@ -53,6 +64,7 @@ export function CardTile({ card, cost, notes = [], handsOver = false, onPress, d
           {card.riposte > 0 && <span className="badge">{fr.riposte(card.riposte)}</span>}
         </span>
       )}
+      {mark !== undefined && <span className="card-mark">{markText[mark]}</span>}
       {notes.map((n) => (
         <span key={n} className="card-note">
           {n}
@@ -67,8 +79,17 @@ export function CardTile({ card, cost, notes = [], handsOver = false, onPress, d
       </div>
     );
   }
+  const classes = ["card", "card-button", mark === undefined ? "" : `card-${mark}`].filter(Boolean).join(" ");
   return (
-    <button type="button" aria-label={label} className="card card-button" disabled={disabled} onClick={onPress}>
+    <button
+      type="button"
+      aria-label={label}
+      aria-pressed={pressed}
+      aria-disabled={inactive ? true : undefined}
+      className={classes}
+      disabled={disabled}
+      onClick={inactive ? undefined : onPress}
+    >
       {body}
     </button>
   );

@@ -43,7 +43,7 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
 |---|---|
 | `src/engine/` | contrat JSON typé (`types.ts`, écrit depuis les sources Rust), `GameSession` (`session.ts`, le seul accès au moteur), adaptateur `createWasmSession` (`wasm-session.ts`), chargeur mémoïsé `loadEngine` (`load.ts`), erreurs (`errors.ts`) |
 | `src/game/` | logique du client sans React ni WASM : la graine (`seed.ts`), les enregistrements de journal (`records.ts`), la politique de l'ordinateur (`computer.ts`), le contrôleur de la partie locale (`controller.ts`), le démarrage sans exception (`start.ts`) et le modèle d'écran (`screen-model.ts`) |
-| `src/ui/` | composants et textes français : écrans (`Home`, `GameScreen`, `EndScreen`, `FatalScreen`), éléments (`HeroBar`, `TimeBand`, `Board`, `CardTile`, `Hand`, `ActionBar`, `ThinkingIndicator`, `ErrorBanner`, `LogBar`, `LogHistory`), dialogues (`Dialog`, `ConfirmDialog`, `LogDrawer`, `DiscardDialog`), textes (`fr.ts`, `errors.fr.ts`), `consequence.ts` et le formateur du journal `log-format.ts` |
+| `src/ui/` | composants et textes français : écrans (`Home`, `GameScreen`, `EndScreen`, `FatalScreen`), éléments (`HeroBar`, `TimeBand`, `Board`, `CardTile`, `Hand`, `ActionBar`, `ThinkingIndicator`, `ErrorBanner`, `LogBar`, `LogHistory`), dialogues (`Dialog`, `ConfirmDialog`, `AttackSheet`, `LogDrawer`, `DiscardDialog`), textes (`fr.ts`, `errors.fr.ts`), `consequence.ts`, l'état du flux d'attaque `attack-state.ts` et le formateur du journal `log-format.ts` |
 | `src/App.tsx` | assemble les écrans ; le seul à lire `data/starter` et `engine/load` |
 | `src/data/starter.ts` | données `starter` importées en `?raw` |
 | `vite/csp-plugin.ts` | plugin Vite de la CSP de build |
@@ -144,8 +144,8 @@ les deux sièges, aucun pilote).
 ## Interface
 
 Contre l'ordinateur, jouable de bout en bout : accueil, partie, tour de l'ordinateur, fin de partie.
-Il n'y a qu'un mode (pas de sélecteur) ; l'attaque (#66) et le mode deux camps (#67) viennent
-ensuite (le journal et les défausses sont là, #65).
+Il n'y a qu'un mode (pas de sélecteur) ; le mode deux camps (#67) vient ensuite (le journal et les
+défausses sont là, #65 ; l'attaque aussi, #66).
 
 - **`App`** (`src/App.tsx`) : charge le moteur pendant l'écran de chargement (« Lancer la partie » reste
   inactif ; échec : message français et « Recharger »), garde la `GameFactory`, puis assemble la session
@@ -229,3 +229,34 @@ ensuite (le journal et les défausses sont là, #65).
 - **Défausses** (`DiscardDialog`) : bouton « Défausse (N) » dans chaque `HeroBar`, les cartes dans
   l'ordre de mort (`view.discard`), « Détruite » au lieu de « PV 0 » (les PV initiaux ne sont pas dans la
   vue). Le journal et les défausses restent consultables pendant le tour de l'ordinateur.
+
+## Flux d'attaque
+
+- **État local, dérivé** : `GameScreen` ne stocke que l'identifiant de l'attaquant touché et la cible en
+  attente de confirmation. `deriveAttackState(selected, snapshot.legal)` (`ui/attack-state.ts`, pur) en
+  tire les aperçus d'attaque de cet attaquant (`isAttackBy` appliqué à `p.action`), `heroTargetable` et
+  `creatureTargets`. Le contrôleur n'en sait rien.
+- **Les cibles sont les aperçus du moteur** : l'interface ne construit aucune liste et **ne recalcule
+  pas la provocation**. Face à un provocateur le moteur ne liste que les provocateurs, donc le héros et
+  les autres créatures adverses n'ont aucun aperçu : leur tuile est `aria-disabled` avec la mention
+  visible « Cible non disponible » (un appui ne fait rien, `apply` n'est pas appelé). L'interface ne dit
+  pas pourquoi ; elle marque seulement les provocateurs (donnée de la carte).
+- **Sélection** : un appui sur une de ses créatures qui a une attaque dans `legal` la sélectionne
+  (`aria-pressed`, bordure épaisse et texte « Sélectionnée ») ; un nouvel appui, « Annuler la
+  sélection » ou Échap la retire. Une créature sans attaque légale (tour de l'ordinateur) est
+  `aria-disabled`. Les cibles possibles sont des `<button>` avec bordure et texte « Cible possible » ;
+  le héros adverse porte un bouton cible dans son bandeau.
+- **Sélection périmée** : si plus aucun aperçu ne soutient l'attaquant (créature morte, tour de
+  l'ordinateur) ou la cible en attente, l'état est remis à zéro **pendant le rendu** (jamais par un
+  `useEffect`) ; elle ne ressuscite donc pas au tour suivant.
+- **`AttackSheet`** (`Dialog` de #64) : « {attaquant} attaque {cible} » puis les lignes de
+  `describeConsequence(aperçu)` (« Coût d'attaque : N », « Passe la main : l'adversaire aura N de temps »
+  ou « Il te restera N de temps », « Met fin à la partie : ... »). Aucun dégât n'est annoncé : le client
+  ne le connaît pas. « Annuler » (qui tient le focus, la réponse sûre) ferme la feuille et garde la
+  sélection ; « Confirmer » appelle `controller.submit` avec **l'aperçu de cette cible**, efface la
+  sélection et rend le focus à la région « Partie », quel que soit le `SubmitResult` (`stale` et
+  `not-your-turn` sont ignorés sans bandeau ; `refused` arrive par `snapshot.error`).
+- **Tests** : `attack-state.test.ts` (pur), `attack-flow.test.tsx` (vrai WASM, scénarios trouvés par
+  recherche bornée : provocateur adverse, riposte du Loup hérissé, attaque létale, deux camps ; la
+  session jumelle rejoue `probe.applied` pour comparer coût et passation). Vérifié aussi dans Chromium
+  à 360 px (pas de défilement horizontal de la page, tous les boutons >= 44 px).

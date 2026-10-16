@@ -40,7 +40,7 @@ describe("describeConsequence, from the engine preview only", () => {
       preview({ action: { attack: { attacker: 3, target: "hero" } }, cost: 1, hands_over: false, budget_after: null, ends_game: { winner: "One", reason: "hero_down" } }),
       labels,
     );
-    expect(lines).toEqual(["Coût : 1", "Met fin à la partie : Tu gagnes. motif:hero_down"]);
+    expect(lines).toEqual(["Coût d'attaque : 1", "Met fin à la partie : Tu gagnes. motif:hero_down"]);
     expect(lines.join(" ")).not.toMatch(/Passe la main/);
   });
 
@@ -67,5 +67,35 @@ describe("describeConsequence, from the engine preview only", () => {
     expect(one).toContain("motif:exhaustion");
     expect(two).toContain("L'ordinateur gagne");
     expect(two).toContain("motif:hero_down");
+  });
+});
+
+describe("describeConsequence for an attack", () => {
+  const attack = (over: Partial<ActionPreview>) =>
+    preview({ action: { attack: { attacker: 3, target: { creature: 8 } } }, cost: 2, budget_after: 1, ...over });
+
+  test("the cost line is worded 'Coût d'attaque', the number is the preview's", () => {
+    expect(describeConsequence(attack({ cost: 2, budget_after: 1 }), labels)).toEqual(["Coût d'attaque : 2", "Il te restera 1 de temps"]);
+    expect(describeConsequence(attack({ cost: 5, budget_after: 4 }), labels)[0]).toBe("Coût d'attaque : 5");
+  });
+
+  test("hand-over by an attack", () => {
+    expect(describeConsequence(attack({ cost: 3, hands_over: true, budget_after: 2 }), labels)).toEqual([
+      "Coût d'attaque : 3",
+      "Passe la main : l'adversaire aura 2 de temps",
+    ]);
+  });
+
+  test("lethal attack on the hero: cost, end of game, no hand-over", () => {
+    const lines = describeConsequence(
+      attack({ action: { attack: { attacker: 3, target: "hero" } }, cost: 1, budget_after: null, ends_game: { winner: "One", reason: "hero_down" } }),
+      labels,
+    );
+    expect(lines).toEqual(["Coût d'attaque : 1", "Met fin à la partie : Tu gagnes. motif:hero_down"]);
+  });
+
+  test("the other actions keep 'Coût'", () => {
+    expect(describeConsequence(preview({ action: { play: { card: 1 } } }), labels)[0]).toBe("Coût : 2");
+    expect(describeConsequence(preview({ action: { activate: { effect: 0 } } }), labels)[0]).toBe("Coût : 2");
   });
 });
