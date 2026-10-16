@@ -5,13 +5,18 @@
 //! data (`from_data`: `cards.json` and `decks.json` strings, decks by identifier, each string
 //! bounded to 1 MiB, no disk), `legal_actions()` and `apply(action)`, all as JSON strings, plus `start_events()`: the events of the setup
 //! (`game_started` with the recorded `data_versions`, possibly `game_won`), which are public
-//! (no hand, pile or card id). There is no accessor for the full state, so nothing hidden
-//! (the opponent's hand, the piles) can leak through this binding.
+//! (no hand, pile or card id). Still no accessor for the full state; instead, `view(seat)` gives
+//! one seat's view (`duel_engine::player_view`: its own hand, the opponent's hand and the piles
+//! only as counts, public boards and discards). The view does not authenticate the seat: this is
+//! a local adapter, the client asks for the seat it plays (a server calls `player_view` itself,
+//! with the seat of the connection). `legal_actions` and the `drew` events still carry the
+//! instance ids of the active hand, which a server would have to redact.
 //! [`Duel`] holds the logic and is testable natively; [`Game`] only converts its errors
 //! to `JsError` (which cannot be built off the wasm target).
 
 use duel_engine::{
-    Action, Event, GameSetup, GameState, apply, game_setup_from_data, legal_actions, new_game,
+    Action, Event, GameSetup, GameState, PlayerId, apply, game_setup_from_data, legal_actions,
+    new_game, player_view,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -73,6 +78,26 @@ impl Duel {
     /// was applied since.
     pub fn start_events_json(&self) -> Result<String, String> {
         to_json(&self.start_events)
+    }
+
+    /// What `seat` may see of the game, as JSON: `"One"` or `"Two"` exactly (any other value,
+    /// including another case, is `invalid_seat`; the length is bounded like every input).
+    /// The view does not authenticate the seat: this is a local adapter, and the caller
+    /// decides whose view it asks for. A server must call `duel_engine::player_view` itself
+    /// with the seat of the connection, never expose this method.
+    pub fn view_json(&self, seat: &str) -> Result<String, String> {
+        bounded(seat)?;
+        let seat = match seat {
+            "One" => PlayerId::One,
+            "Two" => PlayerId::Two,
+            _ => {
+                return Err(error_json(
+                    "invalid_seat",
+                    "the seat must be exactly \"One\" or \"Two\"",
+                ));
+            }
+        };
+        to_json(&player_view(&self.state, seat))
     }
 
     /// The legal actions of the active player, as a JSON array.
@@ -149,6 +174,10 @@ impl Game {
 
     pub fn start_events(&self) -> Result<String, JsError> {
         self.0.start_events_json().map_err(|e| JsError::new(&e))
+    }
+
+    pub fn view(&self, seat: &str) -> Result<String, JsError> {
+        self.0.view_json(seat).map_err(|e| JsError::new(&e))
     }
 
     pub fn legal_actions(&self) -> Result<String, JsError> {

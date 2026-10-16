@@ -10,6 +10,10 @@
 //! and `engine-wasm`); it parses text, never reads the disk. A card's display name travels
 //! with its instance but no rule, formula or draw reads it.
 //!
+//! [`player_view`] projects a state for one seat (its own hand, the opponent's hand and both
+//! piles only as counts): the types make the opposing hand impossible to express. It does not
+//! authenticate the seat it is asked for; a server calls it with the seat of the connection.
+//!
 //! Randomness is consumed only at setup, in this documented order: shuffle of One's deck,
 //! shuffle of Two's deck, then `random_below(2)` if (and only if) the initiatives are equal.
 //! [`apply`] never consumes the generator.
@@ -32,8 +36,10 @@ mod state;
 #[cfg(test)]
 mod testing;
 mod time;
+mod view;
 
 pub use data::{DataError, game_setup_from_data, player_setup};
 pub use rules::{Action, Event, RuleError, Target, apply, legal_actions};
 pub use setup::{GameSetup, PlayerSetup, SetupError, new_game};
 pub use state::{CardInstanceId, GameState, PlayerId, WinReason};
+pub use view::{CardView, GameResult, HeroView, OpponentSide, OwnSide, PlayerView, player_view};
