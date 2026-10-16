@@ -67,6 +67,11 @@ describe("checkCliVersion", () => {
     expect(() => checkCliVersion("0.2.129", { error, status: null, stdout: "" })).toThrow(install);
   });
 
+  test("an error wins even if the status and output look fine", () => {
+    const error = new Error("boom");
+    expect(() => checkCliVersion("0.2.129", { error, status: 0, stdout: "wasm-bindgen 0.2.129\n" })).toThrow(install);
+  });
+
   test("a non-zero status fails with the install command", () => {
     expect(() => checkCliVersion("0.2.129", { status: 1, stdout: "wasm-bindgen 0.2.129\n" })).toThrow(install);
   });

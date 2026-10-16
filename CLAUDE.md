@@ -46,6 +46,21 @@ Règles propres à ce repo :
   partie enregistre les versions utilisées (parties rejouables, équilibrage traçable).
 - **Aucun hasard hors de la graine du moteur** : toute règle qui tire au sort passe par
   `GameState::random_below`.
+- **Pas d'entropie système, y compris dans le binding WASM** : `rand` est déclaré au niveau du
+  workspace **sans features par défaut** (`default-features = false`) ; `rand::rng()`, `StdRng` et
+  `OsRng` ne compilent donc pas, et `getrandom` n'est jamais tiré. Ne jamais activer
+  `getrandom/wasm_js` : la CI échoue si `getrandom` apparaît dans l'arbre de `duel-engine-wasm`.
+- **Paquet WASM du client** : généré, jamais versionné. `apps/web/scripts/build-wasm.mjs` (le seul
+  script, appelé par les hooks npm `predev`, `prebuild` et `pretest`) compile `duel-engine-wasm` en
+  `--release` puis lance `wasm-bindgen --target web` vers `apps/web/src/wasm/` (ignoré par git). La
+  version attendue du CLI est celle de l'entrée `wasm-bindgen` de `Cargo.lock`, comparée par égalité
+  stricte ; sinon le script échoue avec la commande d'installation exacte. `--print-version` imprime
+  cette version (la CI s'en sert). Le contrat d'erreur du binding : une `Error` JS dont `message` est
+  la chaîne JSON `{"code","message"}`.
+- **CI** (`.github/workflows/ci.yml`, sur `pull_request` et `push` vers `main`) : `fmt`, `clippy`,
+  tests Rust, build WASM, contrôle de non-entropie, puis `npm ci`, `npm run build` et `npm test`
+  dans `apps/web`. Permissions `contents: read`, actions épinglées par SHA, aucun secret ; sa
+  politique est gardée par `apps/web/tests/ci-policy.test.ts`.
 - Une nouvelle mécanique ajoute une brique au moteur sans modifier le comportement des decks
   qui ne l'utilisent pas (à vérifier par le simulateur).
 - Format des données : un set = un dossier versionné `data/<set>/<version>/` (`cards.json`, `decks.json`). Une carte a un discriminant `kind` ; un deck embarque son héros et compte exactement 30 cartes ; toute validation passe par `duel-cards` (`parse_cards`, `parse_decks`, `resolve_deck`), stats bornées à `MAX_STAT` = 10000. Exemple : `data/fixture/1.0.0/`. Une créature a aussi `provocation` (booléen, défaut faux) et `riposte` (u32 ≥ 0, défaut 0, ≤ `MAX_STAT`, 0 valide sans minimum 1), `#[serde(default)]` sur `Card::Creature` et `CreatureStats` (toujours émis à la sérialisation ; la compatibilité exigée est en lecture : un JSON à quatre clés reste accepté), validés par `validate_creature` (erreur `StatTooHigh { field: "riposte" }`). Le moteur lit `provocation` (S2b-T2, filtre de cibles) et `riposte` (S2b-T3, dégâts rendus à l'attaquant) ; la fixture ne change pas (`S2A_GOLDEN`, dans `crates/engine/tests/engine.rs`, est le journal de référence que les decks sans riposte ni provocation doivent laisser identique). Jeu de départ `data/starter/1.0.0/` (version enregistrée `starter@1.0.0`) : deux decks de 30 cartes, `rush` (One) puis `bulwark` (Two), héros d'initiatives différentes (Ruée commence toujours) ; premier jeu qui utilise `provocation` (Rempart seul) et `riposte` (Ruée seul). **Valeurs provisoires, non équilibrées** ; propriétés pinnées par `crates/cards/tests/starter_set.rs`. La fixture reste l'exemple de format sans ces mécaniques.
@@ -63,7 +78,15 @@ Règles propres à ce repo :
   `cargo test --workspace`
 - **Simulateur :** `cargo run -p duel-simulator -- 1000` (parties **par matchup**) ; `[parties] [--set <nom>[@<version>]] [--seed <u64>]`, ordre libre, défauts `1000`, `--set starter`, `--seed 0` ; `-- 200 --set fixture --seed 7` joue le jeu `fixture` ; imprime le rapport (en-tête, une ligne par matchup avec intervalles de Wilson), voir « Format du rapport du simulateur » ; `N = 0`, `--seed` illisible ou option donnée deux fois : code 2
 - **Serveur :** `cargo run -p duel-server` (`PORT`, 8080 par défaut ; `GET /health`)
-- **Web :** `cd apps/web && npm ci && npm run dev` ; `npm run build` ; `npm test`
+- **Outils requis pour le web :** Node de `apps/web/.node-version` (24), Rust avec la cible
+  (`rustup target add wasm32-unknown-unknown`) et `wasm-bindgen-cli` **à la version exacte de
+  l'entrée `wasm-bindgen` de `Cargo.lock`** : `cargo install wasm-bindgen-cli --version <version> --locked`
+  (`node apps/web/scripts/build-wasm.mjs --print-version` l'affiche). Sans eux, `predev`, `prebuild` et
+  `pretest` échouent avec un message qui donne la commande à lancer.
+- **Web :** `cd apps/web && npm ci && npm run dev` ; `npm run build` ; `npm test` (chacun régénère
+  d'abord `apps/web/src/wasm/` via `scripts/build-wasm.mjs`)
+- **Rust, comme la CI :** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+  `cargo test --workspace --locked`, `cargo build --locked --target wasm32-unknown-unknown -p duel-engine-wasm --release`
 <!-- PILOT:COMMANDS:END -->
 
 ---
