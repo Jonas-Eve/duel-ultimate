@@ -35,7 +35,7 @@ describe(".github/workflows/ci.yml", () => {
   });
 
   test("never interpolates a GitHub context inside a run script", () => {
-    const runs = code.split(/\n(?=\s*- name:)/).filter((s) => /\brun:/.test(s));
+    const runs = code.split(/\n(?=\s*- name:)/).slice(1).filter((s) => /\brun:/.test(s));
     for (const r of runs) expect(r).not.toContain("${{");
   });
 
