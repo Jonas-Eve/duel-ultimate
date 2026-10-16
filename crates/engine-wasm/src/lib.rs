@@ -75,6 +75,15 @@ impl Duel {
         to_json(&self.start_events)
     }
 
+    /// The view of `seat` (`"One"` or `"Two"`), as JSON.
+    pub fn view_json(&self, seat: &str) -> Result<String, String> {
+        let _ = seat;
+        to_json(&duel_engine::player_view(
+            &self.state,
+            duel_engine::PlayerId::One,
+        ))
+    }
+
     /// The legal actions of the active player, as a JSON array.
     pub fn legal_actions_json(&self) -> Result<String, String> {
         to_json(&legal_actions(&self.state))
@@ -149,6 +158,10 @@ impl Game {
 
     pub fn start_events(&self) -> Result<String, JsError> {
         self.0.start_events_json().map_err(|e| JsError::new(&e))
+    }
+
+    pub fn view(&self, seat: &str) -> Result<String, JsError> {
+        self.0.view_json(seat).map_err(|e| JsError::new(&e))
     }
 
     pub fn legal_actions(&self) -> Result<String, JsError> {
