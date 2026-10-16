@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: apps/web/.node-version
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal -c rustfmt,clippy -t wasm32-unknown-unknown --no-self-update && rustup default stable
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --workspace --locked
+
+      - name: Build engine-wasm
+        run: cargo build --locked --target wasm32-unknown-unknown -p duel-engine-wasm --release
+
+      - name: No system entropy in the wasm binding
+        run: |
+          tree=$(cargo tree -p duel-engine-wasm --target wasm32-unknown-unknown -e normal --locked --prefix none)
+          if ! grep -q '^rand' <<<"$tree"; then
+            echo "unexpected dependency listing (no rand): the check cannot be trusted" >&2
+            exit 1
+          fi
+          if grep -qE '^getrandom ' <<<"$tree"; then
+            echo "getrandom is in the wasm dependency tree: the engine must stay free of system entropy" >&2
+            exit 1
+          fi
+
+      - name: Install wasm-bindgen-cli at the version of Cargo.lock
+        run: |
+          start=$SECONDS
+          V=$(node apps/web/scripts/build-wasm.mjs --print-version)
+          cargo install wasm-bindgen-cli --version "$V" --locked
+          echo "wasm-bindgen-cli $V installed in $((SECONDS - start))s"
+
+      - name: Install web dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Build web
+        working-directory: apps/web
+        run: npm run build
+
+      - name: Test web
+        working-directory: apps/web
+        run: npm test
