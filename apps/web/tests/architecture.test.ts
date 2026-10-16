@@ -58,9 +58,22 @@ describe("architecture of apps/web/src", () => {
     expect(importers).toContain("engine/load.ts");
   });
 
-  test("data/starter.ts is imported by nothing yet but App/Home (#64): not by engine/, game/ or ui/", () => {
+  test("data/starter.ts and engine/load.ts are read by App only (#64): not by engine/, game/ or ui/", () => {
     for (const f of [...inDir("engine"), ...inDir("game"), ...inDir("ui")]) {
-      for (const spec of importsOf(f.text)) expect(/(^|\/)data\/starter$/.test(spec), `${f.rel} imports ${spec}`).toBe(false);
+      for (const spec of importsOf(f.text)) {
+        expect(/(^|\/)data\/starter$/.test(spec), `${f.rel} imports ${spec}`).toBe(false);
+        expect(/(^|\/)engine\/load$/.test(spec) || (f.rel.startsWith("ui/") && /(^|\/)load$/.test(spec)), `${f.rel} imports ${spec}`).toBe(false);
+      }
+    }
+  });
+
+  test("ui/ only reaches game/ and the engine's types and errors", () => {
+    for (const f of inDir("ui")) {
+      for (const spec of importsOf(f.text)) {
+        if (!spec.startsWith(".")) continue;
+        const ok = /^\.\/[A-Za-z0-9.]+$/.test(spec) || /(^|\/)game\/[a-z-]+$/.test(spec) || /(^|\/)engine\/(types|errors)$/.test(spec);
+        expect(ok, `${f.rel} imports ${spec}`).toBe(true);
+      }
     }
   });
 });
