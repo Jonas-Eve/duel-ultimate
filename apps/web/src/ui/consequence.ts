@@ -1,6 +1,7 @@
 // What an action will do, in words, read ONLY from the engine's preview: the client never
 // computes a cost, a hand-over or an end of game (the engine's time rule is the single one).
 import type { ActionPreview, GameResult, Seat } from "../engine/types";
+import { isAttack } from "../engine/types";
 
 export interface ConsequenceLabels {
   /** "Tu gagnes" / "L'ordinateur gagne". */
@@ -16,7 +17,7 @@ export interface ConsequenceLabels {
  */
 export function describeConsequence(preview: ActionPreview, labels: ConsequenceLabels): string[] {
   const lines: string[] = [];
-  if (preview.cost !== null) lines.push(`Coût : ${preview.cost}`);
+  if (preview.cost !== null) lines.push(`${isAttack(preview.action) ? "Coût d'attaque" : "Coût"} : ${preview.cost}`);
   const end = preview.ends_game;
   if (end !== null) {
     const head = preview.hands_over ? "Passe la main et met fin à la partie" : "Met fin à la partie";

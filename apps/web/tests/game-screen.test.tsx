@@ -75,10 +75,10 @@ describe("the permanent information", () => {
       [false, v.opponent.board],
     ] as const) {
       const names = within(board(mine))
-        .getAllByRole("group")
+        .getAllByRole(mine ? "button" : "group") // my creatures are the attack flow's buttons (#66)
         .map((g) => g.getAttribute("aria-label"));
       expect(names).toEqual(cards.map((x) => label(x)));
-      for (const g of within(board(mine)).getAllByRole("group")) {
+      for (const g of within(board(mine)).getAllByRole(mine ? "button" : "group")) {
         const text = g.textContent ?? "";
         expect(text).toMatch(/Force \d+/);
         expect(text).toMatch(/Attaque \d+/);
@@ -196,7 +196,7 @@ describe("summon and draw", () => {
     await user.click(handButtons()[index]);
 
     expect(handButtons()).toHaveLength(v.you.hand.length - 1);
-    const onBoard = within(board(true)).getAllByRole("group");
+    const onBoard = within(board(true)).getAllByRole("button");
     expect(onBoard.map((g) => g.getAttribute("aria-label"))).toContain(label(card));
     const band = screen.getByRole("group", { name: "Temps et jeton" });
     expect(within(band).getByText(`Temps : ${p.budget_after}`)).toBeTruthy();

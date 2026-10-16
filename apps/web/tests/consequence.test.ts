@@ -40,7 +40,7 @@ describe("describeConsequence, from the engine preview only", () => {
       preview({ action: { attack: { attacker: 3, target: "hero" } }, cost: 1, hands_over: false, budget_after: null, ends_game: { winner: "One", reason: "hero_down" } }),
       labels,
     );
-    expect(lines).toEqual(["Coût : 1", "Met fin à la partie : Tu gagnes. motif:hero_down"]);
+    expect(lines).toEqual(["Coût d'attaque : 1", "Met fin à la partie : Tu gagnes. motif:hero_down"]);
     expect(lines.join(" ")).not.toMatch(/Passe la main/);
   });
 
