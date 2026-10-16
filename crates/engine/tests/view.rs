@@ -351,7 +351,7 @@ fn check_views(state: &GameState, t: &Tracker, context: &str) {
 fn play(setup: GameSetup, seed: u32, mut after: impl FnMut(&GameState, &[Event])) -> GameState {
     let (mut state, start) = new_game(setup, u64::from(seed)).unwrap();
     after(&state, &start);
-    let mut rng = Xorshift(u64::from(seed) * 0x9E37_79B9_7F4A_7C15 + 1);
+    let mut rng = Xorshift(u64::from(seed).wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
     for _ in 0..2_000 {
         let actions: Vec<Action> = legal_actions(&state)
             .into_iter()

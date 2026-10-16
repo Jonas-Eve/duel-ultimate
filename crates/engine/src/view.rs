@@ -14,8 +14,7 @@
 //! as `"One"` / `"Two"` (as [`PlayerId`] serializes everywhere else), reasons as
 //! `hero_down`, `exhaustion`, `concede`.
 
-use crate::CardInstanceId;
-use crate::state::{CardInstance, GameState, PlayerId, PlayerState, WinReason};
+use crate::state::{CardInstance, CardInstanceId, GameState, PlayerId, PlayerState, WinReason};
 use duel_cards::HeroEffect;
 use serde::Serialize;
 
@@ -82,41 +81,56 @@ pub struct PlayerView {
 
 /// Projects `state` for `seat`. Pure: reads the state, touches neither it nor the generator.
 pub fn player_view(state: &GameState, seat: PlayerId) -> PlayerView {
-    let _ = (state, seat);
-    todo_view()
-}
-
-fn todo_view() -> PlayerView {
-    let hero = || HeroView {
-        name: String::new(),
-        health: 0,
-        max_time: 0,
-        effects: Vec::new(),
-    };
+    let you = state.player(seat);
+    let opponent = state.player(seat.opponent());
     PlayerView {
-        seat: PlayerId::One,
-        active: PlayerId::One,
-        budget: 0,
-        result: None,
+        seat,
+        active: state.active,
+        budget: state.budget,
+        result: state
+            .winner
+            .map(|(winner, reason)| GameResult { winner, reason }),
         you: OwnSide {
-            hero: hero(),
-            hand: Vec::new(),
-            deck_count: 0,
-            board: Vec::new(),
-            discard: Vec::new(),
+            hero: hero_view(you),
+            hand: card_views(&you.hand),
+            deck_count: you.deck.len(),
+            board: card_views(&you.board),
+            discard: card_views(&you.discard),
         },
         opponent: OpponentSide {
-            hero: hero(),
-            hand_count: 0,
-            deck_count: 0,
-            board: Vec::new(),
-            discard: Vec::new(),
+            hero: hero_view(opponent),
+            hand_count: opponent.hand.len(),
+            deck_count: opponent.deck.len(),
+            board: card_views(&opponent.board),
+            discard: card_views(&opponent.discard),
         },
     }
 }
 
-#[allow(dead_code)]
-fn unused(_: &CardInstance, _: &PlayerState) {}
+fn hero_view(side: &PlayerState) -> HeroView {
+    HeroView {
+        name: side.hero.name.clone(),
+        health: side.health,
+        max_time: side.hero.max_time,
+        effects: side.hero.effects.clone(),
+    }
+}
+
+fn card_views(cards: &[CardInstance]) -> Vec<CardView> {
+    cards
+        .iter()
+        .map(|card| CardView {
+            id: card.id,
+            name: card.name.clone(),
+            cost: card.stats.cost,
+            force: card.stats.force,
+            attack_cost: card.stats.attack_cost,
+            health: card.stats.health,
+            provocation: card.stats.provocation,
+            riposte: card.stats.riposte,
+        })
+        .collect()
+}
 
 #[cfg(test)]
 mod tests {
