@@ -43,7 +43,7 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
 |---|---|
 | `src/engine/` | contrat JSON typé (`types.ts`, écrit depuis les sources Rust), `GameSession` (`session.ts`, le seul accès au moteur), adaptateur `createWasmSession` (`wasm-session.ts`), chargeur mémoïsé `loadEngine` (`load.ts`), erreurs (`errors.ts`) |
 | `src/game/` | logique du client sans React ni WASM : la graine (`seed.ts`), les enregistrements de journal (`records.ts`), la politique de l'ordinateur (`computer.ts`), le contrôleur de la partie locale (`controller.ts`), le démarrage sans exception (`start.ts`) et le modèle d'écran (`screen-model.ts`) |
-| `src/ui/` | composants et textes français : écrans (`Home`, `GameScreen`, `EndScreen`, `FatalScreen`), éléments (`HeroBar`, `TimeBand`, `Board`, `CardTile`, `Hand`, `ActionBar`, `ThinkingIndicator`, `ErrorBanner`), dialogues (`Dialog`, `ConfirmDialog`), textes (`fr.ts`, `errors.fr.ts`) et `consequence.ts` |
+| `src/ui/` | composants et textes français : écrans (`Home`, `GameScreen`, `EndScreen`, `FatalScreen`), éléments (`HeroBar`, `TimeBand`, `Board`, `CardTile`, `Hand`, `ActionBar`, `ThinkingIndicator`, `ErrorBanner`, `LogBar`, `LogHistory`), dialogues (`Dialog`, `ConfirmDialog`, `LogDrawer`, `DiscardDialog`), textes (`fr.ts`, `errors.fr.ts`), `consequence.ts` et le formateur du journal `log-format.ts` |
 | `src/App.tsx` | assemble les écrans ; le seul à lire `data/starter` et `engine/load` |
 | `src/data/starter.ts` | données `starter` importées en `?raw` |
 | `vite/csp-plugin.ts` | plugin Vite de la CSP de build |
@@ -144,8 +144,8 @@ les deux sièges, aucun pilote).
 ## Interface
 
 Contre l'ordinateur, jouable de bout en bout : accueil, partie, tour de l'ordinateur, fin de partie.
-Il n'y a qu'un mode (pas de sélecteur) ; l'attaque (#66), le journal et les défausses (#65) et le mode
-deux camps (#67) viennent ensuite.
+Il n'y a qu'un mode (pas de sélecteur) ; l'attaque (#66) et le mode deux camps (#67) viennent
+ensuite (le journal et les défausses sont là, #65).
 
 - **`App`** (`src/App.tsx`) : charge le moteur pendant l'écran de chargement (« Lancer la partie » reste
   inactif ; échec : message français et « Recharger »), garde la `GameFactory`, puis assemble la session
@@ -200,3 +200,32 @@ deux camps (#67) viennent ensuite.
   réutilisé par #65 à #67) cherche un scénario de façon bornée et échoue explicitement.
 
 Évolution prévue : PWA, puis application native (Capacitor) sans réécriture.
+
+## Journal et défausses
+
+- **Formateur** (`ui/log-format.ts`, pur, sans React, textes dans `fr.ts`) : `formatRecords(records, ctx)`
+  donne une `LogLine` française par événement (les `drew` consécutifs d'un joueur et `token_moved` +
+  `active_player_changed` fusionnent) ; `formatBlocks` les groupe en blocs titrés (« Début de partie »,
+  « Ton tour », « Tour de l'ordinateur », « Camp 1 — Ruée »). Le contexte vient du snapshot
+  (`logContext(snapshot)` : mode, `youSeat = snapshot.humanSeat`, libellés tirés des noms de deck, jamais
+  `SideModel.label`, qui dépend de la position haut/bas). 2e personne pour le siège humain (« Tu
+  invoques Pillard »), 3e sinon. Clé de regroupement : `by` pour le démarrage et l'ordinateur,
+  (`by`, `actor`) pour l'humain, car en deux camps `by` vaut toujours `human`. Un nom absent donne
+  « une carte », jamais un identifiant.
+- **Exhaustivité** : `switch` sur `eventKind` avec une branche `never` qui lève ; le test
+  `tests/log-format.test.ts` lit `enum Event` de `crates/engine/src/rules.rs` et exige un `case` par
+  variante, donc une variante Rust ajoutée casse la compilation puis le test.
+- **Confidentialité = choix d'affichage** : contre l'ordinateur les enregistrements sont écrits d'après
+  la seule vue du siège humain ; sa pioche s'affiche « L'ordinateur pioche 2 cartes. » **parce que le nom
+  manque**. Pas de table globale id -> nom : elle nommerait une pioche après coup (l'écran reformate tout
+  à chaque rendu, le test le rejoue deux fois). Ce n'est pas une garantie de sécurité. Les tests de
+  parties complètes (80 parties, vrai WASM) lisent la vraie main de l'ordinateur sur la session interne
+  par le décorateur de test, jamais par le contrôleur.
+- **Régions vives** : `LogBar` (dernière ligne, toujours visible, tiroir ouvert ou non) est un
+  `role="log"` `aria-live="polite"` `aria-atomic="false"`, mais `aria-live="off"` pendant le tour de
+  l'ordinateur **et** tant que le résumé « L'ordinateur a joué N actions » est l'annonce en cours (une
+  seule annonce de fin de chaîne, jamais deux) ; il redevient poli à l'action suivante. `LogDrawer` (bouton
+  « Journal », `Dialog` titré « Journal ») et le journal complet de `EndScreen` sont des listes non vives.
+- **Défausses** (`DiscardDialog`) : bouton « Défausse (N) » dans chaque `HeroBar`, les cartes dans
+  l'ordre de mort (`view.discard`), « Détruite » au lieu de « PV 0 » (les PV initiaux ne sont pas dans la
+  vue). Le journal et les défausses restent consultables pendant le tour de l'ordinateur.
