@@ -79,6 +79,8 @@ export const fr = {
   cancel: "Annuler",
   emptyHand: "Aucune carte en main",
 
+  /** Visible caption above the other camp's hand (two camps): the region itself is named by `campRegion`. */
+  otherHandCaption: (label: string) => `Main de ${label} (non jouable)`,
   regionHero: "héros",
   regionBoard: "plateau",
   regionHand: "main",

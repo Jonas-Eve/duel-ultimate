@@ -159,7 +159,14 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
         label={names.topHero}
         target={attack.selected === null ? undefined : { possible: attack.heroTargetable, onPress: () => setPending("hero") }}
       />
-      {twoCamps && <Hand cards={model.top.hand ?? []} legal={[]} enabled={false} labels={labels} onPlay={submit} label={names.topHand} readOnly />}
+      {twoCamps && (
+        <>
+          <p className="row-caption" aria-hidden="true">
+            {fr.otherHandCaption(model.top.label)}
+          </p>
+          <Hand cards={model.top.hand ?? []} legal={[]} enabled={false} labels={labels} onPlay={submit} label={names.topHand} readOnly />
+        </>
+      )}
       <Board
         cards={model.top.board}
         label={names.topBoard}

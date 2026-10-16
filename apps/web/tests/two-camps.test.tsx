@@ -294,3 +294,11 @@ describe("wording of the consequence lines in two camps", () => {
     expect(notes).not.toMatch(/te restera|adversaire/);
   });
 });
+
+describe("the other camp's hand is captioned", () => {
+  test("a visible caption says it is not playable", () => {
+    const c = makeCampsController("rush", "bulwark", 3);
+    mountGame(c);
+    expect(screen.getByText(`Main de ${CAMP2} (non jouable)`)).toBeTruthy();
+  });
+});
