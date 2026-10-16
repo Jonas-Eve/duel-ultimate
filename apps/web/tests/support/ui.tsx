@@ -48,6 +48,13 @@ export function makeController(
   return c;
 }
 
+/** Two camps: one person plays both seats, no computer. */
+export function makeCampsController(one: string, two: string, seed: number, over: Partial<ControllerDeps> = {}, factory?: GameFactory): GameController {
+  const c = GameController.create({ ...config(one, two, seed), mode: "two-camps" }, realDeps(over, factory));
+  controllers.push(c);
+  return c;
+}
+
 /** Renders `GameScreen` on a controller built here and starts it, like `App` does. */
 export function mountGame(c: GameController) {
   const onReplaySameSeed = vi.fn();
