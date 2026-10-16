@@ -132,20 +132,20 @@ export class GameController {
     if (this.disposed || this.started) return;
     this.started = true;
     this.publish();
-    if (this.currentPhase() === "computer-turn") void this.drive(this.generation);
+    this.driveIfComputerTurn();
   }
 
-  getSnapshot(): Snapshot {
-    return this.snapshot;
-  }
+  // Arrow-function properties, not methods: `useSyncExternalStore(controller.subscribe,
+  // controller.getSnapshot)` passes them detached, so they must not depend on `this` at call time.
+  readonly getSnapshot = (): Snapshot => this.snapshot;
 
-  subscribe(fn: () => void): () => void {
+  readonly subscribe = (fn: () => void): (() => void) => {
     if (this.disposed) return () => undefined;
     this.listeners.add(fn);
     return () => {
       this.listeners.delete(fn);
     };
-  }
+  };
 
   /** The only entry point of human actions: accepts only the identity of a preview of the CURRENT snapshot. */
   submit(preview: ActionPreview): SubmitResult {
@@ -177,7 +177,7 @@ export class GameController {
       return { ok: false, reason: "refused", error };
     }
     this.publish();
-    if (this.currentPhase() === "computer-turn") void this.drive(this.generation);
+    this.driveIfComputerTurn();
     return { ok: true };
   }
 
@@ -205,6 +205,12 @@ export class GameController {
   }
 
   // ---- internals -------------------------------------------------------------------------
+
+  /** A subscriber may have disposed the controller during `publish()`: then nothing starts (no session call after `dispose`). */
+  private driveIfComputerTurn(): void {
+    if (this.disposed || this.currentPhase() !== "computer-turn") return;
+    void this.drive(this.generation);
+  }
 
   private readViews(): Views {
     return this.config.mode === "computer"

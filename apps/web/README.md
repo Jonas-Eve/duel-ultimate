@@ -78,11 +78,13 @@ les deux sièges, aucun pilote).
 
 - **Contrôleur** (`GameController`) : `create(config, deps)` (crée la session, lit `startEvents` et les
   vues, lève `EngineError` si la création échoue), `start()`, `getSnapshot()` (immuable, nouvelle
-  identité à chaque publication), `subscribe(fn)`, `submit(aperçu)`, `concede()`, `clearError()`,
+  identité à chaque publication), `subscribe(fn)` (ces deux-là sont des propriétés fléchées, utilisables
+  détachées : `useSyncExternalStore(controller.subscribe, controller.getSnapshot)`), `submit(aperçu)`, `concede()`, `clearError()`,
   `dispose()`. **L'appelant (`App`) le crée dans un gestionnaire d'événement, jamais dans un
   `useEffect`** : StrictMode rejoue les effets et une libération dans un cleanup tuerait l'instance du
   second montage. `dispose()` incrémente un jeton de génération (le pilote s'arrête à son prochain
-  contrôle), vide les abonnés et libère la session une seule fois. `startGame` (`start.ts`) valide la
+  contrôle), vide les abonnés et libère la session une seule fois ; appelé depuis un abonné pendant `start()` ou
+  `submit()`, il empêche le pilote de démarrer (aucun appel à la session après `dispose`). `startGame` (`start.ts`) valide la
   graine saisie, tire une graine avec `crypto` si elle est vide et ne lève jamais : sans
   `crypto.getRandomValues` il renvoie `entropy_unavailable` (l'écran propose alors la graine manuelle,
   jamais `Math.random`).
