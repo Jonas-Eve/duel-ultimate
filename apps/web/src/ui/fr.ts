@@ -12,6 +12,20 @@ export interface Outcome {
 const other = (s: Seat): Seat => (s === "One" ? "Two" : "One");
 const camp = (s: Seat): string => `Le camp ${s === "One" ? 1 : 2}`;
 
+/** Who a log line is about: `subject` opens a sentence ("Tu", "L'ordinateur"), `tonic` follows a preposition ("toi"). */
+export interface Who {
+  subject: string;
+  tonic: string;
+  you: boolean;
+}
+/** The verb in the second person for the human's seat ("tu invoques"), the third otherwise. */
+const verb = (who: Who, third: string, second: string): string => (who.you ? second : third);
+const damage = (n: number): string => `${n} dégât${n > 1 ? "s" : ""}`;
+const cardCount = (n: number): string => `${n} carte${n > 1 ? "s" : ""}`;
+/** A card name, or "une carte" when the view never gave it (never an id). */
+const named = (name: string | null): string => name ?? "une carte";
+const capital = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+
 export const fr = {
   appTitle: "duel-ultimate",
   loadingEngine: "Chargement du moteur…",
@@ -69,6 +83,41 @@ export const fr = {
   backHome: "Retour à l'accueil",
   fatalTitle: "Partie interrompue",
   unknownCard: "Carte",
+
+  close: "Fermer",
+  logRegion: "Journal",
+  logButton: "Journal",
+  logTitle: "Journal",
+  logHistory: "Historique de la partie",
+  logEmpty: "Aucune action pour le moment.",
+  blockStart: "Début de partie",
+  blockComputer: "Tour de l'ordinateur",
+  blockYou: "Ton tour",
+  discardButton: (n: number) => `Défausse (${n})`,
+  discardTitle: (who: string) => `Défausse : ${who}`,
+  discardEmpty: "Aucune carte détruite",
+  destroyed: "Détruite",
+
+  /** Journal lines. Names are plain text; a missing name reads "une carte", never an identifier. */
+  log: {
+    started: (w: Who, budget: number) => `La partie commence : ${w.subject} ${verb(w, "a", "as")} la main (temps ${budget}).`,
+    effect: (w: Who, effect: string | null, cost: number) =>
+      `${w.subject} ${verb(w, "utilise", "utilises")} ${effect ?? "un effet"} (coût ${cost}).`,
+    drew: (w: Who, count: number, names: string[] | null) =>
+      `${w.subject} ${verb(w, "pioche", "pioches")} ${cardCount(count)}${names === null ? "" : ` : ${names.join(", ")}`}.`,
+    played: (w: Who, card: string | null, cost: number) => `${w.subject} ${verb(w, "invoque", "invoques")} ${named(card)} (coût ${cost}).`,
+    attacked: (w: Who, card: string | null, cost: number) =>
+      `${w.subject} ${verb(w, "attaque", "attaques")} avec ${named(card)} (coût ${cost}).`,
+    heroDamaged: (hero: string, amount: number, left: number) => `Le héros ${hero} subit ${damage(amount)} (PV restants : ${left}).`,
+    creatureDamaged: (card: string | null, amount: number, left: number) =>
+      `${capital(named(card))} subit ${damage(amount)} (PV restants : ${left}).`,
+    riposted: (card: string | null, amount: number, left: number) =>
+      `${capital(named(card))} subit ${damage(amount)} de riposte (PV restants : ${left}).`,
+    died: (card: string | null) => `${capital(named(card))} meurt.`,
+    handPasses: (w: Who, budget: number | null) => `La main passe à ${w.tonic}${budget === null ? "" : ` (temps ${budget})`}.`,
+    handKept: (w: Who, budget: number) => `${w.subject} ${verb(w, "garde", "gardes")} la main (temps restant ${budget}).`,
+    won: (w: Who, why: string) => `${w.subject} ${verb(w, "gagne", "gagnes")} : ${why}`,
+  },
 
   /** Title of the end screen. */
   winnerTitle: (winner: Seat, you: Seat | null): string =>
