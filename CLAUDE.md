@@ -57,6 +57,15 @@ Règles propres à ce repo :
   stricte ; sinon le script échoue avec la commande d'installation exacte. `--print-version` imprime
   cette version (la CI s'en sert). Le contrat d'erreur du binding : une `Error` JS dont `message` est
   la chaîne JSON `{"code","message"}`.
+- **Client web** : aucune règle de jeu en TypeScript. La version de données est une constante
+  unique (`DATA_VERSION = "starter@1.0.0"`, `apps/web/src/data/starter.ts`), épinglée par test contre
+  le chemin importé (`data/starter/1.0.0/`, import `?raw`, `server.fs.allow` dans `vite.config.ts`).
+  Le seul accès au moteur est l'interface `GameSession` (`src/engine/`, couches `engine/` <- `game/`
+  <- `ui/`, gardées par `tests/architecture.test.ts` et `tests/security-policy.test.ts`). La table
+  d'erreurs françaises (`src/ui/errors.fr.ts`) est gardée par `tests/error-codes.test.ts` contre les
+  sources Rust : un nouveau code d'erreur Rust casse ce test tant qu'on n'ajoute pas son texte ; le
+  contrat JSON (`src/engine/types.ts`, `EVENT_KINDS`) est gardé par `tests/wasm.contract.test.ts`.
+  Contre l'ordinateur, la confidentialité de sa main n'est qu'un choix d'affichage local.
 - **CI** (`.github/workflows/ci.yml`, sur `pull_request` et `push` vers `main`) : `fmt`, `clippy`,
   tests Rust, build WASM, contrôle de non-entropie, puis `npm ci`, `npm run build` et `npm test`
   dans `apps/web`. Permissions `contents: read`, actions épinglées par SHA, aucun secret ; sa

@@ -41,6 +41,11 @@ Règles propres à ce repo :
   stricte ; sinon le script échoue avec la commande d'installation exacte. `--print-version` imprime
   cette version (la CI s'en sert). Le contrat d'erreur du binding : une `Error` JS dont `message` est
   la chaîne JSON `{"code","message"}`.
+- **Client web** : aucune règle de jeu en TypeScript ; la version de données est une constante
+  unique (`starter@1.0.0`) épinglée par test contre le chemin importé ; la table d'erreurs françaises
+  est gardée par un test contre les sources Rust (un nouveau code d'erreur Rust casse ce test tant que
+  son texte français manque) ; contre l'ordinateur, la confidentialité de sa main n'est qu'un choix
+  d'affichage local. Détails dans `apps/web/README.md`.
 - **CI** (`.github/workflows/ci.yml`, sur `pull_request` et `push` vers `main`) : `fmt`, `clippy`,
   tests Rust, build WASM, contrôle de non-entropie, puis `npm ci`, `npm run build` et `npm test`
   dans `apps/web`. Permissions `contents: read`, actions épinglées par SHA, aucun secret ; sa
