@@ -99,7 +99,7 @@ describe("the screen: both hands visible, the camp holding the main at the botto
   test("the contents of the decks are never shown: a card name absent from hands, boards, discards and the log is not in the DOM", async () => {
     const c = makeCampsController("rush", "bulwark", 3);
     const { container } = mountGame(c);
-    await inAct(() => playUntil(c, stallPreview, (s) => s.records.length >= 8, 60));
+    await inAct(() => playUntil(c, stallPreview, (s) => s.records.length >= 3, 60));
     const s = c.getSnapshot();
     const known = new Set<string>();
     for (const seat of seats) {
@@ -112,6 +112,7 @@ describe("the screen: both hands visible, the camp holding the main at the botto
     const decks = JSON.parse(DECKS_JSON) as { cards: string[] }[];
     const hidden = new Set(decks.flatMap((d) => d.cards.map((id) => nameOf.get(id)!)).filter((n) => !known.has(n)));
     // The scenario is only meaningful if some name is really unknown at this point.
+    expect(hidden.size).toBeGreaterThan(0);
     for (const name of hidden) expect(container.textContent).not.toContain(name);
     for (const name of known) expect(container.textContent).toContain(name);
   });
