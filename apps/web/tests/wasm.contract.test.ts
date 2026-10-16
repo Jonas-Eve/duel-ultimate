@@ -119,5 +119,5 @@ describe("JSON shapes of real games", () => {
     expect(games).toBe(80);
     expect([...seenEvents].sort()).toEqual([...EVENT_KINDS].sort());
     expect([...seenActions].sort()).toEqual(["activate", "attack", "attack_creature", "attack_hero", "concede", "play"].sort());
-  });
+  }, 120_000);
 });

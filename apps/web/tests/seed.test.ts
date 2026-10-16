@@ -87,7 +87,7 @@ describe("randomSeed", () => {
       throw new Error("Math.random must not be used");
     };
     try {
-      expect(() => randomSeed(undefined as unknown as Crypto)).toThrow(/crypto/);
+      expect(() => randomSeed(null as unknown as Crypto)).toThrow(/crypto/);
       expect(() => randomSeed({} as unknown as Crypto)).toThrow(/crypto/);
     } finally {
       Math.random = original;

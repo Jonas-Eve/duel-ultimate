@@ -31,12 +31,13 @@ export const CLIENT_CODES = [
 
 export type ErrorCode = (typeof ENGINE_CODES)[number] | (typeof CLIENT_CODES)[number];
 
+const FATAL: readonly string[] = ["internal_error", "serialization_failed", "computer_stuck", "computer_chain_limit"];
 
 /**
  * Fatal: the game cannot go on. Rule errors leave the state intact and creation errors mean
  * the game does not exist, so neither is fatal.
  */
-export const isFatalCode = (_code: string): boolean => false; // stub
+export const isFatalCode = (code: string): boolean => FATAL.includes(code);
 
 export class EngineError extends Error {
   readonly code: string;
@@ -45,7 +46,7 @@ export class EngineError extends Error {
     super(message);
     this.name = "EngineError";
     this.code = code;
-    this.fatal = false; // stub
+    this.fatal = isFatalCode(code);
   }
 }
 
@@ -57,6 +58,21 @@ export class SessionDisposedError extends Error {
   }
 }
 
-export function parseEngineError(_e: unknown): EngineError {
-  return new EngineError("", ""); // stub
+export function parseEngineError(e: unknown): EngineError {
+  if (e instanceof EngineError) return e;
+  if (e instanceof Error) {
+    try {
+      const body: unknown = JSON.parse(e.message);
+      if (typeof body === "object" && body !== null) {
+        const { code, message } = body as { code?: unknown; message?: unknown };
+        if (typeof code === "string" && code !== "" && typeof message === "string") {
+          return new EngineError(code, message);
+        }
+      }
+    } catch {
+      // Not the binding's JSON: falls through to the internal error.
+    }
+    return new EngineError("internal_error", e.message);
+  }
+  return new EngineError("internal_error", String(e));
 }

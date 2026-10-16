@@ -58,7 +58,8 @@ describe("legal actions", () => {
         const raw = s.legalActions();
         const timed = s.legalActionsWithTime();
         expect(timed.map((p) => p.action)).toEqual(raw);
-        const chosen = timed.find((p) => p.action === pick(raw))!;
+        const wanted = JSON.stringify(pick(raw));
+        const chosen = timed.find((p) => JSON.stringify(p.action) === wanted)!;
         const events = s.apply(chosen.action);
         expect(events.length).toBeGreaterThan(0);
       }

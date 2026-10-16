@@ -86,17 +86,37 @@ export type EngineEvent =
   | { game_won: { winner: Seat; reason: WinReason } };
 
 /** The variants of `enum Event`, in declaration order: a new Rust variant breaks the contract test. */
-export const EVENT_KINDS = [] as readonly EventKindName[];
-type EventKindName = string;
-export type EventKind = EventKindName;
+export const EVENT_KINDS = [
+  "game_started",
+  "effect_activated",
+  "drew",
+  "played",
+  "attacked",
+  "damaged",
+  "creature_damaged",
+  "riposted",
+  "died",
+  "token_moved",
+  "active_player_changed",
+  "game_won",
+] as const;
+export type EventKind = (typeof EVENT_KINDS)[number];
 
-const todo = (): never => {
-  throw new Error("not implemented");
-};
-export const isPlay = (_a: Action): _a is PlayAction => todo();
-export const isActivate = (_a: Action): _a is ActivateAction => todo();
-export const isAttack = (_a: Action): _a is AttackAction => todo();
-export const isConcede = (_a: Action): _a is "concede" => todo();
-export const isAttackBy = (_attacker: number) => (_a: Action): _a is AttackAction => todo();
-export const isAttackOn = (_target: Target) => (_a: Action): _a is AttackAction => todo();
-export const eventKind = (_e: EngineEvent): EventKind => todo();
+export const isPlay = (a: Action): a is PlayAction => typeof a === "object" && "play" in a;
+export const isActivate = (a: Action): a is ActivateAction => typeof a === "object" && "activate" in a;
+export const isAttack = (a: Action): a is AttackAction => typeof a === "object" && "attack" in a;
+export const isConcede = (a: Action): a is "concede" => a === "concede";
+
+const sameTarget = (a: Target, b: Target): boolean =>
+  a === "hero" || b === "hero" ? a === b : a.creature === b.creature;
+
+export const isAttackBy =
+  (attacker: number) =>
+  (a: Action): a is AttackAction =>
+    isAttack(a) && a.attack.attacker === attacker;
+export const isAttackOn =
+  (target: Target) =>
+  (a: Action): a is AttackAction =>
+    isAttack(a) && sameTarget(a.attack.target, target);
+
+export const eventKind = (e: EngineEvent): EventKind => Object.keys(e)[0] as EventKind;
