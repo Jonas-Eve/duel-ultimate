@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, test, vi } from "vitest";
 import { EngineError } from "../src/engine/errors";
 import type { ActionPreview, Seat } from "../src/engine/types";
 import { GameController, type GameConfig, type Mode, type Snapshot } from "../src/game/controller";
-import { deriveAiSeed } from "../src/game/seed";
+import { deriveAiSeed, mulberry32 } from "../src/game/seed";
 import { PAIRS, decorateSession, initTestEngine, newSession } from "./support/engine";
 import { faultyFactory } from "./support/faulty";
 import { fakeSession } from "./support/fake-session";
@@ -573,6 +573,78 @@ describe("the driver on engine doubles", () => {
     expect(state.applied).toBe(2);
     expect(s.records.every((r) => r.events.every((e) => !("game_won" in e)))).toBe(true);
     c.dispose();
+  });
+});
+
+describe("what the controller writes into its records (mutations 2, 12c, 13a)", () => {
+  test("records are completed from the views taken after each action, computer's steps included", async () => {
+    let computerPlays = 0;
+    let deaths = 0;
+    for (const [one, two] of PAIRS) {
+      const c = GameController.create(config("computer", one, two, 6), realDeps());
+      try {
+        c.start();
+        const { snapshot } = await playHuman(c, randomPreview(6));
+        for (const r of snapshot.records) {
+          for (const e of r.events) {
+            if ("played" in e) {
+              if (e.played.player === "Two") computerPlays += 1;
+              expect(typeof r.cards[e.played.card]?.name, `${one}/${two} seq ${r.seq}`).toBe("string");
+            }
+            if ("died" in e) {
+              deaths += 1;
+              expect(r.cards[e.died.creature]?.health, `${one}/${two} seq ${r.seq}`).toBe(0);
+            }
+          }
+        }
+      } finally {
+        c.dispose();
+      }
+    }
+    expect(computerPlays).toBeGreaterThan(0);
+    expect(deaths).toBeGreaterThan(0);
+  });
+
+  test("dispose while the very first yield is pending: nothing is applied once it resolves", async () => {
+    const { session, probe } = decorateSession(newSession("bulwark", "rush", 3));
+    const gates: (() => void)[] = [];
+    const c = GameController.create(
+      config("computer", "bulwark", "rush", 3),
+      realDeps({ createSession: () => session, scheduler: { yield: () => new Promise<void>((r) => gates.push(r)) } }),
+    );
+    c.start();
+    expect(gates).toHaveLength(1);
+    c.dispose();
+    gates.splice(0).forEach((g) => g());
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(probe.calls.apply).toBe(0);
+    expect(probe.calls.legalActions).toBe(0);
+  });
+
+  test("the computer draws its randomness from mulberry32(deriveAiSeed(seed)), one draw per action", async () => {
+    const seed = 21;
+    const expected = mulberry32(deriveAiSeed(seed));
+    const draws: number[] = [];
+    const reference: number[] = [];
+    const c = GameController.create(
+      config("computer", "bulwark", "rush", seed),
+      realDeps({
+        policy: (actions, rng) => {
+          const got = rng();
+          draws.push(got);
+          reference.push(expected());
+          return Math.floor(got * actions.length);
+        },
+      }),
+    );
+    try {
+      c.start();
+      await playHuman(c, randomPreview(seed));
+      expect(draws.length).toBeGreaterThan(5);
+      expect(draws).toEqual(reference);
+    } finally {
+      c.dispose();
+    }
   });
 });
 
