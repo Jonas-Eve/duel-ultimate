@@ -45,7 +45,7 @@ Règles propres à ce repo :
   unique (`starter@1.0.0`) épinglée par test contre le chemin importé ; la table d'erreurs françaises
   est gardée par un test contre les sources Rust (un nouveau code d'erreur Rust casse ce test tant que
   son texte français manque) ; contre l'ordinateur, la confidentialité de sa main n'est qu'un choix
-  d'affichage local. Détails dans `apps/web/README.md`.
+  d'affichage local. Client : le contrôleur ne calcule ni coût, ni cible, ni fin de partie ; l'ordinateur ne reçoit jamais l'abandon ; le journal contre l'ordinateur est écrit d'après la seule vue du siège humain. Détails dans `apps/web/README.md`.
 - **CI** (`.github/workflows/ci.yml`, sur `pull_request` et `push` vers `main`) : `fmt`, `clippy`,
   tests Rust, build WASM, contrôle de non-entropie, puis `npm ci`, `npm run build` et `npm test`
   dans `apps/web`. Permissions `contents: read`, actions épinglées par SHA, aucun secret ; sa

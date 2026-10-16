@@ -66,6 +66,7 @@ Règles propres à ce repo :
   sources Rust : un nouveau code d'erreur Rust casse ce test tant qu'on n'ajoute pas son texte ; le
   contrat JSON (`src/engine/types.ts`, `EVENT_KINDS`) est gardé par `tests/wasm.contract.test.ts`.
   Contre l'ordinateur, la confidentialité de sa main n'est qu'un choix d'affichage local.
+  Partie locale (`apps/web/src/game/`, #63) : le contrôleur ne calcule ni coût, ni cible, ni fin de partie ; l'ordinateur ne reçoit jamais l'abandon ; le journal contre l'ordinateur est écrit d'après la seule vue du siège humain. Le contrôleur (`GameController`) est créé par l'appelant dans un gestionnaire d'événement, jamais dans un `useEffect` ; `dispose()` annule le pilote et libère la session une fois ; une session qui a levé une erreur fatale (throw non JSON) est morte, plus aucun appel n'atteint le WASM.
 - **CI** (`.github/workflows/ci.yml`, sur `pull_request` et `push` vers `main`) : `fmt`, `clippy`,
   tests Rust, build WASM, contrôle de non-entropie, puis `npm ci`, `npm run build` et `npm test`
   dans `apps/web`. Permissions `contents: read`, actions épinglées par SHA, aucun secret ; sa
