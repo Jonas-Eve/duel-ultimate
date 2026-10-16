@@ -11,14 +11,19 @@ interface HandProps {
   enabled: boolean;
   labels: ConsequenceLabels;
   onPlay(preview: ActionPreview): void;
+  /** The accessible name of the row ("Ta main", or the camp's hand in two camps). */
+  label: string;
+  /** The other camp's hand in two camps: named in full, but plain tiles, never controls. */
+  readOnly?: boolean;
 }
 
-/** The human's hand. Each card's cost and consequence come from its engine preview (found by card id). */
-export function Hand({ cards, legal, enabled, labels, onPlay }: HandProps) {
+/** A hand. Each card's cost and consequence come from its engine preview (found by card id). */
+export function Hand({ cards, legal, enabled, labels, onPlay, label, readOnly = false }: HandProps) {
   return (
-    <div role="group" aria-label={fr.yourHand} tabIndex={0} className="row hand">
+    <div role="group" aria-label={label} tabIndex={0} className="row hand">
       {cards.length === 0 && <p className="empty">{fr.emptyHand}</p>}
       {cards.map((card) => {
+        if (readOnly) return <CardTile key={card.id} card={card} cost={card.cost} />;
         const preview = legal.find((p) => isPlay(p.action) && p.action.play.card === card.id);
         return (
           <CardTile

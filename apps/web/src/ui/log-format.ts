@@ -58,7 +58,7 @@ function format(record: StepRecord, ctx: LogContext): LogLine[] {
     seat === ctx.youSeat ? { subject: "Tu", tonic: "toi", you: true } : { subject: ctx.labels[seat], tonic: ctx.labels[seat], you: false };
   const cardName = (id: number): string | null => record.cards[id]?.name ?? null;
   const cardHealth = (id: number): number => record.cards[id]?.health ?? 0;
-  const outcome = { you: ctx.youSeat, heroName: (seat: Seat) => record.hero[seat].name };
+  const outcome = { you: ctx.youSeat, heroName: (seat: Seat) => record.hero[seat].name, camp: (seat: Seat) => ctx.labels[seat] };
 
   const lines: LogLine[] = [];
   const push = (index: number, text: string, tone: LogLine["tone"]) =>

@@ -6,12 +6,14 @@ interface ConfirmDialogProps {
   lines: string[];
   onConfirm(): void;
   onCancel(): void;
+  /** Two camps: "Le camp N abandonne ?"; defaults to the single-player title. */
+  title?: string;
 }
 
 /** Concession confirmation. "Continuer" comes first so it holds the focus: the safe answer. */
-export function ConfirmDialog({ lines, onConfirm, onCancel }: ConfirmDialogProps) {
+export function ConfirmDialog({ lines, onConfirm, onCancel, title = fr.concedeTitle }: ConfirmDialogProps) {
   return (
-    <Dialog title={fr.concedeTitle} onClose={onCancel}>
+    <Dialog title={title} onClose={onCancel}>
       {lines.map((l) => (
         <p key={l}>{l}</p>
       ))}

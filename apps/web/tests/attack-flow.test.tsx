@@ -81,10 +81,15 @@ function twinOf(g: Game) {
 
 // ---------- DOM helpers ----------
 
-const board = (isMine: boolean) => screen.getByRole("group", { name: isMine ? "Ton plateau" : "Plateau adverse" });
+/** Two camps name their regions after the camp ("Camp 1 — Ruée : plateau"); set by that test only. */
+let campNames: { bottom: string; top: string } | null = null;
+const board = (isMine: boolean) =>
+  screen.getByRole("group", {
+    name: campNames !== null ? `${isMine ? campNames.bottom : campNames.top} : plateau` : isMine ? "Ton plateau" : "Plateau adverse",
+  });
 const myTiles = () => within(board(true)).getAllByRole("button") as HTMLButtonElement[];
 const theirTiles = () => within(board(false)).getAllByRole("button") as HTMLButtonElement[];
-const heroGroup = () => screen.getByRole("group", { name: "Héros adverse" });
+const heroGroup = () => screen.getByRole("group", { name: campNames !== null ? `${campNames.top} : héros` : "Héros adverse" });
 const heroTarget = () => within(heroGroup()).getByRole("button", { name: /cible (possible|non disponible)/ }) as HTMLButtonElement;
 const sheet = () => screen.queryByRole("dialog", { name: "Confirmer l'attaque" });
 const disabled = (el: Element) => el.getAttribute("aria-disabled") === "true";
@@ -540,6 +545,8 @@ describe("two camps", () => {
     const { user } = mountGame(c!);
     const s = c!.getSnapshot();
     const active = s.views.One!.active;
+    const camp = (seat: "One" | "Two") => `Camp ${seat === "One" ? 1 : 2} — ${seat === "One" ? "Ruée" : "Rempart"}`;
+    campNames = { bottom: camp(active), top: camp(active === "One" ? "Two" : "One") };
     const v = s.views[active]!;
     const attacker = v.you.board.findIndex((x) => s.legal.some((p) => isAttackBy(x.id)(p.action)));
     await user.click(myTiles()[attacker]);
@@ -558,6 +565,7 @@ describe("two camps", () => {
       await user.click(within(sheet()!).getByRole("button", { name: "Confirmer" }));
       expect(c!.getSnapshot().records.length).toBe(before + 1);
     }
+    campNames = null;
     c!.dispose();
   });
 });

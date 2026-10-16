@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { EngineError } from "../engine/errors";
-import type { DeckRef } from "../game/controller";
+import type { DeckRef, Mode } from "../game/controller";
 import type { StartResult } from "../game/start";
 import { messageFor } from "./errors.fr";
 import { fr } from "./fr";
@@ -15,12 +15,30 @@ interface HomeProps {
   status: "loading" | "ready" | "failed";
   loadError: EngineError | null;
   startError: StartFailure | null;
-  onStart(deckId: string, seedText: string): void;
+  /** Against the computer `deckTwo` is the opponent's deck (the other one); in two camps it is camp 2's. */
+  onStart(start: { mode: Mode; deckOne: string; deckTwo: string; seedText: string }): void;
   onReload(): void;
 }
 
+function DeckGroup({ name, legend, decks, value, onChange }: { name: string; legend: string; decks: DeckRef[]; value: string; onChange(id: string): void }) {
+  return (
+    <fieldset className="decks">
+      <legend>{legend}</legend>
+      {decks.map((d) => (
+        <label key={d.id} className="deck-choice">
+          <input type="radio" name={name} value={d.id} checked={d.id === value} onChange={() => onChange(d.id)} />
+          {d.name}
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
 export function Home({ decks, dataVersion, status, loadError, startError, onStart, onReload }: HomeProps) {
+  const [mode, setMode] = useState<Mode>("computer");
   const [deckId, setDeckId] = useState(decks[0]?.id ?? "");
+  // Camp 2's deck follows "the other deck" until the player picks one (the mirror is allowed).
+  const [chosenTwo, setChosenTwo] = useState<string | null>(null);
   const [seedText, setSeedText] = useState("");
   const seed = useRef<HTMLInputElement>(null);
   const ids = useId();
@@ -33,6 +51,7 @@ export function Home({ decks, dataVersion, status, loadError, startError, onStar
   }, [startError]);
 
   const opponent = decks.find((d) => d.id !== deckId);
+  const deckTwoId = chosenTwo ?? opponent?.id ?? deckId;
   const seedMessage =
     startError === null || startError.reason === "engine"
       ? null
@@ -62,19 +81,29 @@ export function Home({ decks, dataVersion, status, loadError, startError, onStar
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (status === "ready") onStart(deckId, seedText);
+          if (status === "ready") onStart({ mode, deckOne: deckId, deckTwo: mode === "computer" ? (opponent?.id ?? deckId) : deckTwoId, seedText });
         }}
       >
         <fieldset className="decks">
-          <legend>{fr.deckLegend}</legend>
-          {decks.map((d) => (
-            <label key={d.id} className="deck-choice">
-              <input type="radio" name="deck" value={d.id} checked={d.id === deckId} onChange={() => setDeckId(d.id)} />
-              {d.name}
+          <legend>{fr.modeLegend}</legend>
+          {(
+            [
+              ["computer", fr.modeComputer],
+              ["two-camps", fr.modeTwoCamps],
+            ] as const
+          ).map(([value, text]) => (
+            <label key={value} className="deck-choice">
+              <input type="radio" name="mode" value={value} checked={mode === value} onChange={() => setMode(value)} />
+              {text}
             </label>
           ))}
         </fieldset>
-        {opponent !== undefined && <p>{fr.opponentDeck(opponent.name)}</p>}
+        <DeckGroup name="deck" legend={mode === "computer" ? fr.deckLegend : fr.campDeckLegend(1)} decks={decks} value={deckId} onChange={setDeckId} />
+        {mode === "computer" ? (
+          opponent !== undefined && <p>{fr.opponentDeck(opponent.name)}</p>
+        ) : (
+          <DeckGroup name="deck-two" legend={fr.campDeckLegend(2)} decks={decks} value={deckTwoId} onChange={setChosenTwo} />
+        )}
 
         <label htmlFor={`${ids}-seed`} className="field-label">
           {fr.seedLabel}

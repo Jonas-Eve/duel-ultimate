@@ -106,10 +106,8 @@ export function App({ deps = {} }: { deps?: AppDeps }) {
     result.controller.start();
   };
 
-  const startFromHome = (deckId: string, seedText: string) => {
-    const other = DECKS.find((d) => d.id !== deckId);
-    begin("computer", deckId, other?.id ?? deckId, seedText);
-  };
+  const startFromHome = (s: { mode: Mode; deckOne: string; deckTwo: string; seedText: string }) =>
+    begin(s.mode, s.deckOne, s.deckTwo, s.seedText);
 
   // "Replay" is built from the current snapshot: same decks and mode, the same seed or a new draw.
   const replay = (sameSeed: boolean) => {

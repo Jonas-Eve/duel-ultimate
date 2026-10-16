@@ -25,7 +25,7 @@ export function EndScreen({ snapshot, onReplaySameSeed, onReplayNewSeed, onHome 
   return (
     <section className="screen end-screen" aria-labelledby="end-title">
       <h2 id="end-title" ref={title} tabIndex={-1}>
-        {result === null ? "" : fr.winnerTitle(result.winner, outcome.you)}
+        {result === null ? "" : fr.winnerTitle(result.winner, outcome)}
       </h2>
       {result !== null && <p>{endReason(result, outcome)}</p>}
       <p>{fr.seed(snapshot.seed)}</p>

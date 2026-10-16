@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { EngineError } from "../src/engine/errors";
 import { DATA_VERSION } from "../src/data/starter";
 import { messageFor } from "../src/ui/errors.fr";
@@ -12,20 +12,72 @@ useAppEngine();
 const home = async () => screen.findByRole("heading", { name: "Choisis ton deck" });
 
 describe("home screen", () => {
-  test("shows the data version, the decks, the opponent's deck, and no mode selector", async () => {
+  test("shows the data version, the decks, the opponent's deck (computer mode by default)", async () => {
     const { user } = renderApp();
     await home();
     expect(screen.getByText(`Données : ${DATA_VERSION}`)).toBeTruthy();
     expect(DATA_VERSION).toBe("starter@1.0.0");
     expect(screen.getByRole("radio", { name: "Ruée" })).toBeTruthy();
     expect(screen.getByRole("radio", { name: "Rempart" })).toBeTruthy();
-    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    // Two mode radios plus the two decks.
+    expect(screen.getAllByRole("radio")).toHaveLength(4);
     // The other deck goes to the opponent, and follows the choice.
     expect(screen.getByText("L'adversaire joue : Rempart")).toBeTruthy();
     await user.click(screen.getByRole("radio", { name: "Rempart" }));
     expect(screen.getByText("L'adversaire joue : Ruée")).toBeTruthy();
-    // One single mode: no mode control, no disabled "soon" control.
-    expect(screen.queryByText(/deux camps|je joue les deux|mode/i)).toBeNull();
+  });
+
+  test("mode group: computer by default, two camps on demand, the second deck only in two camps", async () => {
+    const { user } = renderApp();
+    await home();
+    const mode = screen.getByRole("group", { name: "Mode" });
+    const computer = within(mode).getByRole("radio", { name: "Contre l'ordinateur" }) as HTMLInputElement;
+    const camps = within(mode).getByRole("radio", { name: "Je joue les deux camps" }) as HTMLInputElement;
+    expect(computer.checked).toBe(true);
+    expect(camps.checked).toBe(false);
+    expect(screen.getByRole("group", { name: "Ton deck" })).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Deck du camp 1" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Deck du camp 2" })).toBeNull();
+
+    await user.click(camps);
+    expect(camps.checked).toBe(true);
+    const one = screen.getByRole("group", { name: "Deck du camp 1" });
+    const two = screen.getByRole("group", { name: "Deck du camp 2" });
+    expect(screen.queryByRole("group", { name: "Ton deck" })).toBeNull();
+    expect(screen.queryByText(/L'adversaire joue/)).toBeNull();
+    // Default: the OTHER deck goes to camp 2, and follows camp 1 until camp 2 is chosen.
+    const checked = (g: HTMLElement) => (within(g).getAllByRole("radio") as HTMLInputElement[]).find((r) => r.checked)?.labels?.[0]?.textContent;
+    expect([checked(one), checked(two)]).toEqual(["Ruée", "Rempart"]);
+    await user.click(within(one).getByRole("radio", { name: "Rempart" }));
+    expect([checked(one), checked(two)]).toEqual(["Rempart", "Ruée"]);
+    // The mirror is accepted: the same deck on both sides.
+    await user.click(within(two).getByRole("radio", { name: "Rempart" }));
+    expect([checked(one), checked(two)]).toEqual(["Rempart", "Rempart"]);
+    // Back to the computer: the opponent line returns.
+    await user.click(computer);
+    expect(screen.getByText("L'adversaire joue : Ruée")).toBeTruthy();
+  });
+
+  test("the chosen mode and decks reach the controller: a two-camps game, camp labels, no computer", async () => {
+    const policy = vi.fn(() => 0);
+    const { user, counters } = renderApp({ policy });
+    await launch(user, { twoCamps: true, deckOne: "Rempart", deckTwo: "Ruée", seed: "4" });
+    // Rempart is seat One (camp 1) but Ruée has the initiative: the camp holding the main is at the bottom.
+    expect(screen.getByRole("group", { name: "Camp 2 — Ruée : héros" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Camp 1 — Rempart : héros" })).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText(/ordinateur/i)).toBeNull();
+    expect(counters).toMatchObject({ creations: 1, seeds: [4] });
+    expect(policy).not.toHaveBeenCalled();
+  });
+
+  test("the mirror launches a game, camps told apart by their number", async () => {
+    const { user } = renderApp();
+    await launch(user, { twoCamps: true, deckOne: "Ruée", deckTwo: "Ruée", seed: "9" });
+    expect(screen.getByRole("group", { name: "Camp 1 — Ruée : héros" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Camp 2 — Ruée : héros" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Camp 1 — Ruée : main" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Camp 2 — Ruée : main" })).toBeTruthy();
   });
 
   test("does not say who starts (initiative decides, known only once the game exists)", async () => {

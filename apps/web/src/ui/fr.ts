@@ -3,14 +3,17 @@
 // used in `aria-label`s, never as HTML.
 import type { GameResult, Seat } from "../engine/types";
 
-/** Who is who, to word a result from the player's side. `you` is null when one person plays both camps. */
+/**
+ * Who is who, to word a result from the player's side. `you` is null when one person plays both
+ * camps; `camp` then names a camp independently of its position on screen ("Camp 2 — Rempart").
+ */
 export interface Outcome {
   you: Seat | null;
   heroName(seat: Seat): string;
+  camp(seat: Seat): string;
 }
 
 const other = (s: Seat): Seat => (s === "One" ? "Two" : "One");
-const camp = (s: Seat): string => `Le camp ${s === "One" ? 1 : 2}`;
 
 /** Who a log line is about: `subject` opens a sentence ("Tu", "L'ordinateur"), `tonic` follows a preposition ("toi"). */
 export interface Who {
@@ -32,7 +35,11 @@ export const fr = {
   reload: "Recharger",
 
   homeHeading: "Choisis ton deck",
+  modeLegend: "Mode",
+  modeComputer: "Contre l'ordinateur",
+  modeTwoCamps: "Je joue les deux camps",
   deckLegend: "Ton deck",
+  campDeckLegend: (n: 1 | 2) => `Deck du camp ${n}`,
   gameRegion: "Partie",
   seedLabel: "Graine (optionnelle)",
   seedHelp: "Laisse vide pour une graine aléatoire (nombre entier de 0 à 4 294 967 295)",
@@ -42,6 +49,11 @@ export const fr = {
   entropyUnavailable:
     "Ton appareil ne peut pas tirer de graine au hasard. Saisis une graine (nombre entier de 0 à 4 294 967 295) pour lancer la partie.",
 
+  /** Two camps: the camp holding the main, named (replaces "À toi" / "À l'adversaire"). */
+  turnOf: (label: string) => `Au tour de ${label}`,
+  /** Two camps: a region named after its camp, so that the mirror stays unambiguous ("Camp 2 — Ruée : main"). */
+  campRegion: (label: string, what: string) => `${label} : ${what}`,
+  campConcedeTitle: (n: 1 | 2) => `Le camp ${n} abandonne ?`,
   yourTurn: "À toi",
   opponentTurn: "À l'adversaire",
   time: (n: number) => `Temps : ${n}`,
@@ -67,6 +79,11 @@ export const fr = {
   cancel: "Annuler",
   emptyHand: "Aucune carte en main",
 
+  /** Visible caption above the other camp's hand (two camps): the region itself is named by `campRegion`. */
+  otherHandCaption: (label: string) => `Main de ${label} (non jouable)`,
+  regionHero: "héros",
+  regionBoard: "plateau",
+  regionHand: "main",
   yourHero: "Ton héros",
   opponentHero: "Héros adverse",
   yourBoard: "Ton plateau",
@@ -131,11 +148,11 @@ export const fr = {
   },
 
   /** Title of the end screen. */
-  winnerTitle: (winner: Seat, you: Seat | null): string =>
-    you === null ? `${camp(winner)} a gagné.` : winner === you ? fr.youWon : fr.computerWon,
+  winnerTitle: (winner: Seat, who: Outcome): string =>
+    who.you === null ? `${who.camp(winner)} a gagné.` : winner === who.you ? fr.youWon : fr.computerWon,
   /** The winner as a predicate, for the consequence line. */
-  winnerPhrase: (winner: Seat, you: Seat | null): string =>
-    you === null ? `${camp(winner)} gagne` : winner === you ? "Tu gagnes" : "L'ordinateur gagne",
+  winnerPhrase: (winner: Seat, who: Outcome): string =>
+    who.you === null ? `${who.camp(winner)} gagne` : winner === who.you ? "Tu gagnes" : "L'ordinateur gagne",
 } as const;
 
 /** Why the game ended, from the loser's side. One wording, shared by the end screen and the consequence lines. */
@@ -144,7 +161,7 @@ export function endReason(result: GameResult, who: Outcome): string {
   // The verb agrees with the subject: "Tu n'avais", "L'ordinateur n'avait".
   const subject =
     who.you === null
-      ? { name: camp(loser), lacked: "n'avait", conceded: "a abandonné" }
+      ? { name: who.camp(loser), lacked: "n'avait", conceded: "a abandonné" }
       : loser === who.you
         ? { name: "Tu", lacked: "n'avais", conceded: "as abandonné" }
         : { name: "L'ordinateur", lacked: "n'avait", conceded: "a abandonné" };

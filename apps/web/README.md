@@ -143,9 +143,32 @@ les deux sièges, aucun pilote).
 
 ## Interface
 
-Contre l'ordinateur, jouable de bout en bout : accueil, partie, tour de l'ordinateur, fin de partie.
-Il n'y a qu'un mode (pas de sélecteur) ; le mode deux camps (#67) vient ensuite (le journal et les
-défausses sont là, #65 ; l'attaque aussi, #66).
+Jouable de bout en bout dans deux modes, choisis à l'accueil (groupe « Mode ») : contre l'ordinateur
+(par défaut) et « Je joue les deux camps » (#67). Le journal et les défausses sont là (#65), l'attaque
+aussi (#66).
+
+### Mode deux camps
+
+Pour reproduire à la main une situation précise que le hasard d'une IA ne produirait pas : une seule
+personne joue les deux decks (« Deck du camp 1 » et « Deck du camp 2 » ; par défaut l'autre deck pour le
+camp 2, le miroir est accepté ; le siège `One` est toujours le camp 1). Le mode ne change qu'une chose :
+c'est l'humain qui choisit l'action des deux sièges (le contrôleur n'a pas de pilote). L'écran est le
+même, alimenté par `toScreenModel` :
+
+- le **camp qui a le jeton** est en bas (zone « joueur », mains et actions jouables) ; l'autre camp est en
+  haut avec **sa main visible** (tuiles non jouables, légende « Main de … (non jouable) ») ; à la
+  passation du jeton haut et bas s'échangent aussitôt, **sans écran de passage d'appareil** ; une
+  annonce `aria-live` dit « Au tour de {camp} » et le focus passe à la région de partie (la tuile
+  pressée a pu quitter la main) ;
+- les camps sont nommés « Camp 1 — Ruée » / « Camp 2 — Rempart » (jamais « joueur 1/2 » seul) : bandeau
+  central (« Au tour de … »), régions (« Camp 2 — Rempart : main »), dialogue d'abandon (« Le camp N
+  abandonne ? »), écran de fin (« Camp 2 — Rempart a gagné. »), journal (tout nommé, y compris les
+  pioches des deux camps, blocs titrés par camp) ; le miroir reste lisible par le numéro de camp ;
+- **rien n'est masqué hors le contenu des pioches** (le moteur ne fournit que `deck_count`) : ne pas
+  croire qu'un camp est « caché » à l'autre, ce n'est pas un mode sécurisé ; **aucune graine de
+  l'ordinateur** (il n'y en a pas) : seule la graine de partie est affichée, pendant la partie et à la
+  fin ; « Rejouer » (même graine ou nouvelle) rejoue le même mode et les mêmes decks (depuis le
+  snapshot).
 
 - **`App`** (`src/App.tsx`) : charge le moteur pendant l'écran de chargement (« Lancer la partie » reste
   inactif ; échec : message français et « Recharger »), garde la `GameFactory`, puis assemble la session
