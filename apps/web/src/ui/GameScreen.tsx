@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
-import { isAttackBy, isConcede, type ActionPreview, type Target } from "../engine/types";
+import { isAttackBy, isConcede, type ActionPreview, type Seat, type Target } from "../engine/types";
 import type { GameController, Phase } from "../game/controller";
 import { toScreenModel } from "../game/screen-model";
 import { ActionBar } from "./ActionBar";
@@ -45,6 +45,22 @@ function useChainAnnouncement(phase: Phase, computerSteps: number, recordCount: 
   return announced !== null && announced.at === recordCount ? announced.message : "";
 }
 
+/**
+ * Two camps: "Au tour de {camp}" when the main changes camp (the swap of top and bottom is silent
+ * without it). Like the chain announcement it is produced on the transition only and goes away
+ * as soon as the next action is recorded. `token` counts the swaps: the screen moves the focus to
+ * its region on each one, since the tile that was pressed may have left the hand.
+ */
+function useTurnAnnouncement(active: Seat | null, recordCount: number, text: (seat: Seat) => string): { message: string; token: number } {
+  const [seen, setSeen] = useState(active);
+  const [state, setState] = useState({ message: "", at: -1, token: 0 });
+  if (seen !== active) {
+    setSeen(active);
+    if (seen !== null && active !== null) setState({ message: text(active), at: recordCount, token: state.token + 1 });
+  }
+  return { message: state.at === recordCount ? state.message : "", token: state.token };
+}
+
 export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHome }: GameScreenProps) {
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [confirming, setConfirming] = useState(false);
@@ -60,7 +76,15 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
   useEffect(() => {
     if (focusToken > 0) region.current?.focus();
   }, [focusToken]);
-  const announcement = useChainAnnouncement(snapshot.phase, snapshot.computerSteps, snapshot.records.length);
+  const twoCamps = snapshot.mode === "two-camps";
+  const chain = useChainAnnouncement(snapshot.phase, snapshot.computerSteps, snapshot.records.length);
+  const turn = useTurnAnnouncement(twoCamps ? (snapshot.views.One?.active ?? null) : null, snapshot.records.length, (seat) =>
+    fr.turnOf(logContext(snapshot).labels[seat]),
+  );
+  const announcement = twoCamps ? turn.message : chain;
+  useEffect(() => {
+    if (turn.token > 0) region.current?.focus();
+  }, [turn.token]);
 
   if (snapshot.phase === "fatal") {
     return <FatalScreen snapshot={snapshot} onReplaySameSeed={onReplaySameSeed} onHome={onHome} />;
@@ -73,6 +97,25 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
   const labels = consequenceLabels(outcomeOf(snapshot, model));
   const humanTurn = snapshot.phase === "human-turn";
   const ctx = logContext(snapshot);
+  // Names of the regions: fixed against the computer; the camp's own name in two camps, which also
+  // tells the two sides of a mirror apart.
+  const names = twoCamps
+    ? {
+        topHero: fr.campRegion(model.top.label, fr.regionHero),
+        topBoard: fr.campRegion(model.top.label, fr.regionBoard),
+        topHand: fr.campRegion(model.top.label, fr.regionHand),
+        bottomHero: fr.campRegion(model.bottom.label, fr.regionHero),
+        bottomBoard: fr.campRegion(model.bottom.label, fr.regionBoard),
+        bottomHand: fr.campRegion(model.bottom.label, fr.regionHand),
+      }
+    : {
+        topHero: fr.opponentHero,
+        topBoard: fr.opponentBoard,
+        topHand: "",
+        bottomHero: fr.yourHero,
+        bottomBoard: fr.yourBoard,
+        bottomHand: fr.yourHand,
+      };
   const lastLine = formatRecords(snapshot.records.slice(-1), ctx).at(-1);
   const concede = snapshot.legal.find((p) => isConcede(p.action));
   // The interface hands back a preview of the CURRENT snapshot, never an action of its own;
@@ -113,12 +156,13 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
       {snapshot.error !== null && <ErrorBanner error={snapshot.error} onClose={() => controller.clearError()} />}
       <HeroBar
         side={model.top}
-        label={fr.opponentHero}
+        label={names.topHero}
         target={attack.selected === null ? undefined : { possible: attack.heroTargetable, onPress: () => setPending("hero") }}
       />
+      {twoCamps && <Hand cards={model.top.hand ?? []} legal={[]} enabled={false} labels={labels} onPlay={submit} label={names.topHand} readOnly />}
       <Board
         cards={model.top.board}
-        label={fr.opponentBoard}
+        label={names.topBoard}
         tileProps={
           attack.selected === null
             ? undefined
@@ -129,7 +173,7 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
         }
       />
       {snapshot.phase === "computer-turn" && <ThinkingIndicator />}
-      <TimeBand model={model} />
+      <TimeBand model={model} twoCamps={twoCamps} />
       {attack.selected !== null && (
         <button type="button" className="btn" onClick={clearAttack}>
           {fr.cancelSelection}
@@ -137,7 +181,7 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
       )}
       <Board
         cards={model.bottom.board}
-        label={fr.yourBoard}
+        label={names.bottomBoard}
         tileProps={(card) => {
           const can = hasAttack(card.id);
           const isSelected = attack.selected === card.id;
@@ -149,7 +193,7 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
           };
         }}
       />
-      <HeroBar side={model.bottom} label={fr.yourHero} />
+      <HeroBar side={model.bottom} label={names.bottomHero} />
       <p aria-live="polite" className="announce">
         {announcement}
       </p>
@@ -159,7 +203,7 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
           {fr.logButton}
         </button>
       </div>
-      <Hand cards={model.bottom.hand ?? []} legal={snapshot.legal} enabled={humanTurn} labels={labels} onPlay={submit} />
+      <Hand cards={model.bottom.hand ?? []} legal={snapshot.legal} enabled={humanTurn} labels={labels} onPlay={submit} label={names.bottomHand} />
       <ActionBar
         hero={model.bottom.hero}
         legal={snapshot.legal}
@@ -183,6 +227,7 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
       )}
       {confirming && concede !== undefined && (
         <ConfirmDialog
+          title={twoCamps ? fr.campConcedeTitle(model.bottom.seat === "One" ? 1 : 2) : undefined}
           lines={describeConsequence(concede, labels)}
           onCancel={() => setConfirming(false)}
           onConfirm={() => {

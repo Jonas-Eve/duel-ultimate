@@ -139,8 +139,8 @@ describe("game_won carries the right reason", () => {
     expect(won("Two", "concede")).toBe("L'ordinateur gagne : Tu as abandonné.");
   });
   test("two camps", () => {
-    expect(won("One", "concede", CAMPS)).toBe("Camp 1 — Ruée gagne : Le camp 2 a abandonné.");
-    expect(won("Two", "exhaustion", CAMPS)).toBe("Camp 2 — Rempart gagne : Le camp 1 n'avait plus aucune action possible (épuisement).");
+    expect(won("One", "concede", CAMPS)).toBe("Camp 1 — Ruée gagne : Camp 2 — Rempart a abandonné.");
+    expect(won("Two", "exhaustion", CAMPS)).toBe("Camp 2 — Rempart gagne : Camp 1 — Ruée n'avait plus aucune action possible (épuisement).");
   });
 });
 

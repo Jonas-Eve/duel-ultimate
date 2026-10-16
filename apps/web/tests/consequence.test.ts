@@ -5,6 +5,8 @@ import { describeConsequence, type ConsequenceLabels } from "../src/ui/consequen
 const labels: ConsequenceLabels = {
   winner: (seat) => (seat === "One" ? "Tu gagnes" : "L'ordinateur gagne"),
   reason: (r) => `motif:${r.reason}`,
+  timeLeft: (n) => `Il te restera ${n} de temps`,
+  handPasses: (n) => `Passe la main : l'adversaire aura ${n} de temps`,
 };
 const preview = (over: Partial<ActionPreview>): ActionPreview => ({
   action: { play: { card: 1 } },

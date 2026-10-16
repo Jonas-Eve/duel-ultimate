@@ -19,7 +19,10 @@ const CAMP1 = "Camp 1 — Ruée";
 const CAMP2 = "Camp 2 — Rempart";
 const group = (name: string) => screen.getByRole("group", { name });
 const buttonsIn = (name: string) => within(group(name)).queryAllByRole("button") as HTMLButtonElement[];
-const baseLabel = (c: CardView) => `${c.name}, coût ${c.cost}, force ${c.force}, coût d'attaque ${c.attack_cost}, PV ${c.health}`;
+const baseLabel = (c: CardView) =>
+  `${c.name}, coût ${c.cost}, force ${c.force}, coût d'attaque ${c.attack_cost}, PV ${c.health}` +
+  (c.provocation ? ", provocation" : "") +
+  (c.riposte > 0 ? `, riposte ${c.riposte}` : "");
 const seats: Seat[] = ["One", "Two"];
 
 /** First seed where the camp holding the main (rush, One) has a summon that hands the main over without ending the game. */
@@ -52,7 +55,7 @@ describe("the screen: both hands visible, the camp holding the main at the botto
     const mine = s.views.One!.you.hand;
     const theirs = s.views.Two!.you.hand;
     const bottom = buttonsIn(`${CAMP1} : main`);
-    expect(bottom.map((b) => b.getAttribute("aria-label")!.startsWith(baseLabel(mine[bottom.indexOf(b)])))).toEqual(mine.map(() => true));
+    expect(bottom.map((b) => b.getAttribute("aria-label")!.startsWith(`${mine[bottom.indexOf(b)].name}, coût`))).toEqual(mine.map(() => true));
     expect(bottom.some((b) => !b.disabled)).toBe(true);
 
     // The other camp's hand is named in full too, but its tiles are not buttons.
@@ -276,5 +279,17 @@ describe("replay through App", () => {
     expect(screen.getByText("Graine : 7")).toBeTruthy();
     expect(screen.queryByRole("status")).toBeNull();
     expect(counters).toMatchObject({ creations: 2, frees: 1, callsAfterFree: 0 });
+  });
+});
+
+describe("wording of the consequence lines in two camps", () => {
+  test("no 'te' / 'adversaire': the other camp is the other camp", async () => {
+    const seed = seedWithHandOver();
+    const c = makeCampsController("rush", "bulwark", seed);
+    mountGame(c);
+    const tile = buttonsIn(`${CAMP1} : main`)[handOverIndex(c.getSnapshot())];
+    expect(tile.textContent).toMatch(/Passe la main : l'autre camp aura \d+ de temps/);
+    const notes = buttonsIn(`${CAMP1} : main`).map((b) => b.textContent).join(" ");
+    expect(notes).not.toMatch(/te restera|adversaire/);
   });
 });

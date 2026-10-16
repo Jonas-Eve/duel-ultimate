@@ -8,6 +8,10 @@ export interface ConsequenceLabels {
   winner(seat: Seat): string;
   /** The end-of-game reason, worded as on the end screen. */
   reason(result: GameResult): string;
+  /** "Il te restera N de temps" (against the computer) / "Il restera N de temps" (two camps). */
+  timeLeft(n: number): string;
+  /** "Passe la main : l'adversaire aura N de temps" / "... l'autre camp aura ...". */
+  handPasses(n: number): string;
 }
 
 /**
@@ -26,10 +30,10 @@ export function describeConsequence(preview: ActionPreview, labels: ConsequenceL
     lines.push(
       preview.budget_after === null
         ? "Passe la main"
-        : `Passe la main : l'adversaire aura ${preview.budget_after} de temps`,
+        : labels.handPasses(preview.budget_after),
     );
   } else if (preview.budget_after !== null) {
-    lines.push(`Il te restera ${preview.budget_after} de temps`);
+    lines.push(labels.timeLeft(preview.budget_after));
   }
   return lines;
 }
