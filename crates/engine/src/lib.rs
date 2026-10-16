@@ -14,6 +14,11 @@
 //! piles only as counts): the types make the opposing hand impossible to express. It does not
 //! authenticate the seat it is asked for; a server calls it with the seat of the connection.
 //!
+//! [`preview_legal_actions`] gives, for each legal action and in the same order, its time cost,
+//! whether it hands the token over, the budget after it and whether it ends the game, by a dry
+//! run on a clone (the time rule stays in one place, the generator is never touched); it never
+//! copies what a draw brings.
+//!
 //! Randomness is consumed only at setup, in this documented order: shuffle of One's deck,
 //! shuffle of Two's deck, then `random_below(2)` if (and only if) the initiatives are equal.
 //! [`apply`] never consumes the generator.

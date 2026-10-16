@@ -11,12 +11,16 @@
 //! a local adapter, the client asks for the seat it plays (a server calls `player_view` itself,
 //! with the seat of the connection). `legal_actions` and the `drew` events still carry the
 //! instance ids of the active hand, which a server would have to redact.
+//! `legal_actions_with_time()` lists the same legal actions, in the same order, each with its
+//! time cost, whether it hands the token over (`hands_over`, to read together with
+//! `ends_game`) and the budget after it, obtained by a dry run on a clone
+//! (`duel_engine::preview_legal_actions`); `legal_actions` and `apply` are unchanged.
 //! [`Duel`] holds the logic and is testable natively; [`Game`] only converts its errors
 //! to `JsError` (which cannot be built off the wasm target).
 
 use duel_engine::{
     Action, Event, GameSetup, GameState, PlayerId, apply, game_setup_from_data, legal_actions,
-    new_game, player_view,
+    new_game, player_view, preview_legal_actions,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -105,9 +109,13 @@ impl Duel {
         to_json(&legal_actions(&self.state))
     }
 
-    /// Stub: the previews of the legal actions (filled in by the implementation commit).
+    /// The legal actions with their time facts, as a JSON array of
+    /// `{"action","cost","hands_over","budget_after","ends_game"}`: same length and order as
+    /// [`Duel::legal_actions_json`], computed by the engine by a dry run on a clone (the state
+    /// and its generator are untouched, nothing drawn is revealed). `action` is the action as
+    /// `legal_actions` returns it, to send back to `apply` unchanged. Empty once the game is over.
     pub fn legal_actions_with_time_json(&self) -> Result<String, String> {
-        Ok("[]".to_owned())
+        to_json(&preview_legal_actions(&self.state))
     }
 
     /// Applies a JSON action; returns the produced events as a JSON array.
@@ -181,6 +189,10 @@ impl Game {
         self.0.start_events_json().map_err(|e| JsError::new(&e))
     }
 
+    /// What `seat` ("One" or "Two") may see of the game, as JSON. WARNING: this does not
+    /// authenticate the seat, whoever calls it chooses whose view it gets. It is a local
+    /// adapter for a client that plays that seat; a server must call `player_view` itself with
+    /// the seat of the connection and never expose `Game.view`.
     pub fn view(&self, seat: &str) -> Result<String, JsError> {
         self.0.view_json(seat).map_err(|e| JsError::new(&e))
     }
