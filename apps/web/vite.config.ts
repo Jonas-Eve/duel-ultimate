@@ -1,12 +1,13 @@
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { cspPlugin } from "./vite/csp-plugin.ts";
 
 const webRoot = fileURLToPath(new URL(".", import.meta.url));
 const dataRoot = fileURLToPath(new URL("../../data", import.meta.url));
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), cspPlugin()],
   server: {
     // `src/data/starter.ts` imports `data/starter/<version>/*.json?raw` from the repository
     // root, outside this app: without this, Vite (and so Vitest) answers "Denied ID". Setting

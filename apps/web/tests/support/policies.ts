@@ -86,3 +86,34 @@ export function realDeps(over: Partial<ControllerDeps> = {}, factory?: GameFacto
 }
 
 export { instrumentedFactory };
+
+export interface PlayUntilResult {
+  /** Human actions submitted. */
+  steps: number;
+  snapshot: Snapshot;
+}
+
+/**
+ * Bounded scenario search: the human (both seats in two camps) plays with `choose` and the
+ * computer replies (`settle`) until `predicate(snapshot)` holds. Stops at once, with zero steps,
+ * if it already holds. Fails explicitly after `maxSteps` human actions, or if the game ends
+ * (over / fatal) before the predicate held. `playHuman` runs to the end of the game and does
+ * not fit this use.
+ */
+export async function playUntil(
+  c: GameController,
+  choose: (s: Snapshot) => ActionPreview,
+  predicate: (s: Snapshot) => boolean,
+  maxSteps: number,
+): Promise<PlayUntilResult> {
+  let steps = 0;
+  for (;;) {
+    const s = await settle(c);
+    if (predicate(s)) return { steps, snapshot: s };
+    if (s.phase !== "human-turn") throw new Error(`playUntil: the game ended (${s.phase}) after ${steps} steps before the predicate held`);
+    if (steps >= maxSteps) throw new Error(`playUntil: the predicate did not hold within maxSteps = ${maxSteps}`);
+    const res = c.submit(choose(s));
+    if (!res.ok) throw new Error(`playUntil: submit refused: ${res.reason}`);
+    steps += 1;
+  }
+}

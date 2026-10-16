@@ -4,9 +4,12 @@ Client web (React + TypeScript + Vite), **mobile-first et responsive** : zones t
 aucune interaction qui dépende du survol. Il appelle le moteur de règles compilé en WASM
 (`crates/engine-wasm`) ; le serveur reste l'autorité sur la partie.
 
-- `npm run dev` — serveur de développement
-- `npm run build` — vérification des types puis build
-- `npm test` — tests (Vitest + Testing Library), dont un test de fumée contre le vrai `.wasm`
+- `npm run dev` — serveur de développement (pas de CSP : Vite y injecte un script en ligne)
+- `npm run build` — vérification des types puis build (la CSP est injectée dans `index.html`)
+- `npm run preview` — sert le build ; `npm run build && npm run preview -- --host` pour l'essayer sur un
+  téléphone du réseau local (un build ne s'ouvre pas en `file://` : modules et `.wasm` ; hors réseau
+  local, voir #54)
+- `npm test` — tests (Vitest + Testing Library + `user-event`), dont un test de fumée contre le vrai `.wasm`
 
 ## Moteur WASM
 
@@ -40,8 +43,10 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
 |---|---|
 | `src/engine/` | contrat JSON typé (`types.ts`, écrit depuis les sources Rust), `GameSession` (`session.ts`, le seul accès au moteur), adaptateur `createWasmSession` (`wasm-session.ts`), chargeur mémoïsé `loadEngine` (`load.ts`), erreurs (`errors.ts`) |
 | `src/game/` | logique du client sans React ni WASM : la graine (`seed.ts`), les enregistrements de journal (`records.ts`), la politique de l'ordinateur (`computer.ts`), le contrôleur de la partie locale (`controller.ts`), le démarrage sans exception (`start.ts`) et le modèle d'écran (`screen-model.ts`) |
-| `src/ui/` | composants et textes français (`errors.fr.ts`) |
+| `src/ui/` | composants et textes français : écrans (`Home`, `GameScreen`, `EndScreen`, `FatalScreen`), éléments (`HeroBar`, `TimeBand`, `Board`, `CardTile`, `Hand`, `ActionBar`, `ThinkingIndicator`, `ErrorBanner`), dialogues (`Dialog`, `ConfirmDialog`), textes (`fr.ts`, `errors.fr.ts`) et `consequence.ts` |
+| `src/App.tsx` | assemble les écrans ; le seul à lire `data/starter` et `engine/load` |
 | `src/data/starter.ts` | données `starter` importées en `?raw` |
+| `vite/csp-plugin.ts` | plugin Vite de la CSP de build |
 
 - **Seuls `engine/wasm-session.ts` (types) et `engine/load.ts` importent `src/wasm/`.** Le client ne
   fabrique jamais une action : il la retrouve dans `legalActionsWithTime()` et la renvoie telle quelle
@@ -135,5 +140,63 @@ les deux sièges, aucun pilote).
   données `starter` changent, ce test doit échouer bruyamment : chercher alors une nouvelle graine dans
   une boucle bornée. Le décorateur de session (`tests/support/engine.ts`) compte les appels, injecte un
   aperçu illégal (filet de sécurité) ou force une vue.
+
+## Interface
+
+Contre l'ordinateur, jouable de bout en bout : accueil, partie, tour de l'ordinateur, fin de partie.
+Il n'y a qu'un mode (pas de sélecteur) ; l'attaque (#66), le journal et les défausses (#65) et le mode
+deux camps (#67) viennent ensuite.
+
+- **`App`** (`src/App.tsx`) : charge le moteur pendant l'écran de chargement (« Lancer la partie » reste
+  inactif ; échec : message français et « Recharger »), garde la `GameFactory`, puis assemble la session
+  de façon **synchrone** (`createWasmSession` avec `CARDS_JSON`, `DECKS_JSON`, `DATA_VERSION`). Elle reçoit
+  des dépendances par prop pour les tests (`App({ deps })` : `engine`, `crypto`, `policy`, `scheduler`,
+  `now`), **sans mock du moteur** : les tests fournissent le vrai WASM, et une graine aléatoire se
+  contrôle par un `crypto` factice (`null` simule l'absence d'entropie). `Home` reçoit les decks et la
+  version par props : `ui/` n'importe ni `data/starter` ni `engine/load` (`tests/architecture.test.ts`).
+- **Le contrôleur est créé dans le gestionnaire du clic**, jamais dans un `useEffect` (StrictMode
+  rejoue les effets : un cleanup libérerait l'instance du second montage ; gardé par le test de montage StrictMode, qui ne couvre que le cleanup qui
+  libère, et par le scan de source `tests/controller-creation-policy.test.ts` : aucun `startGame(` ni
+  `GameController.create(` dans un `useEffect`/`useLayoutEffect` de `App` ou de `ui/`),
+  par `startGame`, qui ne lève jamais. Sur succès, `App` garde le contrôleur et appelle `start()` ; elle
+  appelle `dispose()` sur l'ancien avant d'en créer un autre, au retour à l'accueil et au démontage
+  (N parties = N `free()`). « Rejouer » se reconstruit depuis le `Snapshot` : même graine
+  (`String(snapshot.seed)`) ou nouvelle graine (texte vide, donc `crypto` rappelé).
+- **Échecs de `startGame`** : `entropy_unavailable` (pas de `crypto.getRandomValues`) garde l'accueil, avec
+  une alerte française (`fr.ts`), le focus sur le champ graine et aucune partie lancée (jamais `Math.random`
+  ni graine 0) ; une graine saisie fonctionne sans entropie. `invalid_seed` : alerte liée au champ par
+  `aria-describedby`. `engine` (données ou deck refusés) : retour à l'accueil avec le texte du code, jamais
+  le message anglais.
+- **Écran de partie** (`GameScreen`, reçoit le contrôleur en prop et lit `useSyncExternalStore(controller.subscribe,
+  controller.getSnapshot)`) : de haut en bas, graine et « Infos de partie », héros adverse, plateau adverse,
+  bandeau de temps et de jeton, plateau du joueur, héros du joueur, main, barre d'actions (effets de héros et
+  « Abandonner » avec confirmation). Les boutons rendent au contrôleur **l'aperçu du snapshot courant**
+  (jamais une action fabriquée) ; coût, « Passe la main », temps restant et fin de partie viennent de cet
+  aperçu (`ui/consequence.ts`, pur : action simple, passation, attaque létale, passation par épuisement,
+  abandon). Pendant le tour de l'ordinateur et après la fin, toutes les commandes sont inactives ; un seul
+  résumé `aria-live` « L'ordinateur a joué N actions. À toi de jouer. » est annoncé à la **transition**
+  `computer-turn` -> `human-turn` (`computerSteps` reste périmé ensuite), puis retiré dès que l'humain agit.
+  La main de l'ordinateur n'existe pas dans la vue : seul son nombre est affiché.
+- **Écrans spéciaux** : fin de partie (vainqueur, motif en français selon le perdant, graines, trois
+  boutons, focus sur le titre) ; état fatal (phase `fatal` : message du code, « Rejouer avec la même graine »,
+  « Retour à l'accueil », aucune commande) ; bandeau d'erreur `role="alert"` pour une erreur de règle
+  (partie intacte, « Fermer »).
+- **Accessibilité** : vrais `<button>` (zone tactile `--tap: 44px`), aucun `:hover`, provocation = pictogramme
+  SVG `aria-hidden` **et** libellé « Provocation », riposte = « Riposte N », nom accessible complet des cartes
+  (« Pillard, coût 2, force 3, coût d'attaque 1, PV 2, passe la main, provocation, riposte 1 »). `Dialog`
+  (`role="dialog"`, `aria-modal`, piège à focus, Échap, focus rendu au déclencheur) n'utilise ni
+  `<dialog>.showModal()` ni `inert` (absents de jsdom) ; il est générique et réutilisé par #65 et #66.
+  Les noms de cartes, héros et decks sont rendus comme **texte React**, jamais comme HTML.
+- **Aucun attribut `style=` ni `<style>`** : classes CSS seulement (`src/index.css`, mobile-first, un thème
+  clair, polices système), vérifié par `tests/ui-policy.test.ts`. **CSP de build** (`vite/csp-plugin.ts`,
+  `apply: "build"`) : `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src
+  'self' data:; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'` ; `'wasm-unsafe-eval'`
+  est requis pour instancier le WASM, jamais `'unsafe-eval'` ni `'unsafe-inline'`. Pas de CSP en dev. Les
+  en-têtes HTTP (`frame-ancestors`, HSTS) relèvent du déploiement (#54). `tests/csp.test.ts` lance un vrai
+  `build()` de Vite dans un dossier temporaire et lit l'`index.html` produit.
+- **Tests de l'interface** : Testing Library + `@testing-library/user-event` 14.6.8 contre le vrai WASM
+  (`tests/support/ui.tsx`, `tests/support/app.tsx`). Les fins de partie se testent en injectant des actions
+  par le contrôleur ; `playUntil(controller, choose, predicate, maxSteps)` (`tests/support/policies.ts`,
+  réutilisé par #65 à #67) cherche un scénario de façon bornée et échoue explicitement.
 
 Évolution prévue : PWA, puis application native (Capacitor) sans réécriture.
