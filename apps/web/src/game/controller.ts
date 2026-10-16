@@ -239,7 +239,7 @@ export class GameController {
   private afterAction(): void {
     const phase = this.currentPhase();
     this.legal = phase === "human-turn" ? this.session.legalActionsWithTime() : [];
-    this.computerSteps = phase === "computer-turn" ? 0 : this.computerSteps;
+    if (phase === "computer-turn") this.computerSteps = 0; // a new chain starts
   }
 
   private fail(error: EngineError): void {
