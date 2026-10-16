@@ -105,6 +105,11 @@ impl Duel {
         to_json(&legal_actions(&self.state))
     }
 
+    /// Stub: the previews of the legal actions (filled in by the implementation commit).
+    pub fn legal_actions_with_time_json(&self) -> Result<String, String> {
+        Ok("[]".to_owned())
+    }
+
     /// Applies a JSON action; returns the produced events as a JSON array.
     pub fn apply_json(&mut self, action_json: &str) -> Result<String, String> {
         let action: Action = parse(action_json)?;
@@ -182,6 +187,12 @@ impl Game {
 
     pub fn legal_actions(&self) -> Result<String, JsError> {
         self.0.legal_actions_json().map_err(|e| JsError::new(&e))
+    }
+
+    pub fn legal_actions_with_time(&self) -> Result<String, JsError> {
+        self.0
+            .legal_actions_with_time_json()
+            .map_err(|e| JsError::new(&e))
     }
 
     pub fn apply(&mut self, action_json: &str) -> Result<String, JsError> {
