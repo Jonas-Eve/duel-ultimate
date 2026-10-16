@@ -12,6 +12,9 @@ import { FatalScreen } from "./FatalScreen";
 import { fr } from "./fr";
 import { Hand } from "./Hand";
 import { HeroBar } from "./HeroBar";
+import { LogBar } from "./LogBar";
+import { LogDrawer } from "./LogDrawer";
+import { formatBlocks, formatRecords, logContext } from "./log-format";
 import { consequenceLabels, outcomeOf } from "./outcome";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { TimeBand } from "./TimeBand";
@@ -43,6 +46,7 @@ function useChainAnnouncement(phase: Phase, computerSteps: number, recordCount: 
 export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHome }: GameScreenProps) {
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [confirming, setConfirming] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
   const announcement = useChainAnnouncement(snapshot.phase, snapshot.computerSteps, snapshot.records.length);
 
   if (snapshot.phase === "fatal") {
@@ -55,6 +59,8 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
   const model = toScreenModel(snapshot);
   const labels = consequenceLabels(outcomeOf(snapshot, model));
   const humanTurn = snapshot.phase === "human-turn";
+  const ctx = logContext(snapshot);
+  const lastLine = formatRecords(snapshot.records.slice(-1), ctx).at(-1);
   const concede = snapshot.legal.find((p) => isConcede(p.action));
   // The interface hands back a preview of the CURRENT snapshot, never an action of its own;
   // a stale one is ignored by the controller (double press), a refused one comes back as `error`.
@@ -82,6 +88,12 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
       <p aria-live="polite" className="announce">
         {announcement}
       </p>
+      <div className="log-row">
+        <LogBar line={lastLine} live={humanTurn && announcement === ""} />
+        <button type="button" className="btn" onClick={() => setLogOpen(true)}>
+          {fr.logButton}
+        </button>
+      </div>
       <Hand cards={model.bottom.hand ?? []} legal={snapshot.legal} enabled={humanTurn} labels={labels} onPlay={submit} />
       <ActionBar
         hero={model.bottom.hero}
@@ -91,6 +103,7 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
         onActivate={submit}
         onConcede={() => setConfirming(true)}
       />
+      {logOpen && <LogDrawer blocks={formatBlocks(snapshot.records, ctx)} onClose={() => setLogOpen(false)} />}
       {confirming && concede !== undefined && (
         <ConfirmDialog
           lines={describeConsequence(concede, labels)}

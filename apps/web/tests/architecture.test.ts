@@ -71,7 +71,7 @@ describe("architecture of apps/web/src", () => {
     for (const f of inDir("ui")) {
       for (const spec of importsOf(f.text)) {
         if (!spec.startsWith(".")) continue;
-        const ok = /^\.\/[A-Za-z0-9.]+$/.test(spec) || /(^|\/)game\/[a-z-]+$/.test(spec) || /(^|\/)engine\/(types|errors)$/.test(spec);
+        const ok = /^\.\/[A-Za-z0-9.-]+$/.test(spec) || /(^|\/)game\/[a-z-]+$/.test(spec) || /(^|\/)engine\/(types|errors)$/.test(spec);
         expect(ok, `${f.rel} imports ${spec}`).toBe(true);
       }
     }

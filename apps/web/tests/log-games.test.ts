@@ -60,6 +60,8 @@ describe("full games against the computer (real WASM, random computer)", () => {
         const ctx = logContext(snap);
         const where = `${one} vs ${two}, seed ${seed}`;
         const lines = formatRecords(snap.records, ctx); // must not throw
+        // The screen formats again at every render: a second pass must give the same text (no memory of names between passes).
+        expect(formatRecords(snap.records, ctx), where).toEqual(lines);
         expect(lines.length, where).toBeGreaterThan(snap.records.length - 1);
         for (const l of lines) {
           expect(l.text, where).not.toMatch(/undefined|NaN|#\d/);

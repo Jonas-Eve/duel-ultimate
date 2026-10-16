@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import type { Snapshot } from "../game/controller";
 import { toScreenModel } from "../game/screen-model";
 import { endReason, fr } from "./fr";
+import { LogHistory } from "./LogHistory";
+import { formatBlocks, logContext } from "./log-format";
 import { outcomeOf } from "./outcome";
 
 interface EndScreenProps {
@@ -11,7 +13,7 @@ interface EndScreenProps {
   onHome(): void;
 }
 
-/** Winner, reason, seeds and the way out. The full log is #65's. Focus lands on the title when it appears. */
+/** Winner, reason, seeds and the way out. The full log follows (a plain list, not a live region). Focus lands on the title when it appears. */
 export function EndScreen({ snapshot, onReplaySameSeed, onReplayNewSeed, onHome }: EndScreenProps) {
   const title = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -28,6 +30,10 @@ export function EndScreen({ snapshot, onReplaySameSeed, onReplayNewSeed, onHome 
       {result !== null && <p>{endReason(result, outcome)}</p>}
       <p>{fr.seed(snapshot.seed)}</p>
       {snapshot.aiSeed !== null && <p>{fr.aiSeed(snapshot.aiSeed)}</p>}
+      <section className="end-log" aria-labelledby="end-log-title">
+        <h3 id="end-log-title">{fr.logFull}</h3>
+        <LogHistory blocks={formatBlocks(snapshot.records, logContext(snapshot))} level={4} />
+      </section>
       <div className="stack">
         <button type="button" className="btn btn-primary" onClick={onReplaySameSeed}>
           {fr.replaySame}

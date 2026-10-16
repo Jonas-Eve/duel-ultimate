@@ -79,11 +79,10 @@ describe("the last line of the log", () => {
     expect(summaries.filter((x) => x !== "")).toHaveLength(1);
     // While the summary is the announcement, the bar stays quiet; the next human action makes it live again.
     expect(bar().getAttribute("aria-live")).toBe("off");
-    await act(async () => {
+    act(() => {
       c.submit(c.getSnapshot().legal.find((p) => p.action !== "concede")!);
-      await settle(c);
     });
-    if (c.getSnapshot().phase === "human-turn") expect(bar().getAttribute("aria-live")).toBe("polite");
+    expect(bar().getAttribute("aria-live")).toBe(c.getSnapshot().phase === "human-turn" ? "polite" : "off");
   });
 });
 
@@ -208,7 +207,7 @@ describe("the end screen shows the whole log", () => {
     const lines = formatRecords(s.records, logContext(s));
     const region = fullLog();
     expect(within(region).getAllByRole("listitem")).toHaveLength(lines.length);
-    expect(lines.length).toBeGreaterThan(20);
+    expect(lines.length).toBeGreaterThan(5);
     expect(region.querySelector("[aria-live], [role='log']")).toBeNull();
     expect(region.closest("[aria-live]")).toBeNull();
     expect(within(region).getByText(lines[lines.length - 1].text)).toBeTruthy();

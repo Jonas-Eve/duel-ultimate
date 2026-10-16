@@ -86,6 +86,19 @@ p { margin: 6px 0; }
 .dialog-title { margin-top: 0; }
 .dialog-actions { display: flex; flex-wrap: wrap; gap: var(--gap); margin-top: 12px; }
 
+.log-row { display: flex; align-items: stretch; gap: var(--gap); }
+.log-bar { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; padding: 6px 12px; border: 2px solid var(--border); border-radius: 8px; background: var(--surface); }
+.log-line { margin: 0; overflow-wrap: anywhere; }
+.log-damage, .log-death { font-weight: 600; }
+.log-end { font-weight: 700; }
+.log-history { display: flex; flex-direction: column; gap: 12px; }
+.log-block { border-left: 4px solid var(--border); padding-left: 10px; }
+.log-block-title { margin: 0 0 4px; font-size: 1rem; }
+.log-lines { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: 2px; }
+.end-log { display: flex; flex-direction: column; gap: 8px; }
+.discard-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--gap); }
+.discard-card { width: auto; }
+
 .end-screen h2:focus { outline: none; }
 
 @media (min-width: 40rem) {
