@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { CARDS_JSON, DATA_VERSION, DECKS_JSON } from "../../src/data/starter";
 import { createWasmSession } from "../../src/engine/wasm-session";
 import type { GameFactory, GameSession, SessionConfig, WasmGameLike } from "../../src/engine/session";
-import type { Action } from "../../src/engine/types";
+import type { Action, ActionPreview, EngineEvent, PlayerView, Seat } from "../../src/engine/types";
 import { mulberry32 } from "../../src/game/seed";
 import { webRoot } from "./paths";
 
@@ -95,4 +95,60 @@ export function randomPolicy(seed: number): (actions: Action[]) => Action {
     const playable = actions.filter((a) => a !== "concede");
     return playable[Math.floor(rnd() * playable.length)];
   };
+}
+
+export interface SessionProbe {
+  calls: { legalActions: number; legalActionsWithTime: number; apply: number; view: number; dispose: number };
+  /** Every action handed to `apply` (the injected illegal preview included). */
+  applied: Action[];
+  /** For each `legalActionsWithTime` call: who held the main at that instant (read off the real session). */
+  timedCalls: { active: Seat }[];
+}
+
+export interface DecorateOptions {
+  /** Appended to every `legalActionsWithTime()` result: the "safety net" test injects an illegal action. */
+  injectPreview?: ActionPreview;
+  /** Rewrites what `view` returns (for example `result: null` while the events say the game ended). */
+  forceView?: (seat: Seat, view: PlayerView) => PlayerView;
+  /** Runs right after each successful `apply`, with the real inner session (reads there are not counted). */
+  afterApply?: (inner: GameSession, events: EngineEvent[]) => void;
+}
+
+/** Wraps a real `GameSession` (not a mock of the engine): counts calls and can alter what it returns. */
+export function decorateSession(inner: GameSession, opts: DecorateOptions = {}): { session: GameSession; probe: SessionProbe } {
+  const probe: SessionProbe = {
+    calls: { legalActions: 0, legalActionsWithTime: 0, apply: 0, view: 0, dispose: 0 },
+    applied: [],
+    timedCalls: [],
+  };
+  const session: GameSession = {
+    startEvents: inner.startEvents,
+    legalActions: () => {
+      probe.calls.legalActions += 1;
+      return inner.legalActions();
+    },
+    legalActionsWithTime: () => {
+      probe.calls.legalActionsWithTime += 1;
+      probe.timedCalls.push({ active: inner.view("One").active });
+      const list = inner.legalActionsWithTime();
+      return opts.injectPreview ? [...list, opts.injectPreview] : list;
+    },
+    view: (seat) => {
+      probe.calls.view += 1;
+      const v = inner.view(seat);
+      return opts.forceView ? opts.forceView(seat, v) : v;
+    },
+    apply: (action) => {
+      probe.calls.apply += 1;
+      probe.applied.push(action);
+      const events = inner.apply(action);
+      opts.afterApply?.(inner, events);
+      return events;
+    },
+    dispose: () => {
+      probe.calls.dispose += 1;
+      inner.dispose();
+    },
+  };
+  return { session, probe };
 }
