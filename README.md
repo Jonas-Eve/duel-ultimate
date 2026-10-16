@@ -46,9 +46,20 @@ Règles propres à ce repo :
   est gardée par un test contre les sources Rust (un nouveau code d'erreur Rust casse ce test tant que
   son texte français manque) ; contre l'ordinateur, la confidentialité de sa main n'est qu'un choix
   d'affichage local. Client : le contrôleur ne calcule ni coût, ni cible, ni fin de partie ; l'ordinateur ne reçoit jamais l'abandon ; le journal contre l'ordinateur est écrit d'après la seule vue du siège humain. Interface : `App` assemble (seul lecteur des données `starter` et du chargeur du moteur), crée le contrôleur dans le gestionnaire du clic, jamais dans un `useEffect` (gardé par un test de lecture de source), et libère l'ancien avant d'en créer un autre ; le coût, la passation de la main et la fin de partie affichés viennent de l'aperçu du moteur ; aucun attribut `style=` (classes CSS) ; CSP injectée au build seulement. Détails dans `apps/web/README.md`.
+- **Tests de bout en bout** (`apps/web/e2e/*.e2e.ts`, Playwright, #68) : ils jouent le **build de
+  production** (CSP, `.wasm` hachés) servi par `vite preview` sur `127.0.0.1:4173`, avec le vrai
+  moteur et le vrai ordinateur, sans rien simuler ; ils lisent les libellés du DOM et ne recalculent
+  jamais un coût ni une règle. **Dérogation à « dernière version stable » (§3), consignée et validée
+  par le propriétaire** : `@playwright/test` est épinglé à **1.56.1** (avec `playwright-core` 1.56.1,
+  pair de `@axe-core/playwright`), la dernière version exécutable avec le Chromium 141 préinstallé
+  dans les environnements d'agents (`/opt/pw-browsers`, aucun téléchargement possible) : chaque version
+  de Playwright exige une révision précise de Chromium. En CI, `npx playwright install` à la version du
+  lock installe ce même Chromium 141 : un e2e identique partout. **Remonter la version quand
+  `/opt/pw-browsers` est rafraîchi** (ticket `type:tech` à ce moment-là).
 - **CI** (`.github/workflows/ci.yml`, sur `pull_request` et `push` vers `main`) : `fmt`, `clippy`,
   tests Rust, build WASM, contrôle de non-entropie, puis `npm ci`, `npm run build` et `npm test`
-  dans `apps/web`. Permissions `contents: read`, actions épinglées par SHA, aucun secret ; sa
+  dans `apps/web`, puis les tests de bout en bout (`npx playwright install --with-deps chromium`,
+  `npm run e2e`). Permissions `contents: read`, actions épinglées par SHA, aucun secret ; sa
   politique est gardée par `apps/web/tests/ci-policy.test.ts`.
 - Une nouvelle mécanique ajoute une brique au moteur sans modifier le comportement des decks
   qui ne l'utilisent pas (à vérifier par le simulateur).
@@ -80,6 +91,12 @@ La bibliothèque `duel_simulator` sait construire et afficher un rapport d'équi
   `pretest` échouent avec un message qui donne la commande à lancer.
 - **Web :** `cd apps/web && npm ci && npm run dev` ; `npm run build` ; `npm test` (chacun régénère
   d'abord `apps/web/src/wasm/` via `scripts/build-wasm.mjs`)
+- **E2E web :** `cd apps/web && npm run e2e` (construit d'abord le build de production, puis lance
+  Chromium sur `vite preview`, environ 1 à 2 minutes dont ~40 s pour le cas « épuisement »). Chromium
+  requis : en local `npx playwright install chromium` ; dans l'environnement des agents le Chromium 141
+  est préinstallé (`PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`, ne jamais lancer `playwright install`
+  là) et la version de Playwright est épinglée à 1.56.1 pour cette raison. La CI les lance après
+  `npm test`.
 - **Tester à la main :** `cd apps/web && npm run dev`. Un build ne s'ouvre pas en `file://` (modules et
   `.wasm`) : `npm run build && npm run preview -- --host` le sert sur le réseau local (le build porte la
   CSP, pas le serveur de dev). Sur un téléphone hors réseau local : voir #54.

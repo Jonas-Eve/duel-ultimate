@@ -65,6 +65,8 @@ describe(".github/workflows/ci.yml", () => {
       "npm ci",
       "npm run build",
       "npm test",
+      "npx playwright install --with-deps chromium",
+      "npm run e2e",
     ];
     let at = -1;
     for (const s of order) {
@@ -79,8 +81,57 @@ describe(".github/workflows/ci.yml", () => {
     expect(code).toMatch(/grep -qE '\^getrandom '/);
   });
 
+  test("the e2e steps exist, run in apps/web and interpolate nothing", () => {
+    const steps = code.split(/\n(?=\s*- name:)/).slice(1);
+    for (const run of ["npx playwright install --with-deps chromium", "npm run e2e"]) {
+      const step = steps.filter((s) => new RegExp(`^\\s*run: ${run}\\s*$`, "m").test(s));
+      expect(step, `exactly one step runs "${run}"`).toHaveLength(1);
+      expect(step[0]).not.toContain("${{");
+      expect(step[0]).toMatch(/working-directory: apps\/web/);
+    }
+  });
+
+  test("Playwright is installed by the local CLI: no version, no remote package, no extra action", () => {
+    expect(code).not.toMatch(/playwright@/);
+    expect(code).not.toMatch(/npx (?:-y |--yes )?@playwright/);
+    expect(code).not.toMatch(/microsoft\/playwright|upload-artifact/);
+  });
+
   test("installs the CLI at the version read from the lock by the build script", () => {
     expect(code).toContain("build-wasm.mjs --print-version");
+  });
+});
+
+describe("end-to-end tests (Playwright)", () => {
+  const deps = { ...pkg.dependencies, ...pkg.devDependencies } as Record<string, string>;
+  const config = read(resolve(webRoot, "playwright.config.ts"));
+
+  test("the scripts build first, then run Playwright", () => {
+    expect(pkg.scripts.pree2e).toBe("npm run build");
+    expect(pkg.scripts.e2e).toBe("playwright test");
+  });
+
+  test("versions are exact; @playwright/test is 1.56.1 (the Chromium 141 of the agents' environment)", () => {
+    expect(deps["@playwright/test"]).toBe("1.56.1");
+    expect(deps["playwright-core"]).toBe("1.56.1"); // the peer of @axe-core/playwright, kept on the same version
+    expect(deps["@axe-core/playwright"]).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  test("the config serves the production build on 127.0.0.1 only, from scratch", () => {
+    expect(config).toContain('testMatch: "**/*.e2e.ts"');
+    expect(config).toContain("npm run preview -- --host 127.0.0.1 --port 4173 --strictPort");
+    expect(config).toContain("reuseExistingServer: false");
+    expect(config).not.toContain("0.0.0.0");
+    expect(config).not.toMatch(/npm run dev|vite dev/);
+    expect(config).toContain("forbidOnly: !!process.env.CI");
+  });
+
+  test("reports and results are git-ignored, e2e is type-checked", () => {
+    const ignored = read(resolve(webRoot, ".gitignore")).split("\n");
+    expect(ignored).toContain("test-results/");
+    expect(ignored).toContain("playwright-report/");
+    const include = JSON.parse(read(resolve(webRoot, "tsconfig.json"))).include as string[];
+    expect(include).toEqual(expect.arrayContaining(["e2e", "playwright.config.ts"]));
   });
 });
 

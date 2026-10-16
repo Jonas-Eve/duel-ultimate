@@ -10,13 +10,17 @@
     "test": "vitest run",
     "predev": "node scripts/build-wasm.mjs",
     "prebuild": "node scripts/build-wasm.mjs",
-    "pretest": "node scripts/build-wasm.mjs"
+    "pretest": "node scripts/build-wasm.mjs",
+    "pree2e": "npm run build",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.56.1",
     "@testing-library/react": "16.3.3",
     "@testing-library/user-event": "14.6.8",
     "@types/node": "24.19.2",
@@ -24,6 +28,7 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
     "jsdom": "30.1.2",
+    "playwright-core": "1.56.1",
     "typescript": "7.0.2",
     "vite": "8.3.4",
     "vitest": "5.0.3"
