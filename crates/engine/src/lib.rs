@@ -30,6 +30,7 @@
 mod combat;
 mod data;
 mod effects;
+mod preview;
 mod rules;
 mod setup;
 mod state;
@@ -39,6 +40,7 @@ mod time;
 mod view;
 
 pub use data::{DataError, game_setup_from_data, player_setup};
+pub use preview::{ActionPreview, preview_legal_actions};
 pub use rules::{Action, Event, RuleError, Target, apply, legal_actions};
 pub use setup::{GameSetup, PlayerSetup, SetupError, new_game};
 pub use state::{CardInstanceId, GameState, PlayerId, WinReason};
