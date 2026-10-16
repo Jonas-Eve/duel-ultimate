@@ -36,6 +36,7 @@ pub fn setup_from(
         Ok(PlayerSetup {
             hero: deck.hero.clone(),
             cards: resolve_deck(deck, &cards).map_err(|error| error.to_string())?,
+            card_names: Vec::new(),
         })
     };
     Ok(GameSetup {

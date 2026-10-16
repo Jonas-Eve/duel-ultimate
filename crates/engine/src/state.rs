@@ -41,6 +41,8 @@ pub enum WinReason {
 pub(crate) struct CardInstance {
     pub(crate) id: CardInstanceId,
     pub(crate) stats: CreatureStats,
+    /// Presentation only (from the setup's `card_names`); no rule, formula or draw reads it.
+    pub(crate) name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -410,6 +412,7 @@ mod tests {
         CardInstance {
             id: CardInstanceId(id),
             stats: stats(1, 1, 1, health),
+            name: None,
         }
     }
 
@@ -660,6 +663,7 @@ mod tests {
         CardInstance {
             id: CardInstanceId(id),
             stats: stats_with(1, force, attack_cost, health, false, riposte),
+            name: None,
         }
     }
 

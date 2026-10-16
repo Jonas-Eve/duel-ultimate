@@ -13,6 +13,10 @@ use serde::{Deserialize, Serialize};
 pub struct PlayerSetup {
     pub hero: Hero,
     pub cards: Vec<CreatureStats>,
+    /// Optional display names, parallel to `cards` (same order). Absent or empty: no names.
+    /// Presentation only: no rule, formula or draw reads them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub card_names: Vec<String>,
 }
 
 /// Everything a game needs. The engine reads neither disk nor identifiers: callers resolve
@@ -57,7 +61,11 @@ fn build_side(side: PlayerSetup, next_id: &mut u32) -> PlayerState {
         .map(|stats| {
             let id = CardInstanceId(*next_id);
             *next_id += 1;
-            CardInstance { id, stats }
+            CardInstance {
+                id,
+                stats,
+                name: None,
+            }
         })
         .collect();
     PlayerState {

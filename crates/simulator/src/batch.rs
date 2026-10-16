@@ -50,6 +50,7 @@ pub fn contenders_from(cards: &str, decks: &str) -> Result<Vec<Contender>, Strin
                 player: PlayerSetup {
                     hero: deck.hero.clone(),
                     cards: resolve_deck(deck, &cards).map_err(|error| error.to_string())?,
+                    card_names: Vec::new(),
                 },
             })
         })
