@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, test } from "vitest";
 import { EngineError } from "../src/engine/errors";
-import type { GameFactory, WasmGameLike } from "../src/engine/session";
 import { createWasmSession } from "../src/engine/wasm-session";
 import { initTestEngine, starterConfig, testFactory } from "./support/engine";
+import { faultyFactory, type Method } from "./support/faulty";
 
 // Carry-over of the #62 review: a non-JSON throw (a Rust panic surfaces as a WebAssembly
 // RuntimeError) leaves the WASM instance unusable. The wrapper must mark the session dead and
@@ -12,42 +12,6 @@ import { initTestEngine, starterConfig, testFactory } from "./support/engine";
 beforeAll(async () => {
   await initTestEngine();
 });
-
-type Method = "start_events" | "view" | "legal_actions" | "legal_actions_with_time" | "apply";
-
-/** The real game, except that `failing` throws a non-JSON RuntimeError (or whatever `thrower` says). */
-function faultyFactory(failing: Method, opts: { thrower?: () => never; freeThrows?: boolean } = {}) {
-  const calls: string[] = [];
-  const thrower =
-    opts.thrower ??
-    (() => {
-      throw new WebAssembly.RuntimeError("unreachable");
-    });
-  const factory: GameFactory = (...args) => {
-    const game = testFactory(...args);
-    const wrap =
-      <A extends unknown[]>(name: Method, fn: (...a: A) => string) =>
-      (...a: A): string => {
-        calls.push(name);
-        if (name === failing) thrower();
-        return fn(...a);
-      };
-    const wrapped: WasmGameLike = {
-      start_events: wrap("start_events", () => game.start_events()),
-      view: wrap("view", (seat: string) => game.view(seat)),
-      legal_actions: wrap("legal_actions", () => game.legal_actions()),
-      legal_actions_with_time: wrap("legal_actions_with_time", () => game.legal_actions_with_time()),
-      apply: wrap("apply", (a: string) => game.apply(a)),
-      free: () => {
-        calls.push("free");
-        game.free();
-        if (opts.freeThrows) throw new Error("null pointer passed to rust");
-      },
-    };
-    return wrapped;
-  };
-  return { factory, calls };
-}
 
 const everyCall = (s: ReturnType<typeof createWasmSession>): (() => unknown)[] => [
   () => s.legalActions(),
