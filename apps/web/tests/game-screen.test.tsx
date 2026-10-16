@@ -66,6 +66,7 @@ describe("the permanent information", () => {
 
   test("the card accessible name is complete, board cards show force, attack cost, health", async () => {
     const c = makeController("rush", "bulwark", 3);
+    c.start();
     await playUntil(c, randomPreview(5), (s) => (s.views.One?.you.board.length ?? 0) >= 1 && (s.views.One?.opponent.board.length ?? 0) >= 1, 40);
     mountGame(c);
     const v = c.getSnapshot().views.One!;
@@ -87,17 +88,26 @@ describe("the permanent information", () => {
   });
 
   test("provocation and riposte carry a visible text label, never colour alone", async () => {
-    const c = makeController("bulwark", "rush", 3);
-    await playUntil(
-      c,
-      randomPreview(2),
-      (s) => {
-        const you = s.views.One!.you;
-        const opp = s.views.One!.opponent;
-        return [...you.board, ...you.hand].some((x) => x.provocation) && [...opp.board].some((x) => x.riposte >= 1);
-      },
-      60,
-    );
+    // The human only summons (never attacks), so the game lasts; bounded search over seeds.
+    const summoner = (s: Snapshot): ActionPreview =>
+      s.legal.find((p) => isPlay(p.action)) ?? (s.legal.find((p) => p.action !== "concede") as ActionPreview);
+    const wanted = (s: Snapshot) => {
+      const v = s.views.One!;
+      return [...v.you.board, ...v.you.hand].some((x) => x.provocation) && v.opponent.board.some((x) => x.riposte >= 1);
+    };
+    let c = makeController("bulwark", "rush", 0);
+    let found = false;
+    for (let seed = 0; seed < 30 && !found; seed++) {
+      c = makeController("bulwark", "rush", seed);
+      c.start();
+      try {
+        await playUntil(c, summoner, wanted, 60);
+        found = true;
+      } catch {
+        c.dispose();
+      }
+    }
+    expect(found).toBe(true);
     mountGame(c);
     const v = c.getSnapshot().views.One!;
     const shown = [...v.you.hand, ...v.you.board, ...v.opponent.board];
@@ -297,27 +307,44 @@ describe("the computer's turn", () => {
     expect(handButtons().some((b) => !b.disabled)).toBe(true);
   });
 
-  test("the announcement is made once per chain, not on every later human turn (stale computerSteps)", async () => {
-    const c = makeController("bulwark", "rush", 3); // the computer opens
+  test("one single announcement per chain even when every action publishes a snapshot", async () => {
+    let t = 0;
+    const c = makeController("bulwark", "rush", 4, { now: () => (t += 50) }); // every action overruns the slice
+    const { container } = mountGame(c);
+    const live = container.querySelector("[aria-live='polite']") as HTMLElement;
+    const seen: string[] = [];
+    const publications: number[] = [];
+    c.subscribe(() => publications.push(c.getSnapshot().computerSteps));
+    new MutationObserver(() => seen.push(live.textContent ?? "")).observe(live, { childList: true, characterData: true, subtree: true });
+    await waitFor(() => expect(c.getSnapshot().phase).toBe("human-turn"));
+    await Promise.resolve();
+    const n = c.getSnapshot().computerSteps;
+    expect(n).toBeGreaterThan(1);
+    expect(publications).toEqual(Array.from({ length: n }, (_, i) => i + 1)); // one snapshot per action, each one a chance to announce
+    expect(seen.filter((x) => x !== "")).toEqual([`L'ordinateur a joué ${n} actions. À toi de jouer.`]);
+  });
+
+  test("a later human action that keeps the main removes the old announcement (computerSteps is stale)", async () => {
+    // Seed 4: the computer opens, and the human then has an action that keeps the main.
+    const c = makeController("bulwark", "rush", 4);
     const { container } = mountGame(c);
     await waitFor(() => expect(c.getSnapshot().phase).toBe("human-turn"));
     const live = container.querySelector("[aria-live='polite']") as HTMLElement;
     expect(live.textContent).toMatch(/L'ordinateur a joué \d+ actions?\. À toi de jouer\./);
 
-    // A human action that keeps the main: the live region must not be touched at all.
     const snap = c.getSnapshot();
     const quiet = snap.legal.findIndex((p) => !p.hands_over && p.ends_game === null && p.action !== "concede");
     expect(quiet).toBeGreaterThanOrEqual(0);
-    const mutations: MutationRecord[] = [];
-    const observer = new MutationObserver((m) => mutations.push(...m));
-    observer.observe(live, { childList: true, characterData: true, subtree: true });
+    const seen: string[] = [];
+    new MutationObserver(() => seen.push(live.textContent ?? "")).observe(live, { childList: true, characterData: true, subtree: true });
     await act(async () => {
       c.submit(snap.legal[quiet]);
     });
     await Promise.resolve();
-    observer.disconnect();
     expect(c.getSnapshot().phase).toBe("human-turn");
-    expect(mutations).toHaveLength(0);
+    expect(c.getSnapshot().computerSteps).toBe(snap.computerSteps); // still the stale value
+    expect(live.textContent).toBe("");
+    expect(seen.filter((x) => x !== "")).toEqual([]);
   });
 
   test("a human action that hands the main over clears the old announcement, the next chain announces its own", async () => {
@@ -345,14 +372,18 @@ describe("the computer's turn", () => {
 });
 
 describe("the three ends of the game", () => {
-  /** A finished game from the controller, by a bounded seed search for the wanted outcome. */
-  async function finishedGame(winner: "One" | "Two", reason: "hero_down") {
+  /**
+   * A finished game, by a bounded seed search. Against a random computer the human `rush` always
+   * wins and the human `bulwark` almost always loses (60 seeds each), hence the two pairings.
+   */
+  async function finishedGame(winner: "One" | "Two") {
+    const [one, two] = winner === "One" ? ["rush", "bulwark"] : ["bulwark", "rush"];
     for (let seed = 0; seed < 60; seed++) {
-      const c = makeController("rush", "bulwark", seed);
+      const c = makeController(one, two, seed);
       c.start();
       const { snapshot } = await playHuman(c, randomPreview(seed));
       const r = snapshot.views.One?.result;
-      if (r?.winner === winner && r.reason === reason) return { c, seed };
+      if (r?.winner === winner && r.reason === "hero_down") return { c, seed };
       c.dispose();
     }
     throw new Error("no game found");
@@ -362,7 +393,7 @@ describe("the three ends of the game", () => {
     ["One", "Tu as gagné !"],
     ["Two", "L'ordinateur a gagné."],
   ] as const)("hero_down, winner %s: title, reason with the fallen hero's name, seeds", async (winner, title) => {
-    const found = await finishedGame(winner, "hero_down");
+    const found = await finishedGame(winner);
     const view = found.c.getSnapshot().views.One!;
     const loser = winner === "One" ? view.opponent.hero.name : view.you.hero.name;
     mountGame(found.c);

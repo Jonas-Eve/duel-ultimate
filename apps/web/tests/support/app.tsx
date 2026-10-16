@@ -2,7 +2,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
-import { afterEach, beforeAll } from "vitest";
+import { afterEach, beforeAll, expect } from "vitest";
 import { App, type AppDeps } from "../../src/App";
 import { fakeCrypto } from "./ui";
 import { initTestEngine, instrumentedFactory, testFactory } from "./engine";

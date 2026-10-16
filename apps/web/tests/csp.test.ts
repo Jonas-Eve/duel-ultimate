@@ -26,7 +26,9 @@ function policy(): Record<string, string[]> {
   const m = /<meta[^>]*http-equiv="Content-Security-Policy"[^>]*content="([^"]*)"/i.exec(html);
   expect(m, "the CSP meta tag is missing from dist/index.html").not.toBeNull();
   const out: Record<string, string[]> = {};
-  for (const part of (m as RegExpExecArray)[1].split(";")) {
+  // The attribute is HTML-escaped by the build ("&#39;" for a quote).
+  const content = (m as RegExpExecArray)[1].replaceAll("&#39;", "'").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
+  for (const part of content.split(";")) {
     const [name, ...values] = part.trim().split(/\s+/);
     if (name) out[name] = values;
   }

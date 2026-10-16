@@ -150,7 +150,7 @@ describe("failures of startGame are shown, never thrown", () => {
 
   test.each(["invalid_setup", "unknown_deck"])("an engine that throws %s: home with the French alert, never the English text", async (code) => {
     let calls = 0;
-    const { user, counters } = renderApp({
+    const { user } = renderApp({
       engine: () =>
         Promise.resolve(((...args: Parameters<typeof testFactory>) => {
           calls += 1;
@@ -164,11 +164,12 @@ describe("failures of startGame are shown, never thrown", () => {
     expect(alert.textContent).not.toContain("boom-english-text");
     await home();
     expect(screen.queryByRole("button", { name: "Abandonner" })).toBeNull();
-    expect(counters.creations).toBe(0);
+    expect(calls).toBe(1);
     // No controller or instance was kept: the next game can be launched.
     await user.click(screen.getByRole("button", { name: "Lancer la partie" }));
     await screen.findByRole("button", { name: "Abandonner" });
-    expect(counters.creations).toBe(1);
+    expect(calls).toBe(2);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   test("a fake crypto of another value gives another seed", async () => {
