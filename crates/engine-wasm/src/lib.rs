@@ -1,15 +1,18 @@
 //! Thin WASM binding: the client runs the exact same rules as the server (local preview,
 //! replays). The server stays authoritative; the client never decides an outcome.
 //!
-//! The surface is deliberately small: a constructor from a JSON setup, `legal_actions()`
-//! and `apply(action)`, all as JSON strings, plus `start_events()`: the events of the setup
+//! The surface is deliberately small: a constructor from a JSON setup, a constructor from the
+//! data (`from_data`: `cards.json` and `decks.json` strings, decks by identifier, each string
+//! bounded to 1 MiB, no disk), `legal_actions()` and `apply(action)`, all as JSON strings, plus `start_events()`: the events of the setup
 //! (`game_started` with the recorded `data_versions`, possibly `game_won`), which are public
 //! (no hand, pile or card id). There is no accessor for the full state, so nothing hidden
 //! (the opponent's hand, the piles) can leak through this binding.
 //! [`Duel`] holds the logic and is testable natively; [`Game`] only converts its errors
 //! to `JsError` (which cannot be built off the wasm target).
 
-use duel_engine::{Action, Event, GameSetup, GameState, apply, legal_actions, new_game};
+use duel_engine::{
+    Action, Event, GameSetup, GameState, apply, game_setup_from_data, legal_actions, new_game,
+};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -26,25 +29,44 @@ pub struct Duel {
 impl Duel {
     /// Starts a game from a JSON `GameSetup`.
     pub fn from_json(setup_json: &str, seed: u32) -> Result<Self, String> {
-        let setup: GameSetup = parse(setup_json)?;
+        Self::from_setup(parse(setup_json)?, seed)
+    }
+
+    /// Starts a game from `cards.json` and `decks.json` strings, the decks chosen by
+    /// identifier (`deck_one` plays first seat, `deck_two` the second; the same twice is a
+    /// mirror). `data_versions_json` is a JSON array of strings, recorded as is. Each of the
+    /// five strings is bounded by [`MAX_INPUT_BYTES`] before anything is analysed; nothing is
+    /// read from disk.
+    pub fn from_data(
+        cards_json: &str,
+        decks_json: &str,
+        deck_one: &str,
+        deck_two: &str,
+        data_versions_json: &str,
+        seed: u32,
+    ) -> Result<Self, String> {
+        for input in [
+            cards_json,
+            decks_json,
+            deck_one,
+            deck_two,
+            data_versions_json,
+        ] {
+            bounded(input)?;
+        }
+        let data_versions: Vec<String> = parse(data_versions_json)?;
+        let setup = game_setup_from_data(cards_json, decks_json, deck_one, deck_two, data_versions)
+            .map_err(|e| error_json(e.code(), &e.to_string()))?;
+        Self::from_setup(setup, seed)
+    }
+
+    fn from_setup(setup: GameSetup, seed: u32) -> Result<Self, String> {
         let (state, start_events) =
             new_game(setup, seed.into()).map_err(|e| error_json(e.code(), &e.to_string()))?;
         Ok(Self {
             state,
             start_events,
         })
-    }
-
-    /// Starts a game from data strings (red stub).
-    pub fn from_data(
-        _cards_json: &str,
-        _decks_json: &str,
-        _deck_one: &str,
-        _deck_two: &str,
-        _data_versions_json: &str,
-        _seed: u32,
-    ) -> Result<Self, String> {
-        Err(error_json("not_implemented", "red stub"))
     }
 
     /// The events of the game's start, as a JSON array: the same at every call, whatever
@@ -72,14 +94,20 @@ fn error_json(code: &str, message: &str) -> String {
     serde_json::json!({ "code": code, "message": message }).to_string()
 }
 
-/// Parses untrusted JSON, after bounding its size.
-fn parse<T: serde::de::DeserializeOwned>(input: &str) -> Result<T, String> {
+/// Rejects an input larger than [`MAX_INPUT_BYTES`], whatever it is (JSON or identifier).
+fn bounded(input: &str) -> Result<(), String> {
     if input.len() > MAX_INPUT_BYTES {
         return Err(error_json(
             "input_too_large",
             &format!("input is larger than {MAX_INPUT_BYTES} bytes"),
         ));
     }
+    Ok(())
+}
+
+/// Parses untrusted JSON, after bounding its size.
+fn parse<T: serde::de::DeserializeOwned>(input: &str) -> Result<T, String> {
+    bounded(input)?;
     serde_json::from_str(input).map_err(|e| error_json("invalid_json", &e.to_string()))
 }
 

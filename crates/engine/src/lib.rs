@@ -5,6 +5,10 @@
 //! costs time through a single time rule; crossing the boundary hands the token over.
 //! The engine consumes data already resolved by `duel-cards` and re-validates it in
 //! [`new_game`], because the setup may come from an untrusted client (WASM).
+//! The [`data`](game_setup_from_data) module builds a [`GameSetup`] from `cards.json` /
+//! `decks.json` strings and deck identifiers (the one implementation shared by the simulator
+//! and `engine-wasm`); it parses text, never reads the disk. A card's display name travels
+//! with its instance but no rule, formula or draw reads it.
 //!
 //! Randomness is consumed only at setup, in this documented order: shuffle of One's deck,
 //! shuffle of Two's deck, then `random_below(2)` if (and only if) the initiatives are equal.

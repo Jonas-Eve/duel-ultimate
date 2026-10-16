@@ -153,7 +153,7 @@ fn journal(setup: GameSetup, seed: u64) -> (Vec<String>, Vec<String>) {
         let playable: Vec<&Action> = actions.iter().filter(|a| **a != Action::Concede).collect();
         let action = playable
             .get(usize::try_from(pick >> 33).unwrap() % playable.len().max(1))
-            .map_or(Action::Concede, |a| (*a).clone());
+            .map_or(Action::Concede, |a| **a);
         let events = apply(&mut state, action).unwrap();
         log.extend(events.iter().map(|e| serde_json::to_string(e).unwrap()));
     }

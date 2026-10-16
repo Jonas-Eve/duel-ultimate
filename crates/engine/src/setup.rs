@@ -3,7 +3,8 @@
 use crate::rules::{self, Event};
 use crate::state::{CardInstance, CardInstanceId, GameState, PlayerId, PlayerState};
 use duel_cards::{
-    CardsError, CreatureStats, Hero, validate_creature, validate_deck_shape, validate_hero,
+    CardsError, CreatureStats, Hero, validate_card_names, validate_creature, validate_deck_shape,
+    validate_hero,
 };
 use serde::{Deserialize, Serialize};
 
@@ -19,8 +20,9 @@ pub struct PlayerSetup {
     pub card_names: Vec<String>,
 }
 
-/// Everything a game needs. The engine reads neither disk nor identifiers: callers resolve
-/// decks with `duel-cards` first. `data_versions` is opaque and untrusted: recorded as is in
+/// Everything a game needs. `new_game` reads neither disk nor identifiers: callers resolve
+/// decks with `duel-cards` first (the `data` module does it for the callers that start from
+/// `cards.json` / `decks.json` strings, by deck identifier, still without any I/O). `data_versions` is opaque and untrusted: recorded as is in
 /// the state and copied into `Event::GameStarted` (replays, balance), never interpreted,
 /// validated or sorted. The key is mandatory in JSON (an empty list is valid).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,12 +51,16 @@ impl SetupError {
 fn validate_side(side: &PlayerSetup) -> Result<(), CardsError> {
     validate_hero(&side.hero)?;
     validate_deck_shape(&side.hero, side.cards.len())?;
+    validate_card_names(&side.card_names, side.cards.len())?;
     side.cards.iter().try_for_each(validate_creature)
 }
 
 /// Builds a player's pile in deck order; `next_id` runs on across both players so that ids
 /// follow the deterministic order of the setup (One's deck, then Two's), before shuffling.
 fn build_side(side: PlayerSetup, next_id: &mut u32) -> PlayerState {
+    // The names are paired with their cards here, before the shuffle, so a name follows its
+    // card into every zone. `validate_side` guarantees none, or exactly one per card.
+    let mut names = side.card_names.into_iter();
     let deck = side
         .cards
         .into_iter()
@@ -64,7 +70,7 @@ fn build_side(side: PlayerSetup, next_id: &mut u32) -> PlayerState {
             CardInstance {
                 id,
                 stats,
-                name: None,
+                name: names.next(),
             }
         })
         .collect();
@@ -223,7 +229,7 @@ mod tests {
                 else {
                     break;
                 };
-                apply(&mut state, (*action).clone()).unwrap();
+                apply(&mut state, **action).unwrap();
                 assert_names_follow_stats(&state, &format!("seed {seed} step {step}"));
                 seen_board |= !state.one.board.is_empty() || !state.two.board.is_empty();
                 seen_discard |= !state.one.discard.is_empty() || !state.two.discard.is_empty();
