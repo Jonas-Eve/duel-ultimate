@@ -139,3 +139,116 @@ pub fn new_game(setup: GameSetup, seed: u64) -> Result<(GameState, Vec<Event>), 
     rules::check_exhaustion(&mut state, &mut events);
     Ok((state, events))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rules::{Action, apply, legal_actions};
+    use crate::state::CardInstance;
+    use crate::testing::{hero, setup};
+
+    /// Names `c{n}`, where `n` is the cost of the card: `testing::deck()` gives its 30 cards
+    /// the distinct costs 1..=30, so a name says which stats it must sit next to.
+    fn named(mut setup: GameSetup) -> GameSetup {
+        for side in [&mut setup.one, &mut setup.two] {
+            side.card_names = side.cards.iter().map(|s| format!("c{}", s.cost)).collect();
+        }
+        setup
+    }
+
+    /// Every card of every zone of both players.
+    fn all_cards(state: &GameState) -> Vec<&CardInstance> {
+        [&state.one, &state.two]
+            .into_iter()
+            .flat_map(|p| {
+                p.deck
+                    .iter()
+                    .chain(&p.hand)
+                    .chain(&p.board)
+                    .chain(&p.discard)
+            })
+            .collect()
+    }
+
+    fn assert_names_follow_stats(state: &GameState, context: &str) {
+        let cards = all_cards(state);
+        assert_eq!(cards.len(), 60, "{context}: no card appears or vanishes");
+        for card in cards {
+            assert_eq!(
+                card.name.as_deref(),
+                Some(format!("c{}", card.stats.cost).as_str()),
+                "{context}: card {:?}",
+                card.id
+            );
+        }
+    }
+
+    #[test]
+    fn a_game_without_names_gives_every_instance_no_name() {
+        let (state, _) = new_game(setup(hero(2, 3, 8, vec![]), hero(1, 1, 8, vec![])), 3).unwrap();
+        assert!(all_cards(&state).iter().all(|c| c.name.is_none()));
+    }
+
+    #[test]
+    fn the_name_follows_its_card_through_the_shuffle_and_the_deal() {
+        for seed in 0..30 {
+            let (state, _) = new_game(
+                named(setup(hero(2, 3, 8, vec![]), hero(1, 1, 8, vec![]))),
+                seed,
+            )
+            .unwrap();
+            assert_names_follow_stats(&state, &format!("seed {seed}"));
+            // The shuffle really moved cards: the pile is not in deck order.
+            let costs: Vec<u32> = state.one.deck.iter().map(|c| c.stats.cost).collect();
+            assert!(costs.windows(2).any(|w| w[0] > w[1]), "seed {seed}");
+        }
+    }
+
+    #[test]
+    fn the_name_follows_its_card_to_the_hand_the_board_and_the_discard() {
+        let mut seen_board = false;
+        let mut seen_discard = false;
+        for seed in 0..12 {
+            let draw = crate::testing::draw(1, 2);
+            let setup = named(setup(
+                hero(2, 3, 8, vec![draw.clone()]),
+                hero(1, 1, 8, vec![draw]),
+            ));
+            let (mut state, _) = new_game(setup, seed).unwrap();
+            for step in 0..3_000_usize {
+                let actions = legal_actions(&state);
+                let playable: Vec<&Action> =
+                    actions.iter().filter(|a| **a != Action::Concede).collect();
+                let Some(action) = playable.get(step.wrapping_mul(7) % playable.len().max(1))
+                else {
+                    break;
+                };
+                apply(&mut state, (*action).clone()).unwrap();
+                assert_names_follow_stats(&state, &format!("seed {seed} step {step}"));
+                seen_board |= !state.one.board.is_empty() || !state.two.board.is_empty();
+                seen_discard |= !state.one.discard.is_empty() || !state.two.discard.is_empty();
+            }
+        }
+        assert!(seen_board, "a card reached a board");
+        assert!(seen_discard, "a card reached a discard");
+    }
+
+    #[test]
+    fn a_name_is_per_instance_not_per_position() {
+        // Names listed in reverse order against the stats: each instance keeps the pairing the
+        // setup gave it (by position in the deck, before the shuffle), whatever the shuffle does.
+        let mut s = setup(hero(2, 3, 8, vec![]), hero(1, 1, 8, vec![]));
+        s.one.card_names = s
+            .one
+            .cards
+            .iter()
+            .rev()
+            .map(|c| format!("c{}", c.cost))
+            .collect();
+        let (state, _) = new_game(s, 5).unwrap();
+        for card in &state.one.deck {
+            let n = 31 - card.stats.cost;
+            assert_eq!(card.name.as_deref(), Some(format!("c{n}").as_str()));
+        }
+    }
+}

@@ -35,6 +35,18 @@ impl Duel {
         })
     }
 
+    /// Starts a game from data strings (red stub).
+    pub fn from_data(
+        _cards_json: &str,
+        _decks_json: &str,
+        _deck_one: &str,
+        _deck_two: &str,
+        _data_versions_json: &str,
+        _seed: u32,
+    ) -> Result<Self, String> {
+        Err(error_json("not_implemented", "red stub"))
+    }
+
     /// The events of the game's start, as a JSON array: the same at every call, whatever
     /// was applied since.
     pub fn start_events_json(&self) -> Result<String, String> {
@@ -85,6 +97,26 @@ impl Game {
         Duel::from_json(setup_json, seed)
             .map(Game)
             .map_err(|e| JsError::new(&e))
+    }
+
+    pub fn from_data(
+        cards_json: &str,
+        decks_json: &str,
+        deck_one: &str,
+        deck_two: &str,
+        data_versions_json: &str,
+        seed: u32,
+    ) -> Result<Game, JsError> {
+        Duel::from_data(
+            cards_json,
+            decks_json,
+            deck_one,
+            deck_two,
+            data_versions_json,
+            seed,
+        )
+        .map(Game)
+        .map_err(|e| JsError::new(&e))
     }
 
     pub fn start_events(&self) -> Result<String, JsError> {

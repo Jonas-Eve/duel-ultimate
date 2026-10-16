@@ -8,6 +8,9 @@ pub const MAX_STAT: u32 = 10_000;
 /// Maximum number of effects a hero can have (bounds hostile data, like [`MAX_STAT`]).
 pub const MAX_HERO_EFFECTS: usize = 8;
 
+/// Maximum length of a card name, in characters (untrusted text shown by clients).
+pub const MAX_NAME_LEN: usize = 64;
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum CardsError {
     #[error("invalid JSON: {0}")]
@@ -49,6 +52,12 @@ pub enum CardsError {
         value: u32,
         max: u32,
     },
+    #[error(
+        "`card_names` has {names} entries but the deck has {cards} cards (empty, or one per card)"
+    )]
+    CardNamesMismatch { names: usize, cards: usize },
+    #[error("a card name is {len} characters long, above the maximum of {max}")]
+    NameTooLong { len: usize, max: usize },
     #[error("card `{id}`: {source}")]
     InvalidCard { id: String, source: Box<CardsError> },
     #[error("deck `{id}`: {source}")]
@@ -230,4 +239,17 @@ pub fn resolve_deck(deck: &Deck, cards: &[Card]) -> Result<Vec<CreatureStats>, C
             Ok(stats)
         })
         .collect()
+}
+
+/// Checks the optional display names of a deck (red stub: accepts everything).
+pub fn validate_card_names(_names: &[String], _cards_len: usize) -> Result<(), CardsError> {
+    Ok(())
+}
+
+/// Like [`resolve_deck`], with the names of the cards (red stub: no names yet).
+pub fn resolve_deck_named(
+    deck: &Deck,
+    cards: &[Card],
+) -> Result<(Vec<CreatureStats>, Vec<String>), CardsError> {
+    Ok((resolve_deck(deck, cards)?, Vec::new()))
 }
