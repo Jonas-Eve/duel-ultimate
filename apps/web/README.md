@@ -155,7 +155,9 @@ deux camps (#67) viennent ensuite.
   contrôle par un `crypto` factice (`null` simule l'absence d'entropie). `Home` reçoit les decks et la
   version par props : `ui/` n'importe ni `data/starter` ni `engine/load` (`tests/architecture.test.ts`).
 - **Le contrôleur est créé dans le gestionnaire du clic**, jamais dans un `useEffect` (StrictMode
-  rejoue les effets : un cleanup libérerait l'instance du second montage ; test de montage StrictMode),
+  rejoue les effets : un cleanup libérerait l'instance du second montage ; gardé par le test de montage StrictMode, qui ne couvre que le cleanup qui
+  libère, et par le scan de source `tests/controller-creation-policy.test.ts` : aucun `startGame(` ni
+  `GameController.create(` dans un `useEffect`/`useLayoutEffect` de `App` ou de `ui/`),
   par `startGame`, qui ne lève jamais. Sur succès, `App` garde le contrôleur et appelle `start()` ; elle
   appelle `dispose()` sur l'ancien avant d'en créer un autre, au retour à l'accueil et au démontage
   (N parties = N `free()`). « Rejouer » se reconstruit depuis le `Snapshot` : même graine
