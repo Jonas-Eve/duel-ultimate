@@ -23,10 +23,18 @@ export function createWasmSession(factory: GameFactory, config: SessionConfig): 
     factory(config.cards, config.decks, config.deckOne, config.deckTwo, versionsJson, config.seed),
   );
   let disposed = false;
+  // Set by the first fatal error (a non-JSON throw: a Rust panic is a WebAssembly
+  // RuntimeError that leaves the instance unusable). From then on nothing reaches the WASM.
+  let poisoned: EngineError | null = null;
   const release = () => {
     if (disposed) return;
     disposed = true;
-    game.free();
+    try {
+      game.free();
+    } catch {
+      // A broken instance may refuse to be freed; this must never mask the error that
+      // made us release it, nor make `dispose()` throw.
+    }
   };
 
   let startEvents: EngineEvent[];
@@ -39,7 +47,15 @@ export function createWasmSession(factory: GameFactory, config: SessionConfig): 
 
   const live = <T>(fn: () => T): T => {
     if (disposed) throw new SessionDisposedError();
-    return call(fn);
+    if (poisoned !== null) {
+      throw new EngineError("internal_error", `the game session is dead: ${poisoned.message}`);
+    }
+    try {
+      return call(fn);
+    } catch (e) {
+      if (e instanceof EngineError && e.fatal) poisoned = e;
+      throw e;
+    }
   };
 
   return {
