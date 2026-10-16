@@ -285,7 +285,10 @@ describe("the computer's turn", () => {
     const status = screen.getByRole("status");
     expect(status.textContent).toBe("L'ordinateur joue…");
     expect(controls().length).toBeGreaterThan(0);
-    for (const b of controls()) expect(b.disabled, b.textContent ?? "").toBe(true);
+    // The game controls are disabled; reading the log and the discards stays possible (#65).
+    for (const b of controls().filter((x) => !/^(Journal|Défausse \(\d+\))$/.test(x.textContent ?? ""))) {
+      expect(b.disabled, b.textContent ?? "").toBe(true);
+    }
     expect(screen.queryByText(/L'ordinateur a joué/)).toBeNull();
 
     await act(async () => {
