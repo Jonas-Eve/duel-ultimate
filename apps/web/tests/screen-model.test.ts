@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, test } from "vitest";
 import type { Seat } from "../src/engine/types";
-import { GameController, type GameConfig, type Mode, type Snapshot } from "../src/game/controller";
+import { GameController, type DeckEmblem, type GameConfig, type Mode, type Snapshot } from "../src/game/controller";
 import { toScreenModel } from "../src/game/screen-model";
+import { EMBLEMS } from "./support/config";
 import { initTestEngine } from "./support/engine";
 import { randomPreview, realDeps, settle } from "./support/policies";
 
@@ -12,9 +13,15 @@ beforeAll(async () => {
 const NAMES: Record<string, string> = { rush: "Ruée", bulwark: "Rempart" };
 const config = (mode: Mode, one: string, two: string, seed: number): GameConfig => ({
   mode,
-  deckOne: { id: one, name: NAMES[one] },
-  deckTwo: { id: two, name: NAMES[two] },
+  deckOne: { id: one, name: NAMES[one], emblem: EMBLEMS[one] },
+  deckTwo: { id: two, name: NAMES[two], emblem: EMBLEMS[two] },
   seed,
+});
+/** Same as `config` but with the decks' emblems given explicitly (or none). */
+const withEmblems = (c: GameConfig, one: DeckEmblem | undefined, two: DeckEmblem | undefined): GameConfig => ({
+  ...c,
+  deckOne: { id: c.deckOne.id, name: c.deckOne.name, emblem: one },
+  deckTwo: { id: c.deckTwo.id, name: c.deckTwo.name, emblem: two },
 });
 const other = (s: Seat): Seat => (s === "One" ? "Two" : "One");
 
@@ -141,5 +148,40 @@ describe("two camps", () => {
     expect(last.phase).toBe("over");
     const m = toScreenModel(last);
     expect(m.top.seat).not.toBe(m.bottom.seat);
+  });
+});
+
+describe("the deck emblem of each side (#94)", () => {
+  test("against the computer: each side carries the emblem of its own seat's deck", () => {
+    const c = GameController.create(config("computer", "rush", "bulwark", 2), realDeps());
+    try {
+      c.start();
+      const m = toScreenModel(c.getSnapshot());
+      expect(m.bottom.emblem).toBe("bolt");
+      expect(m.top.emblem).toBe("battlements");
+    } finally {
+      c.dispose();
+    }
+  });
+
+  test("two camps: the emblem follows the seat, not the camp holding the main, through every swap", async () => {
+    let swaps = 0;
+    for (const s of await humanSnapshots("two-camps", "rush", "bulwark", 5)) {
+      const m = toScreenModel(s);
+      for (const side of [m.top, m.bottom]) expect(side.emblem).toBe(side.seat === "One" ? "bolt" : "battlements");
+      if (m.bottom.seat === "Two") swaps += 1;
+    }
+    expect(swaps).toBeGreaterThan(0);
+  });
+
+  test.each(["computer", "two-camps"] as const)("%s: no emblem on a deck means undefined on its side (the other keeps its own)", (mode) => {
+    const c = GameController.create(withEmblems(config(mode, "rush", "bulwark", 2), undefined, "battlements"), realDeps());
+    try {
+      c.start();
+      const m = toScreenModel(c.getSnapshot());
+      for (const side of [m.top, m.bottom]) expect(side.emblem).toBe(side.seat === "One" ? undefined : "battlements");
+    } finally {
+      c.dispose();
+    }
   });
 });
