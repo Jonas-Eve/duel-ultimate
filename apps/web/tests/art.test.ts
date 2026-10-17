@@ -111,7 +111,8 @@ describe("the starter set", () => {
 
 describe("the glob pinning", () => {
   const src = readFileSync(resolve(webRoot, "src/data/art.ts"), "utf8");
-  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  // Comments only at the start of a line: a naive `/* */` strip would eat the `art/*.{webp,svg}` glob.
+  const code = src.replace(/^\s*\/\*[\s\S]*?\*\//gm, "").replace(/^\s*\/\/.*$/gm, "");
 
   test("literal paths of the same version as DATA_VERSION", () => {
     const globs = [...code.matchAll(/import\.meta\.glob\(\s*"([^"]+)"/g)].map((m) => m[1]);
@@ -157,7 +158,7 @@ describe("useArtLookup", () => {
   test("with a provider, it returns the given lookup", () => {
     const info: ArtInfo = { url: "u", author: "a", license: "CC0-1.0", source: "s" };
     const { result } = renderHook(() => useArtLookup(), {
-      wrapper: ({ children }) => createElement(ArtProvider, { lookup: (n: string) => (n === "Loup" ? info : undefined) }, children),
+      wrapper: ({ children }) => createElement(ArtProvider, { lookup: (n: string) => (n === "Loup" ? info : undefined), children }),
     });
     expect(result.current("Loup")).toBe(info);
     expect(result.current("x")).toBeUndefined();

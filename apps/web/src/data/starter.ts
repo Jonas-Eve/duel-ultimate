@@ -11,7 +11,7 @@ export const CARDS_JSON: string = cardsRaw;
 export const DECKS_JSON: string = decksRaw;
 
 /**
- * Provisional deck -> symbol table (#94); the art manifest of #88 will replace it. The one place
+ * Provisional deck -> symbol table (#94); it stays provisional (deck art is out of #88's scope). The one place
  * a deck id meets an emblem; a deck absent from it has no chip.
  */
 export const DECK_EMBLEMS: Readonly<Record<string, DeckEmblem>> = { rush: "bolt", bulwark: "battlements" };
