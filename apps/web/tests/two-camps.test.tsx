@@ -94,7 +94,7 @@ describe("the screen: both hands visible, the camp holding the main at the botto
     expect(container.textContent).not.toMatch(/ordinateur|À toi|adversaire|Tu /i);
     // The info panel has the data version and no computer seed.
     const info = within(container.querySelector("details") as HTMLElement);
-    expect(info.getByText(/Données : starter@1\.0\.0/)).toBeTruthy();
+    expect(info.getByText(/Données : starter@1\.1\.0/)).toBeTruthy();
     expect(container.querySelector("details")!.textContent).not.toMatch(/ordinateur|Graine/i);
   });
 

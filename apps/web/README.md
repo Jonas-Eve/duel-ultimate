@@ -19,7 +19,7 @@ aucune interaction qui dépende du survol. Il appelle le moteur de règles compi
   sous-chemin, la donner aussi à `preview` :
   `VITE_BASE=/duel-ultimate/ npm run build && VITE_BASE=/duel-ultimate/ npm run preview`.
 - **Identifiant de build (#80)** : `VITE_BUILD_SHA` (un SHA de commit, 7 à 40 caractères hexadécimaux
-  minuscules) est affiché en 7 caractères sur l'accueil, sous « Données : starter@1.0.0 » :
+  minuscules) est affiché en 7 caractères sur l'accueil, sous « Données : starter@1.1.0 » :
   « Version : abc1234 ». Absent ou invalide (dev, tests, build local) : `dev`. `src/data/build.ts`
   (`buildIdFrom`, `BUILD_ID`) n'est lu que par `App`, qui le passe à l'accueil par la prop `buildId`.
   Seules les variables `VITE_` entrent dans le bundle ; aucun secret. `index.html` porte
@@ -30,7 +30,7 @@ aucune interaction qui dépende du survol. Il appelle le moteur de règles compi
   **Manuel** (`workflow_dispatch` seul : Actions > « Deploy to Pages » > Run workflow, sur `main`, depuis
   un `main` vert : il ne lance ni tests, ni Clippy, ni `fmt`, ni e2e). Pour vérifier la version en ligne,
   lire sur l'accueil « Version : <SHA à 7 caractères> » (à comparer à `git rev-parse --short origin/main`)
-  et « Données : starter@1.0.0 ». **Cache** : Pages envoie `Cache-Control: max-age=600` (en-têtes non
+  et « Données : starter@1.1.0 ». **Cache** : Pages envoie `Cache-Control: max-age=600` (en-têtes non
   réglables) ; pendant ~10 minutes après un redéploiement, un `index.html` périmé peut référencer des assets
   hachés disparus et afficher l'écran d'erreur `wasm_load_failed` avec « Recharger » : attendre ou recharger.
   Le garde est le bloc « deploy-pages.yml » de `tests/ci-policy.test.ts` (déclencheur, permissions,
@@ -86,14 +86,14 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
   fabrique jamais une action : il la retrouve dans `legalActionsWithTime()` et la renvoie telle quelle
   à `apply`. `dispose()` libère la partie une seule fois (après `free()` le binding lève « null pointer
   passed to rust ») ; toute autre méthode lève alors `SessionDisposedError` sans toucher au WASM.
-- **Données** : `cards.json` et `decks.json` sont lus depuis `data/starter/1.0.0/` (jamais copiés).
+- **Données** : `cards.json` et `decks.json` sont lus depuis `data/starter/1.1.0/` (jamais copiés).
   L'import hors de `apps/web` exige `server.fs.allow` dans `vite.config.ts` (sans lui, Vitest répond
   « Denied ID ») ; `allow` remplace la liste par défaut de Vite, donc elle contient `apps/web` et
-  `data/`, jamais la racine du dépôt (`data/build.ts`, lui, ne lit que `import.meta.env`). `DATA_VERSION` (`starter@1.0.0`) est la seule constante de
+  `data/`, jamais la racine du dépôt (`data/build.ts`, lui, ne lit que `import.meta.env`). `DATA_VERSION` (`starter@1.1.0`) est la seule constante de
   version ; `tests/data-version.test.ts` la compare au chemin importé.
 - **Art des cartes (#101)** : un set peut avoir `art.json` et `art/` (format et licences : `crates/cards/src/art.rs`,
   le moteur n'y touche pas). `data/art.ts` les lit par deux `import.meta.glob` à chemins littéraux (même version
-  que `DATA_VERSION`, tolérants à l'absence : `starter@1.0.0` n'a pas d'art, donc l'index est vide et les cartes gardent le paysage de substitution) et
+  que `DATA_VERSION`, tolérants à l'absence : `starter@1.1.0` n'a pas encore d'art, donc l'index est vide et les cartes gardent le paysage de substitution) et
   `buildArtIndex` (pure, ne lève jamais) construit la recherche par nom d'affichage exact. `file` n'est jamais
   concaténé en URL : c'est la clé d'une table fermée d'images, une clé absente laisse l'illustration de
   substitution. Un nom partagé par plusieurs cartes, une licence hors `CC0-1.0`/`CC-BY-4.0` ou une entrée invalide

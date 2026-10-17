@@ -92,7 +92,7 @@ describe("phases at the start", () => {
       const s = c.getSnapshot();
       expect(s.mode).toBe("computer");
       expect(s.seed).toBe(77);
-      expect(s.dataVersion).toBe("starter@1.0.0");
+      expect(s.dataVersion).toBe("starter@1.1.0");
       expect(s.players.One).toEqual({ id: "rush", name: "Ruée" });
       expect(s.players.Two).toEqual({ id: "bulwark", name: "Rempart" });
     } finally {

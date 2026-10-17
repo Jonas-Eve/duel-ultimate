@@ -1,0 +1,94 @@
+[
+  {
+    "kind": "creature",
+    "id": "skirmisher",
+    "name": "Escarmoucheur",
+    "cost": 1,
+    "force": 2,
+    "attack_cost": 1,
+    "health": 1
+  },
+  {
+    "kind": "creature",
+    "id": "raider",
+    "name": "Pillard",
+    "cost": 2,
+    "force": 3,
+    "attack_cost": 1,
+    "health": 2
+  },
+  {
+    "kind": "creature",
+    "id": "spiked_wolf",
+    "name": "Loup hérissé",
+    "cost": 2,
+    "force": 3,
+    "attack_cost": 1,
+    "health": 1,
+    "riposte": 1
+  },
+  {
+    "kind": "creature",
+    "id": "lancer",
+    "name": "Lancier",
+    "cost": 3,
+    "force": 4,
+    "attack_cost": 1,
+    "health": 2
+  },
+  {
+    "kind": "creature",
+    "id": "rider",
+    "name": "Cavalier",
+    "cost": 4,
+    "force": 5,
+    "attack_cost": 2,
+    "health": 3
+  },
+  {
+    "kind": "creature",
+    "id": "warden",
+    "name": "Garde du rempart",
+    "cost": 3,
+    "force": 1,
+    "attack_cost": 2,
+    "health": 6,
+    "provocation": true
+  },
+  {
+    "kind": "creature",
+    "id": "pikeman",
+    "name": "Piquier",
+    "cost": 3,
+    "force": 2,
+    "attack_cost": 2,
+    "health": 5
+  },
+  {
+    "kind": "creature",
+    "id": "knight",
+    "name": "Chevalier",
+    "cost": 4,
+    "force": 2,
+    "attack_cost": 3,
+    "health": 7
+  },
+  {
+    "kind": "creature",
+    "id": "ogre",
+    "name": "Ogre",
+    "cost": 5,
+    "force": 3,
+    "attack_cost": 3,
+    "health": 8
+  },
+  {
+    "kind": "creature",
+    "id": "colossus",
+    "name": "Colosse",
+    "cost": 6,
+    "force": 4,
+    "attack_cost": 4,
+    "health": 10
+  }
+]

@@ -1,12 +1,12 @@
 // The starter set, imported as text from the versioned data folder (never copied into the
 // app). `DATA_VERSION` is the one version constant; `tests/data-version.test.ts` pins it
 // against the imported path. Vite must be allowed to read `data/` (see `vite.config.ts`).
-import cardsRaw from "../../../../data/starter/1.0.0/cards.json?raw";
-import decksRaw from "../../../../data/starter/1.0.0/decks.json?raw";
+import cardsRaw from "../../../../data/starter/1.1.0/cards.json?raw";
+import decksRaw from "../../../../data/starter/1.1.0/decks.json?raw";
 import { EngineError } from "../engine/errors";
 import type { DeckEmblem } from "../game/controller";
 
-export const DATA_VERSION = "starter@1.0.0";
+export const DATA_VERSION = "starter@1.1.0";
 export const CARDS_JSON: string = cardsRaw;
 export const DECKS_JSON: string = decksRaw;
 
