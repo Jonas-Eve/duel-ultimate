@@ -14,8 +14,8 @@ const source = readFileSync(resolve(webRoot, "src/data/starter.ts"), "utf8");
 
 describe("the starter data and its version", () => {
   test("the source imports the versioned folder of the repository", () => {
-    expect(source).toContain("data/starter/1.0.0/");
-    for (const f of ["cards.json", "decks.json"]) expect(existsSync(resolve(repoRoot, "data/starter/1.0.0", f))).toBe(true);
+    expect(source).toContain("data/starter/1.1.0/");
+    for (const f of ["cards.json", "decks.json"]) expect(existsSync(resolve(repoRoot, "data/starter/1.1.0", f))).toBe(true);
   });
 
   test("DATA_VERSION follows the imported path (the two cannot diverge)", () => {
@@ -23,12 +23,12 @@ describe("the starter data and its version", () => {
     expect(paths.length).toBe(2);
     expect(new Set(paths).size).toBe(1);
     expect(DATA_VERSION).toBe(`starter@${paths[0]}`);
-    expect(DATA_VERSION).toBe("starter@1.0.0");
+    expect(DATA_VERSION).toBe("starter@1.1.0");
   });
 
   test("the imported text is the file on disk", () => {
-    expect(CARDS_JSON).toBe(readFileSync(resolve(repoRoot, "data/starter/1.0.0/cards.json"), "utf8"));
-    expect(DECKS_JSON).toBe(readFileSync(resolve(repoRoot, "data/starter/1.0.0/decks.json"), "utf8"));
+    expect(CARDS_JSON).toBe(readFileSync(resolve(repoRoot, "data/starter/1.1.0/cards.json"), "utf8"));
+    expect(DECKS_JSON).toBe(readFileSync(resolve(repoRoot, "data/starter/1.1.0/decks.json"), "utf8"));
   });
 
   test("DECKS lists rush then bulwark", () => {

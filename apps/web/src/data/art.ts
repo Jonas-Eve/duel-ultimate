@@ -6,8 +6,8 @@
 import type { ArtInfo, ArtLicenseId, ArtLookup } from "../game/art";
 import { CARDS_JSON } from "./starter";
 
-const rawArt = import.meta.glob("../../../../data/starter/1.0.0/art.json", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
-const imageUrls = import.meta.glob("../../../../data/starter/1.0.0/art/*.{webp,svg}", { query: "?url", import: "default", eager: true }) as Record<string, string>;
+const rawArt = import.meta.glob("../../../../data/starter/1.1.0/art.json", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+const imageUrls = import.meta.glob("../../../../data/starter/1.1.0/art/*.{webp,svg}", { query: "?url", import: "default", eager: true }) as Record<string, string>;
 
 /** Same closed list as `ART_LICENSES` in `crates/cards/src/art.rs` (pinned by `tests/art.test.ts`). */
 export const ART_LICENSES: readonly ArtLicenseId[] = ["CC0-1.0", "CC-BY-4.0"];

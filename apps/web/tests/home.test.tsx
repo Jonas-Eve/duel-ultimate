@@ -14,16 +14,16 @@ const home = async () => screen.findByRole("heading", { name: "Choisis ton deck"
 
 describe("home screen", () => {
   test("shows the build identifier it is given, apart from the data version (#80)", () => {
-    render(<Home decks={[{ id: "a", name: "A" }]} dataVersion="starter@1.0.0" buildId="abc1234" status="ready" loadError={null} startError={null} onStart={() => {}} onReload={() => {}} />);
+    render(<Home decks={[{ id: "a", name: "A" }]} dataVersion="starter@1.1.0" buildId="abc1234" status="ready" loadError={null} startError={null} onStart={() => {}} onReload={() => {}} />);
     expect(screen.getByText("Version : abc1234")).toBeTruthy();
-    expect(screen.getByText("Données : starter@1.0.0")).toBeTruthy();
+    expect(screen.getByText("Données : starter@1.1.0")).toBeTruthy();
   });
 
   test("shows the data version, the decks, the opponent's deck (computer mode by default)", async () => {
     const { user } = renderApp();
     await home();
     expect(screen.getByText(`Données : ${DATA_VERSION}`)).toBeTruthy();
-    expect(DATA_VERSION).toBe("starter@1.0.0");
+    expect(DATA_VERSION).toBe("starter@1.1.0");
     // The build identifier is its own paragraph (`dev` outside a deployment, #80).
     expect(screen.getByText("Version : dev")).toBeTruthy();
     expect(screen.getByRole("radio", { name: "Ruée" })).toBeTruthy();

@@ -28,7 +28,7 @@ fn a_run_prints_the_report_structure_for_the_three_starter_matchups() {
     assert!(output.stderr.is_empty());
     let text = stdout(&output);
     assert!(
-        text.starts_with("set: starter@1.0.0 | seed: 0 | games per matchup: 20 | action cap: "),
+        text.starts_with("set: starter@1.1.0 | seed: 0 | games per matchup: 20 | action cap: "),
         "{text:?}"
     );
     assert!(text.ends_with('\n'));
@@ -68,9 +68,20 @@ fn each_set_names_its_version() {
     assert!(fixture.starts_with("set: fixture@1.0.0 | "), "{fixture:?}");
     assert_eq!(matchup_lines(&fixture).len(), 3);
     let starter = stdout(&run(&["10", "--set", "starter"]));
-    assert!(starter.starts_with("set: starter@1.0.0 | "), "{starter:?}");
-    let exact = stdout(&run(&["10", "--set", "starter@1.0.0"]));
+    assert!(starter.starts_with("set: starter@1.1.0 | "), "{starter:?}");
+    let exact = stdout(&run(&["10", "--set", "starter@1.1.0"]));
     assert_eq!(starter, exact);
+    let older = stdout(&run(&["10", "--set", "starter@1.0.0"]));
+    assert!(older.starts_with("set: starter@1.0.0 | "), "{older:?}");
+}
+
+#[test]
+fn starter_1_0_0_and_1_1_0_give_the_same_report_but_for_the_first_line() {
+    let rest = |set: &str| {
+        let text = stdout(&run(&["20", "--set", set, "--seed", "5"]));
+        text.split_once('\n').expect("a first line").1.to_owned()
+    };
+    assert_eq!(rest("starter@1.0.0"), rest("starter@1.1.0"));
 }
 
 #[test]
