@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, test } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, test } from "vitest";
 import type { CardView } from "../src/engine/types";
 import { CardTile } from "../src/ui/CardTile";
 import { expectedCardLabel } from "./support/card-label";
@@ -15,6 +15,8 @@ const card = (over: Partial<CardView> = {}): CardView => ({
   riposte: 0,
   ...over,
 });
+
+afterEach(cleanup);
 
 describe("the compact card", () => {
   test("a plain tile is a group inside one fixed-size face; its three values are always there, riposte 0 included", () => {

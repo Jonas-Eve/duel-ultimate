@@ -238,8 +238,9 @@ même, alimenté par `toScreenModel` :
   « Retour à l'accueil », aucune commande) ; bandeau d'erreur `role="alert"` pour une erreur de règle
   (partie intacte, « Fermer »).
 - **Accessibilité** : vrais `<button>` (zone tactile `--tap: 44px`), aucun `:hover`, provocation = pictogramme
-  SVG `aria-hidden` **et** libellé « Provocation », riposte = « Riposte N », nom accessible complet des cartes
-  (« Pillard, coût 2, force 3, coût d'attaque 1, PV 2, passe la main, provocation, riposte 1 »). `Dialog`
+  SVG `aria-hidden` **et** libellé « Provocation », riposte = la deuxième des trois valeurs de la carte, nom
+  accessible complet des cartes (« Pillard, coût 2, attaque 3, riposte 0, vie 2, provocation, passe la main »,
+  voir « Carte compacte » ci-dessous). `Dialog`
   (`role="dialog"`, `aria-modal`, piège à focus, Échap, focus rendu au déclencheur) n'utilise ni
   `<dialog>.showModal()` ni `inert` (absents de jsdom) ; il est générique et réutilisé par #65 et #66.
   Les noms de cartes, héros et decks sont rendus comme **texte React**, jamais comme HTML.
@@ -302,6 +303,22 @@ même, alimenté par `toScreenModel` :
   sélection » ou Échap la retire. Une créature sans attaque légale (tour de l'ordinateur) est
   `aria-disabled`. Les cibles possibles sont des `<button>` avec bordure et texte « Cible possible » ;
   le héros adverse porte un bouton cible dans son bandeau.
+- **Carte compacte (#92)** : `CardTile` est une carte de jeu de taille fixe. L'élément externe (`.card
+  .card-compact` : `<button>` ou `div role="group"`) contient `.card-face` (exactement `--card-w` = 62 px sur
+  112 px, quel que soit le contenu : nom tronqué par `text-overflow: ellipsis`, marques sans effet sur la
+  taille) puis `.card-tags` (sous la carte, dans l'élément interactif). Cadre commun à tous les decks par
+  jetons `:root` (parchemin, bordure brune, filet doré décoratif). La face (`CardFace`, exporté, purement
+  visuel) montre le nom, la pastille de coût **en main seulement** (sablier + chiffre, une seule fois, jamais
+  sur un plateau), une illustration de substitution en SVG `aria-hidden`, et trois valeurs à chiffres de
+  10 px au moins : attaque (étoile, `force`), riposte (flèche de retour, affichée même à 0), vie (cœur,
+  PV courants). Sous la carte : « Provocation », la légende de main « Reste N » ou « Passe la main » (lue sur
+  l'aperçu du moteur, jamais calculée ; le détail complet viendra avec #90) et la marque « Sélectionnée » /
+  « Cible possible » / « Cible non disponible ». Nom accessible : « Nom, coût N (main seulement), attaque N,
+  riposte N, vie N[, provocation][, passe la main | il te restera N de temps][, marque] » ; le coût d'attaque
+  n'est plus sur la carte (il reste dans `AttackSheet`). Cinq cartes tiennent en main à 360 px (rangées :
+  `gap: 2px`, `padding: 4px`). `.card` reste partagé avec la défausse (`DiscardDialog`, repris dans la tâche suivante de #87) : la taille fixe
+  est sur le modificateur `.card-compact`. Pas de vie maximale dans `CardView` : aucun style « blessé » pour
+  l'instant. Le helper de test `tests/support/card-label.ts` écrit le libellé attendu en toutes lettres.
 - **Sélection périmée** : si plus aucun aperçu ne soutient l'attaquant (créature morte, tour de
   l'ordinateur) ou la cible en attente, l'état est remis à zéro **pendant le rendu** (jamais par un
   `useEffect`) ; elle ne ressuscite donc pas au tour suivant.
