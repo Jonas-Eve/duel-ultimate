@@ -6,7 +6,7 @@ import type { Snapshot } from "../src/game/controller";
 import { messageFor } from "../src/ui/errors.fr";
 import { decorateSession, newSession } from "./support/engine";
 import { faultyFactory } from "./support/faulty";
-import { playHuman, playUntil, randomPreview, settle, stallPolicy, stallPreview } from "./support/policies";
+import { playHuman, playUntil, randomPreview, seedWithQuietHumanAction, settle, stallPolicy, stallPreview } from "./support/policies";
 import { expectedCardLabel } from "./support/card-label";
 import { inAct, makeController, mountGame, useRealEngine } from "./support/ui";
 import { playTile } from "./support/play";
@@ -340,8 +340,8 @@ describe("the computer's turn", () => {
   });
 
   test("a later human action that keeps the main removes the old announcement (computerSteps is stale)", async () => {
-    // Seed 4: the computer opens, and the human then has an action that keeps the main.
-    const c = makeController("bulwark", "rush", 4);
+    // A seed (searched on the real engine) where the computer opens, and the human then has an action that keeps the main.
+    const c = makeController("bulwark", "rush", await seedWithQuietHumanAction("bulwark", "rush"));
     const { container } = mountGame(c);
     await waitFor(() => expect(c.getSnapshot().phase).toBe("human-turn"));
     const live = container.querySelector(".announce") as HTMLElement;
@@ -423,7 +423,7 @@ describe("the three ends of the game", () => {
   // 220 actions rendered through jsdom: ~3.5 s alone in the full suite, 7+ s under CPU contention;
   // the default 5 s timeout flaked in CI (#77).
   test("exhaustion (pinned case: rush against bulwark, seed 2, both sides stalling): the reason is not swapped", async () => {
-    const c = makeController("rush", "bulwark", 2, { policy: stallPolicy });
+    const c = makeController("rush", "bulwark", 2, { chooseAction: stallPolicy });
     c.start();
     const { snapshot } = await playHuman(c, stallPreview);
     const result = snapshot.views.One!.result!;

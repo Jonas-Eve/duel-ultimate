@@ -3,6 +3,8 @@ import type { GameFactory, GameSession, SessionConfig, WasmGameLike } from "./se
 import type { Action, ActionPreview, EngineEvent, PlayerView, Seat } from "./types";
 
 const U32_MAX = 4294967295;
+/** The computer's policy, a closed name of the binding (never chosen by `game/` or `ui/`). */
+const COMPUTER_POLICY = "random";
 
 /** Runs a WASM call and turns whatever it throws into an `EngineError`. */
 function call<T>(fn: () => T): T {
@@ -62,6 +64,13 @@ export function createWasmSession(factory: GameFactory, config: SessionConfig): 
     startEvents,
     legalActions: () => live(() => JSON.parse(game.legal_actions()) as Action[]),
     legalActionsWithTime: () => live(() => JSON.parse(game.legal_actions_with_time()) as ActionPreview[]),
+    computerAction: (seat: Seat, draw: number) => {
+      // The binding would silently reduce a value outside u32: refuse it here, like the seed.
+      if (!Number.isInteger(draw) || draw < 0 || draw > U32_MAX) {
+        throw new EngineError("internal_error", `draw ${String(draw)} is not a u32`);
+      }
+      return live(() => JSON.parse(game.computer_action(seat, COMPUTER_POLICY, draw)) as Action);
+    },
     view: (seat: Seat) => live(() => JSON.parse(game.view(seat)) as PlayerView),
     apply: (action: Action) => live(() => JSON.parse(game.apply(JSON.stringify(action))) as EngineEvent[]),
     dispose: release,

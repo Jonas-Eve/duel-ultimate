@@ -54,6 +54,7 @@ export function instrumentedFactory(): { factory: GameFactory; counters: Counter
       view: guard((seat: string) => game.view(seat)),
       legal_actions: guard(() => game.legal_actions()),
       legal_actions_with_time: guard(() => game.legal_actions_with_time()),
+      computer_action: guard((seat: string, policy: string, draw: number) => game.computer_action(seat, policy, draw)),
       apply: guard((a: string) => game.apply(a)),
       free: () => {
         if (freed) counters.callsAfterFree += 1;
@@ -98,7 +99,9 @@ export function randomPolicy(seed: number): (actions: Action[]) => Action {
 }
 
 export interface SessionProbe {
-  calls: { legalActions: number; legalActionsWithTime: number; apply: number; view: number; dispose: number };
+  calls: { legalActions: number; legalActionsWithTime: number; computerAction: number; apply: number; view: number; dispose: number };
+  /** Every `draw` handed to `computerAction`, in order. */
+  draws: number[];
   /** Every action handed to `apply` (the injected illegal preview included). */
   applied: Action[];
   /** For each `legalActionsWithTime` call: who held the main at that instant (read off the real session). */
@@ -117,7 +120,8 @@ export interface DecorateOptions {
 /** Wraps a real `GameSession` (not a mock of the engine): counts calls and can alter what it returns. */
 export function decorateSession(inner: GameSession, opts: DecorateOptions = {}): { session: GameSession; probe: SessionProbe } {
   const probe: SessionProbe = {
-    calls: { legalActions: 0, legalActionsWithTime: 0, apply: 0, view: 0, dispose: 0 },
+    calls: { legalActions: 0, legalActionsWithTime: 0, computerAction: 0, apply: 0, view: 0, dispose: 0 },
+    draws: [],
     applied: [],
     timedCalls: [],
   };
@@ -132,6 +136,11 @@ export function decorateSession(inner: GameSession, opts: DecorateOptions = {}):
       probe.timedCalls.push({ active: inner.view("One").active });
       const list = inner.legalActionsWithTime();
       return opts.injectPreview ? [...list, opts.injectPreview] : list;
+    },
+    computerAction: (seat, draw) => {
+      probe.calls.computerAction += 1;
+      probe.draws.push(draw);
+      return inner.computerAction(seat, draw);
     },
     view: (seat) => {
       probe.calls.view += 1;

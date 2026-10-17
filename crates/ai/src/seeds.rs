@@ -28,3 +28,11 @@ pub fn policy_rng(game_seed: u64, seat: PlayerId) -> ChaCha8Rng {
     };
     ChaCha8Rng::seed_from_u64(derive_seed(game_seed, tag))
 }
+
+/// The generator of one computer action in the client: seeded from `draw`, the `u32` the client
+/// hands over for that action, through the same derivation as every other generator. Fresh at
+/// every call, so the choice is a pure function of (state, seat, policy, draw); it lets a
+/// binding stay free of any direct dependency on `rand_chacha`.
+pub fn rng_from_draw(draw: u32) -> ChaCha8Rng {
+    ChaCha8Rng::seed_from_u64(derive_seed(u64::from(draw), TAG_COMPUTER))
+}

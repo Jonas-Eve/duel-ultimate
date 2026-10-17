@@ -68,8 +68,8 @@ describe("home screen", () => {
   });
 
   test("the chosen mode and decks reach the controller: a two-camps game, camp labels, no computer", async () => {
-    const policy = vi.fn(() => 0);
-    const { user, counters } = renderApp({ policy });
+    const chooseAction = vi.fn(() => "concede" as const);
+    const { user, counters } = renderApp({ chooseAction });
     await launch(user, { twoCamps: true, deckOne: "Rempart", deckTwo: "Ruée", seed: "4" });
     // Rempart is seat One (camp 1) but Ruée has the initiative: the camp holding the main is at the bottom.
     expect(screen.getByRole("group", { name: "Camp 2 — Ruée : héros" })).toBeTruthy();
@@ -77,7 +77,7 @@ describe("home screen", () => {
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByText(/ordinateur/i)).toBeNull();
     expect(counters).toMatchObject({ creations: 1, seeds: [4] });
-    expect(policy).not.toHaveBeenCalled();
+    expect(chooseAction).not.toHaveBeenCalled();
   });
 
   test("the mirror launches a game, camps told apart by their number", async () => {

@@ -18,11 +18,12 @@ const everyCall = (s: ReturnType<typeof createWasmSession>): (() => unknown)[] =
   () => s.legalActionsWithTime(),
   () => s.view("One"),
   () => s.view("Two"),
+  () => s.computerAction("One", 0),
   () => s.apply("concede"),
 ];
 
 describe("a session that met a non-JSON throw is dead", () => {
-  test.each<Method>(["view", "legal_actions", "legal_actions_with_time", "apply"])(
+  test.each<Method>(["view", "legal_actions", "legal_actions_with_time", "computer_action", "apply"])(
     "after a RuntimeError in %s, every call refuses with the fatal internal_error without reaching the WASM",
     (failing) => {
       const { factory, calls } = faultyFactory(failing);
@@ -31,6 +32,7 @@ describe("a session that met a non-JSON throw is dead", () => {
         view: () => s.view("One"),
         legal_actions: () => s.legalActions(),
         legal_actions_with_time: () => s.legalActionsWithTime(),
+        computer_action: () => s.computerAction("One", 0),
         apply: () => s.apply("concede"),
       };
       let first: unknown;
@@ -59,6 +61,28 @@ describe("a session that met a non-JSON throw is dead", () => {
       s.dispose();
     },
   );
+
+  test("the fatal computer_stuck of the binding kills the session: nothing reaches the WASM afterwards", () => {
+    const { factory, calls } = faultyFactory("computer_action", {
+      thrower: () => {
+        throw new Error(JSON.stringify({ code: "computer_stuck", message: "nothing but conceding" }));
+      },
+    });
+    const s = createWasmSession(factory, starterConfig("rush", "bulwark", 3));
+    let first: unknown;
+    try {
+      s.computerAction("One", 0);
+    } catch (e) {
+      first = e;
+    }
+    expect(first).toBeInstanceOf(EngineError);
+    expect((first as EngineError).code).toBe("computer_stuck");
+    expect((first as EngineError).fatal).toBe(true);
+    const reached = calls.length;
+    for (const call of everyCall(s)) expect(call).toThrow(expect.objectContaining({ code: "internal_error", fatal: true }));
+    expect(calls.length).toBe(reached);
+    s.dispose();
+  });
 
   test("a JSON rule error does not poison the session", () => {
     const s = createWasmSession(testFactory, starterConfig("rush", "bulwark", 3));

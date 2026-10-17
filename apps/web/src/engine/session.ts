@@ -6,6 +6,7 @@ export interface WasmGameLike {
   view(seat: string): string;
   legal_actions(): string;
   legal_actions_with_time(): string;
+  computer_action(seat: string, policy: string, draw: number): string;
   apply(action_json: string): string;
   free(): void;
 }
@@ -37,10 +38,17 @@ export interface SessionConfig {
  */
 export interface GameSession {
   readonly startEvents: readonly EngineEvent[];
-  /** Raw list, engine order (for the computer). */
+  /** Raw list, engine order. */
   legalActions(): Action[];
   /** Same length and order as `legalActions()` (human turn only: costs a clone per action). */
   legalActionsWithTime(): ActionPreview[];
+  /**
+   * The action the computer plays for `seat` (the active seat), chosen by the engine from the
+   * single `draw` (a u32) this call is given: the same state, seat and draw always give the same
+   * action. Never "concede". Throws `EngineError` (`computer_stuck`, fatal, when nothing else is
+   * playable). Like `view`, a local adapter: nothing authenticates the seat.
+   */
+  computerAction(seat: Seat, draw: number): Action;
   view(seat: Seat): PlayerView;
   /** Throws `EngineError`; the state is untouched on error (guaranteed by the engine). */
   apply(action: Action): EngineEvent[];
