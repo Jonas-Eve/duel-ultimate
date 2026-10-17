@@ -17,6 +17,8 @@ pub enum CardsError {
     Json(String),
     #[error("duplicate card id `{0}`")]
     DuplicateCard(String),
+    #[error("duplicate card name `{0}`")]
+    DuplicateCardName(String),
     #[error("duplicate deck id `{0}`")]
     DuplicateDeck(String),
     #[error("deck `{deck}` references unknown card `{card}`")]
@@ -107,6 +109,7 @@ pub fn parse_cards(json: &str) -> Result<Vec<Card>, CardsError> {
     let cards: Vec<Card> =
         serde_json::from_str(json).map_err(|e| CardsError::Json(e.to_string()))?;
     ensure_unique(cards.iter().map(Card::id), CardsError::DuplicateCard)?;
+    ensure_unique(cards.iter().map(Card::name), CardsError::DuplicateCardName)?;
     for card in &cards {
         validate_creature(&card.stats()).map_err(|e| CardsError::InvalidCard {
             id: card.id().to_owned(),

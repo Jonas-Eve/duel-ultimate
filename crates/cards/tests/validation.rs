@@ -464,3 +464,36 @@ fn truncated_json_is_an_error_not_a_panic() {
         Err(CardsError::Json(_))
     ));
 }
+
+#[test]
+fn rejects_duplicate_card_names() {
+    let json = r#"[
+        {"kind":"creature","id":"a","name":"Same","cost":1,"force":1,"attack_cost":1,"health":1},
+        {"kind":"creature","id":"b","name":"Same","cost":1,"force":1,"attack_cost":1,"health":1}
+    ]"#;
+    assert_eq!(
+        parse_cards(json),
+        Err(CardsError::DuplicateCardName("Same".into()))
+    );
+}
+
+#[test]
+fn duplicate_card_id_is_reported_before_duplicate_name() {
+    let json = r#"[
+        {"kind":"creature","id":"a","name":"Same","cost":1,"force":1,"attack_cost":1,"health":1},
+        {"kind":"creature","id":"a","name":"Same","cost":1,"force":1,"attack_cost":1,"health":1}
+    ]"#;
+    assert_eq!(
+        parse_cards(json),
+        Err(CardsError::DuplicateCard("a".into()))
+    );
+}
+
+#[test]
+fn card_names_differing_by_case_are_distinct() {
+    let json = r#"[
+        {"kind":"creature","id":"a","name":"Same","cost":1,"force":1,"attack_cost":1,"health":1},
+        {"kind":"creature","id":"b","name":"same","cost":1,"force":1,"attack_cost":1,"health":1}
+    ]"#;
+    assert!(parse_cards(json).is_ok());
+}
