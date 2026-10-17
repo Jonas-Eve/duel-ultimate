@@ -320,6 +320,17 @@ même, alimenté par `toScreenModel` :
   `gap: 2px`, `padding: 4px`). `.card` reste partagé avec la défausse (`DiscardDialog`, repris dans la tâche suivante de #87) : la taille fixe
   est sur le modificateur `.card-compact`. Pas de vie maximale dans `CardView` : aucun style « blessé » pour
   l'instant. Le helper de test `tests/support/card-label.ts` écrit le libellé attendu en toutes lettres.
+- **Pastille de deck (#94)** : une pastille ronde SVG (`aria-hidden`, décorative, classes `card-emblem
+  card-emblem-bolt|battlements`) en haut à droite de l'illustration : éclair (Ruée), créneaux (Rempart) ; le
+  cadre reste commun. Type fermé `DeckEmblem` et `DeckRef.emblem?` dans `game/controller.ts` (absent = pas de
+  pastille, pas de trou) ; `DeckInfo.emblem?` et la table provisoire `DECK_EMBLEMS` (un seul export, `#88`
+  la remplacera) dans `data/starter.ts`, lues par `App` seul comme le reste de `data/` : l'emblème voyage
+  dans `DeckRef` -> `snapshot.players` -> `SideModel.emblem` (`toScreenModel`), `ui/` et `game/` n'importent
+  jamais `data/`. `Board`, `Hand` et `DiscardDialog` reçoivent l'emblème du camp propriétaire (le siège de la
+  carte, jamais le joueur courant : plateaux, deux mains, défausses). Le nom accessible ne change pas (le
+  libellé du camp nomme le deck). Contraste (WCAG 1.4.11, 3:1) : disque `--emblem-fill` sur les deux tons de
+  l'illustration, glyphe `--emblem-glyph` sur le disque, anneau `--emblem-ring` contre le cadre brun ; la
+  pastille est dans l'illustration, jamais collée au cadre ; gardé par `tests/emblem-contrast.test.ts`.
 - **Sélection périmée** : si plus aucun aperçu ne soutient l'attaquant (créature morte, tour de
   l'ordinateur) ou la cible en attente, l'état est remis à zéro **pendant le rendu** (jamais par un
   `useEffect`) ; elle ne ressuscite donc pas au tour suivant.

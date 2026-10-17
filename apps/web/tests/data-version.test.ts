@@ -33,9 +33,15 @@ describe("the starter data and its version", () => {
 
   test("DECKS lists rush then bulwark", () => {
     expect(DECKS).toEqual([
-      { id: "rush", name: "Ruée" },
-      { id: "bulwark", name: "Rempart" },
+      { id: "rush", name: "Ruée", emblem: "bolt" },
+      { id: "bulwark", name: "Rempart", emblem: "battlements" },
     ]);
+  });
+
+  test("the emblem of each deck: Ruée = bolt, Rempart = battlements, one table, no other deck", () => {
+    expect(Object.fromEntries(DECKS.map((d) => [d.id, d.emblem]))).toEqual({ rush: "bolt", bulwark: "battlements" });
+    expect(parseDeckList('[{"id":"unknown","name":"X"}]')).toEqual([{ id: "unknown", name: "X" }]);
+    expect(source.match(/DECK_EMBLEMS/g)?.length).toBeGreaterThanOrEqual(1);
   });
 
   test("the version the engine records is DATA_VERSION", () => {

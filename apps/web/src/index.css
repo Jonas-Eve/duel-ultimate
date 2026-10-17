@@ -21,6 +21,10 @@
   --card-border: #4a3a22;
   --card-gold: #c9a24a;
   --card-ink: #2b2112;
+  /* Deck chip (#94): a dark disc on the light art (>= 3:1 on both stripe tones), a light glyph on the disc, a light ring against the dark frame. */
+  --emblem-fill: #2b2112;
+  --emblem-glyph: #f6edd9;
+  --emblem-ring: #f6edd9;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: var(--fg);
   background: var(--bg);
@@ -85,6 +89,10 @@ p { margin: 6px 0; }
 .card-compact .card-name { flex: 1 1 0; min-width: 0; font-size: 10px; font-weight: 700; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card-cost { display: inline-flex; align-items: center; justify-content: center; gap: 1px; flex: none; min-width: 16px; height: 16px; padding: 0 2px; border-radius: 8px; background: var(--fg); color: #ffffff; font-size: 10px; font-weight: 700; }
 .card-art { flex: 1 1 0; min-height: 0; display: flex; overflow: hidden; border: 1px solid var(--card-border); border-radius: 3px; background: repeating-linear-gradient(45deg, #e4d8bd, #e4d8bd 4px, #f1e8d2 4px, #f1e8d2 8px); color: var(--card-border); }
+.card-art { position: relative; }
+.card-emblem { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; }
+.card-emblem-disc { fill: var(--emblem-fill); stroke: var(--emblem-ring); stroke-width: 1; }
+.card-emblem-glyph { fill: var(--emblem-glyph); }
 .card-values { display: flex; justify-content: space-between; align-items: center; flex: none; height: 16px; }
 .card-value { display: inline-flex; align-items: center; gap: 1px; font-size: 10px; font-weight: 700; }
 .card-tags { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; font-size: 10px; line-height: 1.15; text-align: center; overflow-wrap: anywhere; }

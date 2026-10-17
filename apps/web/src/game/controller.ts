@@ -14,9 +14,13 @@ import { captureRecord, type StepRecord } from "./records";
 import { deriveAiSeed, mulberry32 } from "./seed";
 
 export type Mode = "computer" | "two-camps";
+/** The closed set of deck symbols the card face can draw (decorative; the deck's name is what is read out). */
+export type DeckEmblem = "bolt" | "battlements";
 export interface DeckRef {
   id: string;
   name: string;
+  /** Absent = no chip on the card art. */
+  emblem?: DeckEmblem;
 }
 export interface GameConfig {
   mode: Mode;

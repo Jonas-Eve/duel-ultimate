@@ -4,14 +4,22 @@
 import cardsRaw from "../../../../data/starter/1.0.0/cards.json?raw";
 import decksRaw from "../../../../data/starter/1.0.0/decks.json?raw";
 import { EngineError } from "../engine/errors";
+import type { DeckEmblem } from "../game/controller";
 
 export const DATA_VERSION = "starter@1.0.0";
 export const CARDS_JSON: string = cardsRaw;
 export const DECKS_JSON: string = decksRaw;
 
+/**
+ * Provisional deck -> symbol table (#94); the art manifest of #88 will replace it. The one place
+ * a deck id meets an emblem; a deck absent from it has no chip.
+ */
+export const DECK_EMBLEMS: Readonly<Record<string, DeckEmblem>> = { rush: "bolt", bulwark: "battlements" };
+
 export interface DeckInfo {
   id: string;
   name: string;
+  emblem?: DeckEmblem;
 }
 
 /** Reads the deck list for display only (no rule); a malformed file is a readable load error. */
@@ -30,7 +38,8 @@ export function parseDeckList(json: string): DeckInfo[] {
     if (typeof id !== "string" || typeof name !== "string") {
       throw new EngineError("internal_error", "a deck of decks.json has no id or name");
     }
-    return { id, name };
+    const emblem = Object.hasOwn(DECK_EMBLEMS, id) ? DECK_EMBLEMS[id] : undefined;
+    return emblem === undefined ? { id, name } : { id, name, emblem };
   });
 }
 
