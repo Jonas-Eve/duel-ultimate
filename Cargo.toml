@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/engine", "crates/cards", "crates/simulator", "crates/server", "crates/engine-wasm"]
+members = ["crates/engine", "crates/cards", "crates/simulator", "crates/server", "crates/engine-wasm", "crates/ai"]
 
 [workspace.package]
 version = "0.1.0"
@@ -23,3 +23,4 @@ wasm-bindgen = "0.2.129"
 serde-wasm-bindgen = "0.6.5"
 duel-engine = { path = "crates/engine" }
 duel-cards = { path = "crates/cards" }
+duel-ai = { path = "crates/ai" }
