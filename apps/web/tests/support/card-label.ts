@@ -3,7 +3,8 @@ import type { CardView } from "../../src/engine/types";
 /**
  * The expected accessible name of a card tile, spelled out literally (never imported from the
  * component, so a wording change breaks the tests on purpose):
- * "Nom, coût N (main seulement), attaque N, riposte N, vie N[, provocation][, passe la main | il te restera N de temps][, marque]".
+ * The time legend is the visible text verbatim ("Reste 3"), never the spoken form (that one describes the Play button).
+ * "Nom, coût N (main seulement), attaque N, riposte N, vie N[, provocation][, passe la main | Reste N][, marque]".
  */
 export function expectedCardLabel(
   card: CardView,

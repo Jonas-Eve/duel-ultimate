@@ -55,7 +55,7 @@ describe("the compact card", () => {
       <CardTile
         card={c}
         cost={2}
-        timeLeft={{ legend: "Reste 3", spoken: "il te restera 3 de temps" }}
+        timeLeft="Reste 3"
         onPress={() => undefined}
         pressed={false}
         mark="selected"
@@ -63,7 +63,7 @@ describe("the compact card", () => {
     );
     const button = screen.getByRole("button");
     expect(button.getAttribute("aria-label")).toBe(
-      expectedCardLabel(c, { inHand: true, cost: 2, timeLeft: "il te restera 3 de temps", mark: "sélectionnée" }),
+      expectedCardLabel(c, { inHand: true, cost: 2, timeLeft: "Reste 3", mark: "sélectionnée" }),
     );
     expect(button.querySelector(".card-tags")!.textContent).toContain("Reste 3");
     expect(button.querySelector(".card-tags .card-mark")!.textContent).toBe("Sélectionnée");

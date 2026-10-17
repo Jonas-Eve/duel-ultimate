@@ -6,6 +6,7 @@ import { fr } from "../src/ui/fr";
 import { faultyFactory } from "./support/faulty";
 import { launch, renderApp, useAppEngine } from "./support/app";
 import { fakeCrypto } from "./support/ui";
+import { playTile } from "./support/play";
 import type userEvent from "@testing-library/user-event";
 
 useAppEngine();
@@ -95,7 +96,7 @@ describe("StrictMode", () => {
     await launch(user, { seed: "3" });
     const hand = within(screen.getByRole("group", { name: "Ta main" }));
     const before = hand.getAllByRole("button").length;
-    await user.click(hand.getAllByRole("button")[0]);
+    await playTile(user, hand.getAllByRole("button")[0]);
     expect(within(screen.getByRole("group", { name: "Ta main" })).getAllByRole("button").length).toBe(before - 1);
     expect(screen.queryByRole("alert")).toBeNull();
     expect(counters.frees).toBe(0);
@@ -109,9 +110,15 @@ describe("the computer opens (human plays bulwark)", () => {
     const gates: (() => void)[] = [];
     const { user } = renderApp({ scheduler: { yield: () => new Promise<void>((r) => gates.push(r)) } });
     await launch(user, { deck: "Rempart", seed: "3" });
-    for (const b of within(screen.getByRole("group", { name: "Ta main" })).getAllByRole("button")) {
-      expect((b as HTMLButtonElement).disabled).toBe(true);
-    }
+    // The tiles open their detail (reading is always possible); only "Jouer" is inactive, with its reason.
+    const tiles = within(screen.getByRole("group", { name: "Ta main" })).getAllByRole("button");
+    for (const b of tiles) expect((b as HTMLButtonElement).disabled).toBe(false);
+    await user.click(tiles[0]);
+    const play = within(screen.getByRole("dialog")).getByRole("button", { name: "Jouer" });
+    expect(play.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText(fr.playUnavailableComputer)).toBeTruthy();
+    await user.click(play);
+    await user.keyboard("{Escape}");
     expect(screen.getByRole("status").textContent).toBe("L'ordinateur joue…");
     await act(async () => {
       gates.shift()?.();
@@ -128,7 +135,7 @@ describe("fatal error through App", () => {
     const { user } = renderApp({ engine: () => Promise.resolve(factory) });
     await launch(user, { seed: "3" });
     const hand = within(screen.getByRole("group", { name: "Ta main" }));
-    await user.click(hand.getAllByRole("button")[0]);
+    await playTile(user, hand.getAllByRole("button")[0]);
     expect(screen.getByText(messageFor("internal_error"))).toBeTruthy();
     expect(screen.queryByRole("group", { name: "Ta main" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Retour à l'accueil" }));
