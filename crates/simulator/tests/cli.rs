@@ -120,6 +120,7 @@ fn a_bad_command_line_never_panics() {
         &["--board-limit", "1.5"],
         &["--board-limit", "99999999999"],
         &["--board-limit", "5", "--board-limit", "none"],
+        &["--timing", "--timing"],
     ] {
         let output = run(args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
@@ -209,5 +210,30 @@ mod while_inert {
             ]));
             assert_eq!(matchup_lines(&base), matchup_lines(&optioned), "{set}");
         }
+    }
+}
+
+#[test]
+fn timing_prints_one_line_on_stderr_and_leaves_stdout_unchanged() {
+    let plain = run(&["--seed", "5", "20"]);
+    let timed = run(&["--seed", "5", "20", "--timing"]);
+    assert!(plain.status.success() && timed.status.success());
+    assert_eq!(timed.status.code(), Some(0));
+    assert_eq!(
+        timed.stdout, plain.stdout,
+        "the duration never enters the report"
+    );
+    assert!(
+        plain.stderr.is_empty(),
+        "no clock, no line without the option"
+    );
+    let line = String::from_utf8(timed.stderr).expect("utf-8 line");
+    assert_eq!(line.lines().count(), 1, "{line:?}");
+    assert!(line.ends_with('\n'), "{line:?}");
+    assert!(line.starts_with("timing: "), "{line:?}");
+    // 3 matchups x 20 games.
+    assert!(line.starts_with("timing: 60 games, "), "{line:?}");
+    for part in [" games, ", " actions, ", " s, ", " games/s, ", " actions/s"] {
+        assert!(line.contains(part), "{part:?} in {line:?}");
     }
 }
