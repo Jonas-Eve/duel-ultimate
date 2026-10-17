@@ -14,6 +14,10 @@
 //! piles only as counts): the types make the opposing hand impossible to express. It does not
 //! authenticate the seat it is asked for; a server calls it with the seat of the connection.
 //!
+//! [`Observation`] is what an AI policy receives instead of the state: the active seat, its legal
+//! actions without `Concede` and, on demand, its own [`PlayerView`]; it gives no way back to
+//! the [`GameState`] (the signature is the guarantee, nothing is authenticated).
+//!
 //! [`preview_legal_actions`] gives, for each legal action and in the same order, its time cost,
 //! whether it hands the token over, the budget after it and whether it ends the game, by a dry
 //! run on a clone (the time rule stays in one place, the generator is never touched); it never
@@ -35,6 +39,7 @@
 mod combat;
 mod data;
 mod effects;
+mod observation;
 mod preview;
 mod rules;
 mod setup;
@@ -45,6 +50,7 @@ mod time;
 mod view;
 
 pub use data::{DataError, game_setup_from_data, player_setup};
+pub use observation::Observation;
 pub use preview::{ActionPreview, preview_legal_actions};
 pub use rules::{Action, Event, RuleError, Target, apply, legal_actions};
 pub use setup::{GameSetup, PlayerSetup, SetupError, new_game};
