@@ -7,9 +7,10 @@
 //! cannot reach the opposing hand, either pile's order or the generator. It does not
 //! authenticate anything: the caller decides whose turn it observes (always the active seat).
 
+use crate::preview::ActionPreview;
 use crate::rules::{Action, legal_actions};
 use crate::state::{GameState, PlayerId};
-use crate::view::{PlayerView, player_view};
+use crate::view::{OutcomeView, PlayerView, player_view};
 
 /// The active seat's window on a running game. Built by [`Observation::of`], lazily: only the
 /// legal action list is computed at construction (once); the view is computed when asked for.
@@ -49,6 +50,23 @@ impl<'a> Observation<'a> {
     pub fn view(&self) -> PlayerView {
         player_view(self.state, self.seat())
     }
+
+    /// TODO(#141) stub.
+    pub fn preview(&self, _i: usize) -> Option<ActionPreview> {
+        None
+    }
+
+    /// TODO(#141) stub.
+    pub fn outcome(&self, _i: usize) -> Option<ActionOutcome> {
+        None
+    }
+}
+
+/// What one legal action would do, as the acting seat may know it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActionOutcome {
+    pub preview: ActionPreview,
+    pub view_after: OutcomeView,
 }
 
 #[cfg(test)]

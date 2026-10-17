@@ -50,9 +50,12 @@ mod time;
 mod view;
 
 pub use data::{DataError, game_setup_from_data, player_setup};
-pub use observation::Observation;
+pub use observation::{ActionOutcome, Observation};
 pub use preview::{ActionPreview, preview_legal_actions};
 pub use rules::{Action, Event, RuleError, Target, apply, legal_actions};
 pub use setup::{GameSetup, PlayerSetup, SetupError, new_game};
 pub use state::{CardInstanceId, GameState, PlayerId, WinReason};
-pub use view::{CardView, GameResult, HeroView, OpponentSide, OwnSide, PlayerView, player_view};
+pub use view::{
+    CardView, GameResult, HeroView, OpponentSide, OutcomeOwnSide, OutcomeView, OwnSide, PlayerView,
+    player_view,
+};

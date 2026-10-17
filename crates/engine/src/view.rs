@@ -79,6 +79,34 @@ pub struct PlayerView {
     pub opponent: OpponentSide,
 }
 
+/// The acting seat's own side right after one of its actions (#141): the hand is split by
+/// provenance. `hand_known` holds the cards that were already in the hand before the action
+/// and still are; `hand_unseen` only counts the cards that came from the draw pile during the
+/// action. No field can carry a drawn card (id, name or stats), so the leak is impossible by
+/// construction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OutcomeOwnSide {
+    pub hero: HeroView,
+    pub hand_known: Vec<CardView>,
+    pub hand_unseen: usize,
+    pub deck_count: usize,
+    pub board: Vec<CardView>,
+    pub discard: Vec<CardView>,
+}
+
+/// What the seat that acted may see of the game right after one of its actions: a type
+/// distinct from [`PlayerView`], whose own hand never shows what was drawn. The opposing side
+/// is the ordinary [`OpponentSide`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OutcomeView {
+    pub seat: PlayerId,
+    pub active: PlayerId,
+    pub budget: u32,
+    pub result: Option<GameResult>,
+    pub you: OutcomeOwnSide,
+    pub opponent: OpponentSide,
+}
+
 /// Projects `state` for `seat`. Pure: reads the state, touches neither it nor the generator.
 pub fn player_view(state: &GameState, seat: PlayerId) -> PlayerView {
     let you = state.player(seat);
