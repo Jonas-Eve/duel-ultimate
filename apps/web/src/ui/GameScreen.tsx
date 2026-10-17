@@ -13,12 +13,13 @@ import { EndScreen } from "./EndScreen";
 import { ErrorBanner } from "./ErrorBanner";
 import { FatalScreen } from "./FatalScreen";
 import { fr } from "./fr";
-import { Hand } from "./Hand";
+import { Hand, playPreviewOf } from "./Hand";
 import { HeroBar } from "./HeroBar";
 import { LogBar } from "./LogBar";
 import { LogDrawer } from "./LogDrawer";
 import { formatBlocks, formatRecords, logContext } from "./log-format";
 import { consequenceLabels, outcomeOf } from "./outcome";
+import { PlayActions } from "./PlayActions";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { TimeBand } from "./TimeBand";
 
@@ -73,7 +74,8 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
   const [focusToken, setFocusToken] = useState(0);
   // The read-only card detail: which card (by id) of which zone. Looked up in the current model on every
   // render, and dropped during render when the card is no longer there (never by an effect).
-  const [detail, setDetail] = useState<{ id: number; zone: "opp-board" | "other-hand" } | null>(null);
+  // The zone is part of the key: after a hand-over in two camps the swapped hand never reopens a card as another zone's.
+  const [detail, setDetail] = useState<{ id: number; zone: "opp-board" | "other-hand" | "hand" } | null>(null);
   const region = useRef<HTMLElement>(null);
   // After an attack is confirmed the focus goes back to the game region: the dialog closes and
   // the tile that opened it may be gone. Runs after the dialog's own focus restoration.
@@ -128,9 +130,12 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
     controller.submit(preview);
   };
 
-  const detailCard =
-    detail === null ? undefined : (detail.zone === "opp-board" ? model.top.board : (model.top.hand ?? [])).find((c) => c.id === detail.id);
+  const detailSide = detail === null ? undefined : detail.zone === "hand" ? model.bottom : model.top;
+  const detailCards = detail === null ? [] : detail.zone === "opp-board" ? model.top.board : (detailSide?.hand ?? []);
+  const detailCard = detail === null ? undefined : detailCards.find((c) => c.id === detail.id);
   if (detail !== null && detailCard === undefined) setDetail(null);
+  // "Jouer": the engine's preview of the CURRENT snapshot, searched on every render; none = inactive, with the reason.
+  const detailPlay = detail?.zone === "hand" && detailCard !== undefined ? playPreviewOf(snapshot.legal, detailCard) : undefined;
 
   const attack = deriveAttackState(selected, snapshot.legal);
   if (selected !== null && attack.selected === null) {
@@ -175,12 +180,8 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
           <Hand
             cards={model.top.hand ?? []}
             legal={[]}
-            enabled={false}
-            labels={labels}
-            onPlay={submit}
             label={names.topHand}
-            readOnly
-            onInspect={(card) => setDetail({ id: card.id, zone: "other-hand" })}
+            onOpen={(card) => setDetail({ id: card.id, zone: "other-hand" })}
             emblem={model.top.emblem}
           />
         </>
@@ -230,7 +231,13 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
           {fr.logButton}
         </button>
       </div>
-      <Hand cards={model.bottom.hand ?? []} legal={snapshot.legal} enabled={humanTurn} labels={labels} onPlay={submit} label={names.bottomHand} emblem={model.bottom.emblem} />
+      <Hand
+        cards={model.bottom.hand ?? []}
+        legal={snapshot.legal}
+        onOpen={(card) => setDetail({ id: card.id, zone: "hand" })}
+        label={names.bottomHand}
+        emblem={model.bottom.emblem}
+      />
       <ActionBar
         hero={model.bottom.hero}
         legal={snapshot.legal}
@@ -240,7 +247,29 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
         onConcede={() => setConfirming(true)}
       />
       {logOpen && <LogDrawer blocks={formatBlocks(snapshot.records, ctx)} onClose={() => setLogOpen(false)} />}
-      {detail !== null && detailCard !== undefined && <CardDetailSheet card={detailCard} emblem={model.top.emblem} deckName={model.top.deckName} onClose={() => setDetail(null)} />}
+      {detail !== null && detailCard !== undefined && detailSide !== undefined && (
+        <CardDetailSheet
+          card={detailCard}
+          emblem={detailSide.emblem}
+          deckName={detailSide.deckName}
+          onClose={() => setDetail(null)}
+          actions={
+            detail.zone === "hand" ? (
+              <PlayActions
+                preview={detailPlay}
+                labels={labels}
+                reason={humanTurn ? fr.playUnavailable : fr.playUnavailableComputer}
+                onPlay={(preview) => {
+                  // The tile leaves the hand: the focus goes to the game region once the sheet has closed.
+                  setDetail(null);
+                  setFocusToken((t) => t + 1);
+                  submit(preview);
+                }}
+              />
+            ) : undefined
+          }
+        />
+      )}
       {pending !== null && pendingPreview !== undefined && (
         <AttackSheet
           summary={fr.attackSummary(attackerName, targetName(pending))}

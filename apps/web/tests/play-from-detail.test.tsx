@@ -175,21 +175,29 @@ describe("no preview: Jouer is inactive and says why", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  test("the sheet opened at my turn turns inactive when the turn ends under it, never plays a stale action", async () => {
-    const c = makeController("rush", "bulwark", 3);
+  test("a sheet left open when the main passes turns inactive at once, and its press plays nothing", async () => {
+    const gate = { yield: () => new Promise<void>(() => undefined) };
+    const { session, probe } = decorateSession(newSession("rush", "bulwark", 3));
+    const c = makeController("rush", "bulwark", 3, { scheduler: gate, createSession: () => session });
     const { user } = mountGame(c);
     const s = c.getSnapshot();
-    const index = firstWhere(s, false);
-    await user.click(tiles()[(index + 1) % tiles().length]);
+    const handOver = s.legal.find((p) => isPlay(p.action) && p.hands_over && p.ends_game === null)!;
+    const handOverId = isPlay(handOver.action) ? handOver.action.play.card : -1;
+    const other = s.views.One!.you.hand.findIndex((card) => card.id !== handOverId);
+    await user.click(tiles()[other]);
     expect(playButton().getAttribute("aria-disabled")).toBeNull();
-    const handOver = s.legal.find((p) => isPlay(p.action) && p.hands_over && p.ends_game === null && p.action.play.card !== s.views.One!.you.hand[(index + 1) % tiles().length].id)!;
+
     await act(async () => {
       c.submit(handOver);
     });
-    await waitFor(() => expect(c.getSnapshot().phase).toBe("human-turn"));
-    // Whatever the sheet shows now, a press never replays the old preview.
-    const dialog = screen.queryByRole("dialog");
-    if (dialog !== null) expect(within(dialog).getByRole("button", { name: /^Jouer/ })).toBeTruthy();
+
+    expect(c.getSnapshot().phase).toBe("computer-turn");
+    const play = within(screen.getByRole("dialog")).getByRole("button", { name: "Jouer" });
+    expect(play.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText(fr.playUnavailableComputer)).toBeTruthy();
+    const applied = probe.calls.apply;
+    await user.click(play);
+    expect(probe.calls.apply).toBe(applied);
   });
 });
 

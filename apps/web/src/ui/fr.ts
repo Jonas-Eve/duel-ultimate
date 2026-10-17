@@ -71,6 +71,11 @@ export const fr = {
   lifeWord: "vie",
   keepsLegend: (n: number) => `Reste ${n}`,
   passesLegend: "Passe la main",
+  // Playing from the detail of a hand card (#105).
+  play: "Jouer",
+  playCost: (n: number) => `Jouer (${n} temps)`,
+  playUnavailableComputer: "C'est le tour de l'ordinateur : tu pourras jouer cette carte à ton tour.",
+  playUnavailable: "Cette carte ne peut pas être jouée maintenant.",
   noCreature: "Aucune créature",
 
   // Card detail (#104). The effect line's words live in `card-effects.ts` next to its one builder.
