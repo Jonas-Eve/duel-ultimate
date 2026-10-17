@@ -227,6 +227,8 @@ describe("the end screen shows the whole log", () => {
     expect(lines[lines.length - 1].text).toMatch(/^(Tu gagnes|L'ordinateur gagne) : Le héros .+ est tombé à 0 PV\.$/);
   });
 
+  // 220 actions rendered through jsdom: ~3.5 s alone in the full suite, 7+ s under CPU contention;
+  // the default 5 s timeout flaked in CI (#77).
   test("exhaustion (pinned: rush vs bulwark, seed 2, both stalling)", async () => {
     const c = makeController("rush", "bulwark", 2, { policy: stallPolicy });
     c.start();
@@ -235,7 +237,7 @@ describe("the end screen shows the whole log", () => {
     const lines = expectComplete(c);
     expect(lines[lines.length - 1].text).toMatch(/ gagnes? : .* n'avai(s|t) plus aucune action possible \(épuisement\)\.$/);
     expect(lines.length).toBeGreaterThan(200); // a log cut at N lines would fail
-  });
+  }, 30_000);
 
   test("concede", async () => {
     const c = makeController("rush", "bulwark", 3);
