@@ -21,7 +21,9 @@
 //! [`preview_legal_actions`] gives, for each legal action and in the same order, its time cost,
 //! whether it hands the token over, the budget after it and whether it ends the game, by a dry
 //! run on a clone (the time rule stays in one place, the generator is never touched); it never
-//! copies what a draw brings.
+//! copies what a draw brings. `Observation::outcome` reuses that same dry run and adds the view of
+//! the acting seat after the action, where a drawn card is only counted ([`OutcomeView`]: the
+//! masking follows the `Drew` events, not a difference of hands).
 //!
 //! Randomness is consumed only at setup, in this documented order: shuffle of One's deck,
 //! shuffle of Two's deck, then `random_below(2)` if (and only if) the initiatives are equal.
@@ -50,9 +52,12 @@ mod time;
 mod view;
 
 pub use data::{DataError, game_setup_from_data, player_setup};
-pub use observation::Observation;
+pub use observation::{ActionOutcome, Observation};
 pub use preview::{ActionPreview, preview_legal_actions};
 pub use rules::{Action, Event, RuleError, Target, apply, legal_actions};
 pub use setup::{GameSetup, PlayerSetup, SetupError, new_game};
 pub use state::{CardInstanceId, GameState, PlayerId, WinReason};
-pub use view::{CardView, GameResult, HeroView, OpponentSide, OwnSide, PlayerView, player_view};
+pub use view::{
+    CardView, GameResult, HeroView, OpponentSide, OutcomeOwnSide, OutcomeView, OwnSide, PlayerView,
+    player_view,
+};

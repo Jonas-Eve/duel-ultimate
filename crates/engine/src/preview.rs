@@ -46,19 +46,33 @@ pub fn preview_legal_actions(state: &GameState) -> Vec<ActionPreview> {
     legal_actions(state)
         .into_iter()
         .map(|action| {
-            let mut copy = state.clone();
-            let summary = apply(&mut copy, action)
-                .map(|events| summarize(&events))
-                .unwrap_or_default();
-            ActionPreview {
-                action,
-                cost: summary.cost,
-                hands_over: summary.hands_over,
-                budget_after: summary.budget_after,
-                ends_game: summary.ends_game,
-            }
+            let run = dry_run(state, action);
+            preview_of(action, run.as_ref().map(|(_, events)| events.as_slice()))
         })
         .collect()
+}
+
+/// The one dry run: `action` applied by [`apply`] on a clone of `state` (the real state and its
+/// generator are never touched, `apply` consumes none). Returns the state after and the events,
+/// or `None` if `apply` refuses the action (an internal inconsistency for a legal action).
+/// Shared by the preview and by `Observation::outcome`, so both read the same replay.
+pub(crate) fn dry_run(state: &GameState, action: Action) -> Option<(GameState, Vec<Event>)> {
+    let mut copy = state.clone();
+    let events = apply(&mut copy, action).ok()?;
+    Some((copy, events))
+}
+
+/// The preview of `action` from the events of its dry run; `None` events (a refused action)
+/// give an entry with no cost and no consequence.
+pub(crate) fn preview_of(action: Action, events: Option<&[Event]>) -> ActionPreview {
+    let summary = events.map(summarize).unwrap_or_default();
+    ActionPreview {
+        action,
+        cost: summary.cost,
+        hands_over: summary.hands_over,
+        budget_after: summary.budget_after,
+        ends_game: summary.ends_game,
+    }
 }
 
 #[derive(Default)]

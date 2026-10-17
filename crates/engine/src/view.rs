@@ -79,17 +79,42 @@ pub struct PlayerView {
     pub opponent: OpponentSide,
 }
 
+/// The acting seat's own side right after one of its actions (#141): the hand is split by
+/// provenance. `hand_known` holds the cards that were already in the hand before the action
+/// and still are; `hand_unseen` only counts the cards that came from the draw pile during the
+/// action. No field can carry a drawn card (id, name or stats), so the leak is impossible by
+/// construction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OutcomeOwnSide {
+    pub hero: HeroView,
+    pub hand_known: Vec<CardView>,
+    pub hand_unseen: usize,
+    pub deck_count: usize,
+    pub board: Vec<CardView>,
+    pub discard: Vec<CardView>,
+}
+
+/// What the seat that acted may see of the game right after one of its actions: a type
+/// distinct from [`PlayerView`], whose own hand never shows what was drawn. The opposing side
+/// is the ordinary [`OpponentSide`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OutcomeView {
+    pub seat: PlayerId,
+    pub active: PlayerId,
+    pub budget: u32,
+    pub result: Option<GameResult>,
+    pub you: OutcomeOwnSide,
+    pub opponent: OpponentSide,
+}
+
 /// Projects `state` for `seat`. Pure: reads the state, touches neither it nor the generator.
 pub fn player_view(state: &GameState, seat: PlayerId) -> PlayerView {
     let you = state.player(seat);
-    let opponent = state.player(seat.opponent());
     PlayerView {
         seat,
         active: state.active,
         budget: state.budget,
-        result: state
-            .winner
-            .map(|(winner, reason)| GameResult { winner, reason }),
+        result: result_of(state),
         you: OwnSide {
             hero: hero_view(you),
             hand: card_views(&you.hand),
@@ -97,13 +122,54 @@ pub fn player_view(state: &GameState, seat: PlayerId) -> PlayerView {
             board: card_views(&you.board),
             discard: card_views(&you.discard),
         },
-        opponent: OpponentSide {
-            hero: hero_view(opponent),
-            hand_count: opponent.hand.len(),
-            deck_count: opponent.deck.len(),
-            board: card_views(&opponent.board),
-            discard: card_views(&opponent.discard),
+        opponent: opponent_side(state, seat),
+    }
+}
+
+/// Projects `state_after`, the state right after an action of `seat`, for that seat. `drawn` are
+/// the instance ids that came into the hand from the draw pile during the action (the `Drew`
+/// events): provenance, not a difference of hands decides what is masked, so a card back in the
+/// hand from the board or a discard would stay public. A drawn card is only counted: its id,
+/// name and stats never reach the result.
+pub(crate) fn outcome_view(
+    state_after: &GameState,
+    seat: PlayerId,
+    drawn: &[CardInstanceId],
+) -> OutcomeView {
+    let you = state_after.player(seat);
+    let (unseen, known): (Vec<&CardInstance>, Vec<&CardInstance>) =
+        you.hand.iter().partition(|card| drawn.contains(&card.id));
+    OutcomeView {
+        seat,
+        active: state_after.active,
+        budget: state_after.budget,
+        result: result_of(state_after),
+        you: OutcomeOwnSide {
+            hero: hero_view(you),
+            hand_known: known.into_iter().map(card_view).collect(),
+            hand_unseen: unseen.len(),
+            deck_count: you.deck.len(),
+            board: card_views(&you.board),
+            discard: card_views(&you.discard),
         },
+        opponent: opponent_side(state_after, seat),
+    }
+}
+
+fn result_of(state: &GameState) -> Option<GameResult> {
+    state
+        .winner
+        .map(|(winner, reason)| GameResult { winner, reason })
+}
+
+fn opponent_side(state: &GameState, seat: PlayerId) -> OpponentSide {
+    let opponent = state.player(seat.opponent());
+    OpponentSide {
+        hero: hero_view(opponent),
+        hand_count: opponent.hand.len(),
+        deck_count: opponent.deck.len(),
+        board: card_views(&opponent.board),
+        discard: card_views(&opponent.discard),
     }
 }
 
@@ -117,19 +183,20 @@ fn hero_view(side: &PlayerState) -> HeroView {
 }
 
 fn card_views(cards: &[CardInstance]) -> Vec<CardView> {
-    cards
-        .iter()
-        .map(|card| CardView {
-            id: card.id,
-            name: card.name.clone(),
-            cost: card.stats.cost,
-            force: card.stats.force,
-            attack_cost: card.stats.attack_cost,
-            health: card.stats.health,
-            provocation: card.stats.provocation,
-            riposte: card.stats.riposte,
-        })
-        .collect()
+    cards.iter().map(card_view).collect()
+}
+
+fn card_view(card: &CardInstance) -> CardView {
+    CardView {
+        id: card.id,
+        name: card.name.clone(),
+        cost: card.stats.cost,
+        force: card.stats.force,
+        attack_cost: card.stats.attack_cost,
+        health: card.stats.health,
+        provocation: card.stats.provocation,
+        riposte: card.stats.riposte,
+    }
 }
 
 #[cfg(test)]
@@ -590,5 +657,54 @@ mod tests {
         );
         assert_eq!(view.budget, state.budget());
         assert_eq!(view.opponent.hand_count, 0);
+    }
+
+    // ---- outcome_view: provenance decides what is masked (#141) -----------------------
+
+    #[test]
+    fn a_card_back_in_hand_from_the_discard_stays_public_and_a_drawn_one_is_only_counted() {
+        let mut state = running_game(5);
+        let seat = state.active;
+        let side = state.player_mut(seat);
+        // A card that came back from a discard (a future operation: the cause is not a draw).
+        let returned = side.deck.pop().expect("a pile");
+        side.discard.push(returned.clone());
+        let back = side.discard.pop().expect("the card just discarded");
+        side.hand.push(back);
+        // And a card really drawn.
+        let drawn = side.deck.pop().expect("a pile");
+        let drawn_id = drawn.id;
+        side.hand.push(drawn);
+
+        let view = outcome_view(&state, seat, &[drawn_id]);
+        assert_eq!(view.you.hand_unseen, 1);
+        assert!(view.you.hand_known.iter().any(|c| c.id == returned.id));
+        assert!(view.you.hand_known.iter().all(|c| c.id != drawn_id));
+        let text = format!("{view:?}");
+        assert!(!text.contains(&format!("SECRET-{}\"", drawn_id.0)));
+        assert!(text.contains(&format!("SECRET-{}\"", returned.id.0)));
+        // Without provenance information nothing is masked (the masking is the events' job).
+        assert_eq!(outcome_view(&state, seat, &[]).you.hand_unseen, 0);
+    }
+
+    #[test]
+    fn swapping_the_top_of_the_pile_with_another_card_changes_no_outcome() {
+        use crate::Observation;
+        for seed in 0..20 {
+            let state = running_game(seed);
+            let mut swapped = state.clone();
+            let seat = swapped.active;
+            let deck = &mut swapped.player_mut(seat).deck;
+            let last = deck.len() - 1;
+            deck.swap(last, 0);
+            let (a, b) = (
+                Observation::of(&state).unwrap(),
+                Observation::of(&swapped).unwrap(),
+            );
+            assert_eq!(a.actions(), b.actions());
+            for i in 0..a.actions().len() {
+                assert_eq!(a.outcome(i), b.outcome(i), "seed {seed}, action {i}");
+            }
+        }
     }
 }
