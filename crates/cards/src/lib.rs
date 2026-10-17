@@ -13,11 +13,16 @@
     )
 )]
 
+mod art;
 mod card;
 mod deck;
 mod hero;
 mod validate;
 
+pub use art::{
+    ART_LICENSES, ArtEntry, ArtError, ArtFormat, ArtLicense, MAX_ART_AUTHOR_LEN, MAX_ART_DOC_BYTES,
+    MAX_ART_SOURCE_LEN, parse_art,
+};
 pub use card::{Card, CreatureStats};
 pub use deck::Deck;
 pub use hero::{Effect, Hero, HeroEffect};

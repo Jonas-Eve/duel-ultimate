@@ -14,8 +14,25 @@ const SVG_NS: &str = "http://www.w3.org/2000/svg";
 const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
 
 const ALLOWED_ELEMENTS: &[&str] = &[
-    "svg", "g", "defs", "title", "desc", "style", "use", "path", "rect", "circle", "ellipse",
-    "line", "polyline", "polygon", "linearGradient", "radialGradient", "stop", "clipPath", "mask",
+    "svg",
+    "g",
+    "defs",
+    "title",
+    "desc",
+    "style",
+    "use",
+    "path",
+    "rect",
+    "circle",
+    "ellipse",
+    "line",
+    "polyline",
+    "polygon",
+    "linearGradient",
+    "radialGradient",
+    "stop",
+    "clipPath",
+    "mask",
 ];
 
 fn check_url_refs(text: &str) -> Result<(), String> {
@@ -44,7 +61,10 @@ fn check_url_refs(text: &str) -> Result<(), String> {
 fn check_node(node: Node) -> Result<(), String> {
     let name = node.tag_name();
     if name.namespace() != Some(SVG_NS) {
-        return Err(format!("element `{}` is not in the SVG namespace", name.name()));
+        return Err(format!(
+            "element `{}` is not in the SVG namespace",
+            name.name()
+        ));
     }
     if !ALLOWED_ELEMENTS.contains(&name.name()) {
         return Err(format!("element `{}` is not allowed", name.name()));
@@ -63,7 +83,6 @@ fn check_node(node: Node) -> Result<(), String> {
         }
     }
     if name.name() == "style" {
-        check_url_refs(&node.text().unwrap_or("").to_owned())?;
         for child in node.children() {
             check_url_refs(child.text().unwrap_or(""))?;
         }
@@ -78,6 +97,7 @@ fn check_svg(text: &str) -> Result<(), String> {
     let options = ParsingOptions {
         allow_dtd: false,
         nodes_limit: 10_000,
+        ..ParsingOptions::default()
     };
     let doc = Document::parse_with_options(text, options).map_err(|e| e.to_string())?;
     let root = doc.root_element();
@@ -110,13 +130,15 @@ fn check_set_dir(dir: &Path) -> Result<(), String> {
     let mut cited = BTreeSet::new();
     for entry in &entries {
         let path = art_dir.join(&entry.file);
-        let meta = fs::symlink_metadata(&path)
-            .map_err(|e| format!("{}: {e}", entry.file))?;
+        let meta = fs::symlink_metadata(&path).map_err(|e| format!("{}: {e}", entry.file))?;
         if !meta.file_type().is_file() {
             return Err(format!("{}: not a regular file", entry.file));
         }
         if meta.len() > MAX_IMAGE_BYTES {
-            return Err(format!("{}: larger than {MAX_IMAGE_BYTES} bytes", entry.file));
+            return Err(format!(
+                "{}: larger than {MAX_IMAGE_BYTES} bytes",
+                entry.file
+            ));
         }
         total += meta.len();
         let bytes = fs::read(&path).map_err(|e| e.to_string())?;
@@ -186,7 +208,9 @@ fn every_art_json_in_data_is_valid() {
 const VALID_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><title>t</title><defs><linearGradient id="g"><stop offset="0"/></linearGradient></defs><style>.a{fill:url(#g)}</style><rect width="10" height="10" fill="url(#g)"/><use href="#g"/></svg>"##;
 
 fn svg_with(body: &str) -> String {
-    format!(r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">{body}</svg>"#)
+    format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">{body}</svg>"#
+    )
 }
 
 #[test]
@@ -199,7 +223,10 @@ fn svg_rejects_each_forbidden_construct() {
     let cases: Vec<(&str, String)> = vec![
         ("not xml", "<svg".into()),
         ("two roots", format!("{VALID_SVG}<svg xmlns=\"{SVG_NS}\"/>")),
-        ("wrong root", "<html xmlns=\"http://www.w3.org/1999/xhtml\"/>".into()),
+        (
+            "wrong root",
+            "<html xmlns=\"http://www.w3.org/1999/xhtml\"/>".into(),
+        ),
         ("no namespace", "<svg/>".into()),
         ("script", svg_with("<script>alert(1)</script>")),
         ("foreignObject", svg_with("<foreignObject/>")),
@@ -211,15 +238,39 @@ fn svg_rejects_each_forbidden_construct() {
         ("unknown element", svg_with("<blink/>")),
         ("onload", svg_with("<rect onload=\"x()\"/>")),
         ("onclick", svg_with("<rect onclick=\"x()\"/>")),
-        ("external href", svg_with("<use href=\"http://a/b.svg#c\"/>")),
-        ("external xlink:href", svg_with("<use xlink:href=\"b.svg#c\"/>")),
-        ("javascript href", svg_with("<use href=\"JavaScript:alert(1)\"/>")),
-        ("external url()", svg_with("<rect fill=\"url(http://a/b)\"/>")),
-        ("data url()", svg_with("<rect fill=\"url(data:image/png;base64,AA)\"/>")),
+        (
+            "external href",
+            svg_with("<use href=\"http://a/b.svg#c\"/>"),
+        ),
+        (
+            "external xlink:href",
+            svg_with("<use xlink:href=\"b.svg#c\"/>"),
+        ),
+        (
+            "javascript href",
+            svg_with("<use href=\"JavaScript:alert(1)\"/>"),
+        ),
+        (
+            "external url()",
+            svg_with("<rect fill=\"url(http://a/b)\"/>"),
+        ),
+        (
+            "data url()",
+            svg_with("<rect fill=\"url(data:image/png;base64,AA)\"/>"),
+        ),
         ("data: attr", svg_with("<rect fill=\"DATA:x\"/>")),
-        ("style external url", svg_with("<style>.a{fill:url(http://a/b)}</style>")),
-        ("style @import", svg_with("<style>@import 'http://a/b.css';</style>")),
-        ("style import url", svg_with("<style>@IMPORT url(#a);</style>")),
+        (
+            "style external url",
+            svg_with("<style>.a{fill:url(http://a/b)}</style>"),
+        ),
+        (
+            "style @import",
+            svg_with("<style>@import 'http://a/b.css';</style>"),
+        ),
+        (
+            "style import url",
+            svg_with("<style>@IMPORT url(#a);</style>"),
+        ),
         ("doctype", format!("<!DOCTYPE svg>{VALID_SVG}")),
         (
             "entity",

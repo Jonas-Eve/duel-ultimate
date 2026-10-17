@@ -31,7 +31,13 @@ fn nominal_case() {
     let json = format!(
         "[{},{}]",
         entry("raider", "raider.svg", "Ann", "CC0-1.0", "own work"),
-        entry("wall", "wall.webp", "Bob", "CC-BY-4.0", "https://example.org/x")
+        entry(
+            "wall",
+            "wall.webp",
+            "Bob",
+            "CC-BY-4.0",
+            "https://example.org/x"
+        )
     );
     let art = parse(&json).unwrap();
     assert_eq!(art.len(), 2);
@@ -52,7 +58,8 @@ fn empty_array_is_valid() {
 fn invalid_json_and_unknown_fields() {
     assert!(matches!(parse("{"), Err(ArtError::Json(_))));
     assert!(matches!(parse(r#"{"a":1}"#), Err(ArtError::Json(_))));
-    let extra = r#"[{"id":"raider","file":"r.svg","author":"A","license":"CC0-1.0","source":"s","x":1}]"#;
+    let extra =
+        r#"[{"id":"raider","file":"r.svg","author":"A","license":"CC0-1.0","source":"s","x":1}]"#;
     assert!(matches!(parse(extra), Err(ArtError::Json(_))));
 }
 
@@ -164,7 +171,10 @@ fn empty_fields() {
 fn field_length_limits_are_exact_and_count_characters() {
     let author = "é".repeat(MAX_ART_AUTHOR_LEN);
     let source = "é".repeat(MAX_ART_SOURCE_LEN);
-    let ok = format!("[{}]", entry("raider", "a.svg", &author, "CC0-1.0", &source));
+    let ok = format!(
+        "[{}]",
+        entry("raider", "a.svg", &author, "CC0-1.0", &source)
+    );
     assert!(parse(&ok).is_ok());
 
     let author = "é".repeat(MAX_ART_AUTHOR_LEN + 1);
