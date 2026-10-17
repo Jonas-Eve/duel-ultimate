@@ -434,6 +434,64 @@ mod tests {
         parse_args(&args(list)).expect_err("invalid arguments")
     }
 
+    fn timing_of(list: &[&str]) -> bool {
+        parse_args(&args(list)).expect("valid arguments").timing
+    }
+
+    #[test]
+    fn timing_is_off_by_default() {
+        assert!(!timing_of(&[]));
+        assert!(!timing_of(&["10", "--seed", "3"]));
+    }
+
+    #[test]
+    fn timing_is_a_flag_without_a_value() {
+        // The number after it is the games, not a value of the flag.
+        assert!(timing_of(&["--timing"]));
+        let config = parse_args(&args(&["--timing", "50"])).expect("valid arguments");
+        assert!(config.timing);
+        assert_eq!(config.games, 50);
+    }
+
+    #[test]
+    fn timing_comes_in_any_order_with_the_other_options() {
+        for list in [
+            &["--timing", "50", "--seed", "7", "--set", "fixture"][..],
+            &["50", "--seed", "7", "--timing", "--set", "fixture"],
+            &["--set", "fixture", "--seed", "7", "50", "--timing"],
+            &[
+                "--hero-riposte",
+                "off",
+                "--board-limit",
+                "none",
+                "--timing",
+                "50",
+                "--seed",
+                "7",
+                "--set",
+                "fixture",
+            ],
+        ] {
+            let config = parse_args(&args(list)).expect("valid arguments");
+            assert!(config.timing, "{list:?}");
+            assert_eq!((config.games, config.seed), (50, 7), "{list:?}");
+            assert_eq!(config.set.name, "fixture", "{list:?}");
+        }
+    }
+
+    #[test]
+    fn timing_given_twice_is_rejected() {
+        let message = rejected(&["--timing", "--timing"]);
+        assert!(message.contains("--timing"), "{message}");
+        assert!(message.contains("--timing given twice"), "{message}");
+    }
+
+    #[test]
+    fn the_usage_lists_timing() {
+        assert!(USAGE.contains("--timing"));
+        assert!(rejected(&["--bogus"]).contains("--timing"));
+    }
+
     #[test]
     fn an_unknown_set_is_named_with_the_available_ones() {
         let message = rejected(&["--set", "nope"]);
