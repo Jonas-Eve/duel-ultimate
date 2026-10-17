@@ -71,8 +71,14 @@ export interface PlayerView {
   opponent: OpponentSide;
 }
 
+/** The rule options recorded in `game_started` when they differ from the engine default (keys in the order of Rust). No screen sets them. */
+export interface RuleSetJson {
+  hero_riposte: boolean;
+  board_limit: number | null;
+}
+
 export type EngineEvent =
-  | { game_started: { first: Seat; budget: number; data_versions?: string[] } }
+  | { game_started: { first: Seat; budget: number; data_versions?: string[]; rules?: RuleSetJson } }
   | { effect_activated: { player: Seat; effect: number; cost: number } }
   | { drew: { player: Seat; card: number } }
   | { played: { player: Seat; card: number; cost: number } }
