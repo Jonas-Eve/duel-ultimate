@@ -15,6 +15,7 @@ fn game(seed: u32) -> Duel {
         "control",
         r#"["fixture@1.0.0"]"#,
         seed,
+        None,
     )
     .unwrap()
 }

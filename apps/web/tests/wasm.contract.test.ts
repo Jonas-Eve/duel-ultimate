@@ -156,3 +156,65 @@ describe("JSON shapes of real games", () => {
     expect([...seenActions].sort()).toEqual(["activate", "attack", "attack_creature", "attack_hero", "concede", "play"].sort());
   }, 120_000);
 });
+
+describe("the optional rules of Game.from_data (#147)", () => {
+  const fixture = (name: string) => readFileSync(resolve(repoRoot, "data/fixture/1.0.0", name), "utf8");
+  const VERSIONS = JSON.stringify(["fixture@1.0.0"]);
+  const build = (rulesJson?: string | null, versions = VERSIONS) =>
+    binding.Game.from_data(fixture("cards.json"), fixture("decks.json"), "aggro", "control", versions, 1, rulesJson);
+  let binding: Awaited<ReturnType<typeof initTestEngine>>;
+
+  beforeAll(async () => {
+    binding = await initTestEngine();
+  });
+
+  test("non-default rules are recorded after data_versions, as the last key of game_started", () => {
+    // `{true, 5}` differs from the engine default until #127, which then rewrites this value.
+    const game = build('{"hero_riposte":true,"board_limit":5}');
+    try {
+      const raw = game.start_events();
+      expect(raw.endsWith('"rules":{"hero_riposte":true,"board_limit":5}}}]')).toBe(true);
+      const started = (JSON.parse(raw)[0] as { game_started: Record<string, unknown> }).game_started;
+      expect(Object.keys(started)).toEqual(["first", "budget", "data_versions", "rules"]);
+      expect(started.rules).toEqual({ hero_riposte: true, board_limit: 5 });
+      expect(raw.indexOf('"data_versions"')).toBeLessThan(raw.indexOf('"rules"'));
+    } finally {
+      game.free();
+    }
+  });
+
+  test("absent rules (undefined or null) and the empty object are the default game, without a rules key", () => {
+    const texts = [build(), build(null), build("{}")].map((game) => {
+      try {
+        return game.start_events();
+      } finally {
+        game.free();
+      }
+    });
+    expect(new Set(texts).size).toBe(1);
+    expect(texts[0]).not.toContain('"rules"');
+  });
+
+  test("refusals are JSON {code, message} errors with codes the client knows", () => {
+    const huge = " ".repeat(1024 * 1024 + 1);
+    const cases: [string, string][] = [
+      ['{"nope":1}', "invalid_json"],
+      ["", "invalid_json"],
+      ['{"board_limit":0}', "invalid_setup"],
+      [huge, "input_too_large"],
+    ];
+    for (const [rules, expected] of cases) {
+      let thrown: unknown = null;
+      try {
+        build(rules).free();
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown, expected).toBeInstanceOf(Error);
+      const body = JSON.parse((thrown as Error).message) as { code: string; message: string };
+      expect(body.code).toBe(expected);
+      expect(body.message.length).toBeGreaterThan(0);
+      expect(ENGINE_CODES).toContain(body.code);
+    }
+  });
+});

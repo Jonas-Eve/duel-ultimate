@@ -3,8 +3,10 @@
 //!
 //! The surface is deliberately small: a constructor from a JSON setup, a constructor from the
 //! data (`from_data`: `cards.json` and `decks.json` strings, decks by identifier, each string
-//! bounded to 1 MiB, no disk), `legal_actions()` and `apply(action)`, all as JSON strings, plus `start_events()`: the events of the setup
-//! (`game_started` with the recorded `data_versions`, possibly `game_won`), which are public
+//! bounded to 1 MiB, no disk, plus an optional sixth input `rules_json`, a `RuleSet` with no
+//! effect before #127), `legal_actions()` and `apply(action)`, all as JSON strings, plus `start_events()`: the events of the setup
+//! (`game_started` with the recorded `data_versions` and, when not the engine default, `rules`,
+//! possibly `game_won`), which are public
 //! (no hand, pile or card id). Still no accessor for the full state; instead, `view(seat)` gives
 //! one seat's view (`duel_engine::player_view`: its own hand, the opponent's hand and the piles
 //! only as counts, public boards and discards). The view does not authenticate the seat: this is
@@ -23,8 +25,8 @@
 
 use duel_ai::{AiError, choose, random_policy, rng_from_draw};
 use duel_engine::{
-    Action, Event, GameSetup, GameState, PlayerId, apply, game_setup_from_data, legal_actions,
-    new_game, player_view, preview_legal_actions,
+    Action, Event, GameSetup, GameState, PlayerId, RuleSet, apply, game_setup_from_data,
+    legal_actions, new_game, player_view, preview_legal_actions,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -47,9 +49,19 @@ impl Duel {
 
     /// Starts a game from `cards.json` and `decks.json` strings, the decks chosen by
     /// identifier (`deck_one` plays first seat, `deck_two` the second; the same twice is a
-    /// mirror). `data_versions_json` is a JSON array of strings, recorded as is. Each of the
-    /// five strings is bounded by [`MAX_INPUT_BYTES`] before anything is analysed; nothing is
-    /// read from disk.
+    /// mirror). `data_versions_json` is a JSON array of strings, recorded as is.
+    /// `rules_json` is optional: `None` is the engine default rules, `Some` a JSON `RuleSet`
+    /// object (a partial object reads the default for each absent field; `""` and `"null"` are
+    /// not "absent" but `invalid_json`, nothing is normalised). The options have no effect on
+    /// the game before #127; they are only recorded in `game_started` when they differ from
+    /// the default.
+    ///
+    /// Order of the checks, the first to fail answers: (1) the size of every string present,
+    /// the five and `rules_json`, bounded by [`MAX_INPUT_BYTES`] before anything is analysed
+    /// (`input_too_large`); (2) `data_versions_json` (`invalid_json`); (3) `rules_json` read
+    /// as a `RuleSet`, unknown fields refused (`invalid_json`); (4) `game_setup_from_data`
+    /// (`invalid_json`, `invalid_setup`, `unknown_deck`); (5) `new_game`, which revalidates
+    /// the rules (`invalid_setup`, e.g. `board_limit` outside 1..=30). Nothing is read from disk.
     pub fn from_data(
         cards_json: &str,
         decks_json: &str,
@@ -57,6 +69,7 @@ impl Duel {
         deck_two: &str,
         data_versions_json: &str,
         seed: u32,
+        rules_json: Option<&str>,
     ) -> Result<Self, String> {
         for input in [
             cards_json,
@@ -64,12 +77,20 @@ impl Duel {
             deck_one,
             deck_two,
             data_versions_json,
-        ] {
+        ]
+        .into_iter()
+        .chain(rules_json)
+        {
             bounded(input)?;
         }
         let data_versions: Vec<String> = parse(data_versions_json)?;
-        let setup = game_setup_from_data(cards_json, decks_json, deck_one, deck_two, data_versions)
-            .map_err(|e| error_json(e.code(), &e.to_string()))?;
+        let rules: Option<RuleSet> = rules_json.map(parse).transpose()?;
+        let mut setup =
+            game_setup_from_data(cards_json, decks_json, deck_one, deck_two, data_versions)
+                .map_err(|e| error_json(e.code(), &e.to_string()))?;
+        if let Some(rules) = rules {
+            setup.rules = rules;
+        }
         Self::from_setup(setup, seed)
     }
 
@@ -230,6 +251,8 @@ impl Game {
             .map_err(|e| JsError::new(&e))
     }
 
+    /// See [`Duel::from_data`]. `rules_json` is optional (`undefined` and `null` both mean
+    /// "absent", the engine default rules); `""` is `invalid_json`.
     pub fn from_data(
         cards_json: &str,
         decks_json: &str,
@@ -237,6 +260,7 @@ impl Game {
         deck_two: &str,
         data_versions_json: &str,
         seed: u32,
+        rules_json: Option<String>,
     ) -> Result<Game, JsError> {
         Duel::from_data(
             cards_json,
@@ -245,6 +269,7 @@ impl Game {
             deck_two,
             data_versions_json,
             seed,
+            rules_json.as_deref(),
         )
         .map(Game)
         .map_err(|e| JsError::new(&e))
@@ -530,6 +555,27 @@ mod tests {
     }
 
     #[test]
+    fn from_json_reads_the_rules_key_of_a_setup() {
+        let default = RuleSet::default();
+        let rules = RuleSet {
+            hero_riposte: !default.hero_riposte,
+            board_limit: Some(5),
+        };
+        let mut v = setup_value();
+        v["rules"] = serde_json::to_value(rules).unwrap();
+        let events = Duel::from_json(&v.to_string(), 1)
+            .unwrap()
+            .start_events_json()
+            .unwrap();
+        let suffix = format!(",\"rules\":{}}}}}]", serde_json::to_string(&rules).unwrap());
+        assert!(events.ends_with(&suffix), "{events}");
+        // An out-of-range option is revalidated by `new_game`.
+        v["rules"] = serde_json::json!({ "board_limit": 31 });
+        let err = Duel::from_json(&v.to_string(), 1).err().unwrap();
+        assert_eq!(code(&err), "invalid_setup");
+    }
+
+    #[test]
     fn the_data_versions_key_stays_mandatory_in_a_setup() {
         let mut v = setup_value();
         v.as_object_mut().unwrap().remove("data_versions");
@@ -561,6 +607,7 @@ mod tests {
             "bulwark",
             r#"["starter@1.1.0"]"#,
             seed,
+            None,
         )
         .unwrap()
     }

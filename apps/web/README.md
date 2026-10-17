@@ -117,6 +117,9 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
 - **Contrat JSON** : `EVENT_KINDS` doit égaler les variantes de `enum Event`
   (`crates/engine/src/rules.rs`) ; `tests/wasm.contract.test.ts` vérifie les clés exactes de chaque
   événement, action et aperçu sur 80 parties réelles. Ajouter une variante côté Rust casse ce test.
+  `game_started.rules?: RuleSetJson` (#147) est additif et optionnel : le client ne passe pas de
+  règles (`rules_json` de `Game.from_data` reste absent), le formateur du journal l'ignore, et
+  `EVENT_KINDS` ne change pas.
 - **Graine** (`game/seed.ts`) : `parseSeed` (chiffres ASCII, 0 à 4294967295, le binding réduirait
   silencieusement une valeur hors `u32`), `randomSeed` (`crypto.getRandomValues`, seule entropie du
   client, jamais `Math.random`), `deriveAiSeed` (graine de l'ordinateur dérivée de celle de la partie) et
