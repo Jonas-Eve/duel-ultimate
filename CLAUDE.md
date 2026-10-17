@@ -84,7 +84,26 @@ Règles propres à ce repo :
   (« E2E (manual) », `workflow_dispatch` seul, jamais `pull_request` ni `push`), à lancer depuis
   l'onglet Actions : la CI automatique ne couvre donc plus le flux complet (Vitest, lui, reste
   automatique). Permissions `contents: read`, actions épinglées par SHA, aucun secret, aucun artefact ;
-  les deux workflows sont gardés par `apps/web/tests/ci-policy.test.ts`.
+  ces deux workflows sont gardés par `apps/web/tests/ci-policy.test.ts`.
+- **Déploiement** (`.github/workflows/deploy-pages.yml`, « Deploy to Pages », #54/#81) : publie le client
+  (`apps/web`, `VITE_BASE=/duel-ultimate/` et `VITE_BUILD_SHA` dérivé de `GITHUB_SHA` en shell, jamais d'un
+  secret ni d'une valeur libre) sur `https://jonas-eve.github.io/duel-ultimate/`. **Manuel seulement**
+  (`workflow_dispatch`, sans `inputs`, décision du propriétaire pour économiser le quota) : onglet Actions >
+  « Deploy to Pages » > Run workflow, sur `main`, **depuis un `main` vert** : il ne lance ni tests, ni Clippy,
+  ni `fmt`, ni e2e. Deux jobs : `build` (`contents: read` et `pages: read`, car `configure-pages` interroge
+  l'API Pages, sans `enablement` : échec rapide avec un message si Pages est désactivé) et `deploy`
+  (`pages: write` et `id-token: write`, environnement `github-pages`, une seule étape `deploy-pages`, ni
+  checkout ni `run:`) ; actions `actions/*` épinglées par SHA. Vérifier la version déployée : le pied de
+  l'accueil affiche « Version : <SHA à 7 caractères> » (à comparer à `git rev-parse --short origin/main`) et
+  « Données : starter@1.0.0 ». **Cache** : Pages envoie `Cache-Control: max-age=600` et les en-têtes ne se
+  règlent pas ici ; pendant ~10 minutes après un redéploiement, un `index.html` périmé peut référencer des
+  assets hachés disparus et afficher l'écran d'erreur `wasm_load_failed` avec « Recharger » : attendre ou
+  recharger. `VITE_BASE` : voir `apps/web/README.md` (#80). Gardé par `apps/web/tests/ci-policy.test.ts` (bloc
+  dédié, hors du `describe.each` commun). Pour redéployer à chaque push sur `main`, ajouter
+  `push: branches: [main]` sous `on:` **et** adapter le garde du déclencheur (sinon le test échoue, à dessein).
+  Action unique du propriétaire : Settings > Pages > Source « GitHub Actions » ; si un déploiement est refusé
+  par une règle de branche, Settings > Environments > `github-pages` : autoriser `main`. Aucun secret,
+  aucun service worker, aucune analytique.
 - Une nouvelle mécanique ajoute une brique au moteur sans modifier le comportement des decks
   qui ne l'utilisent pas (à vérifier par le simulateur).
 - Format des données : un set = un dossier versionné `data/<set>/<version>/` (`cards.json`, `decks.json`). Une carte a un discriminant `kind` ; un deck embarque son héros et compte exactement 30 cartes ; toute validation passe par `duel-cards` (`parse_cards`, `parse_decks`, `resolve_deck_named`, `resolve_deck` en étant un mince appel), stats bornées à `MAX_STAT` = 10000. Exemple : `data/fixture/1.0.0/`. Une créature a aussi `provocation` (booléen, défaut faux) et `riposte` (u32 ≥ 0, défaut 0, ≤ `MAX_STAT`, 0 valide sans minimum 1), `#[serde(default)]` sur `Card::Creature` et `CreatureStats` (toujours émis à la sérialisation ; la compatibilité exigée est en lecture : un JSON à quatre clés reste accepté), validés par `validate_creature` (erreur `StatTooHigh { field: "riposte" }`). Le moteur lit `provocation` (S2b-T2, filtre de cibles) et `riposte` (S2b-T3, dégâts rendus à l'attaquant) ; la fixture ne change pas (`S2A_GOLDEN`, dans `crates/engine/tests/engine.rs`, est le journal de référence que les decks sans riposte ni provocation doivent laisser identique). Jeu de départ `data/starter/1.0.0/` (version enregistrée `starter@1.0.0`) : deux decks de 30 cartes, `rush` (One) puis `bulwark` (Two), héros d'initiatives différentes (Ruée commence toujours) ; premier jeu qui utilise `provocation` (Rempart seul) et `riposte` (Ruée seul). **Valeurs provisoires, non équilibrées** ; propriétés pinnées par `crates/cards/tests/starter_set.rs`. La fixture reste l'exemple de format sans ces mécaniques.

@@ -1,0 +1,91 @@
+name: Deploy to Pages
+
+# Manual only (#54, #81): the client is published to https://jonas-eve.github.io/duel-ultimate/ from
+# the Actions tab (Run workflow, on main), never on push or pull_request, to spare CI quota. This
+# workflow runs no test: dispatch it from a green main. To deploy on every push to main later, add
+# `push: branches: [main]` under `on:` and update the trigger guard of apps/web/tests/ci-policy.test.ts.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # configure-pages only reads the Pages site (GET /repos/{owner}/{repo}/pages): read, never write.
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      # Without `enablement`, it fails fast when Pages is disabled (Settings > Pages > Source).
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Explain a Pages failure
+        if: failure() && steps.pages.outcome == 'failure'
+        run: |
+          echo "::error::Pages is not usable for this repository. The owner must set Settings > Pages > Source to 'GitHub Actions', then run this workflow again."
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: apps/web/.node-version
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal -t wasm32-unknown-unknown --no-self-update && rustup default stable
+
+      - name: Install wasm-bindgen-cli at the version of Cargo.lock
+        run: |
+          start=$SECONDS
+          V=$(node apps/web/scripts/build-wasm.mjs --print-version)
+          cargo install wasm-bindgen-cli --version "$V" --locked
+          echo "wasm-bindgen-cli $V installed in $((SECONDS - start))s"
+
+      - name: Install web dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      # The sub-path is a literal; the short SHA only comes from GITHUB_SHA (shown in the home footer).
+      - name: Build web
+        working-directory: apps/web
+        env:
+          VITE_BASE: /duel-ultimate/
+        run: VITE_BUILD_SHA="${GITHUB_SHA::7}" npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: apps/web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The only job that writes Pages and mints the OIDC token: it runs no repository code.
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

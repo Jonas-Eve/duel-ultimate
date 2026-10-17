@@ -24,6 +24,21 @@ aucune interaction qui dépende du survol. Il appelle le moteur de règles compi
   (`buildIdFrom`, `BUILD_ID`) n'est lu que par `App`, qui le passe à l'accueil par la prop `buildId`.
   Seules les variables `VITE_` entrent dans le bundle ; aucun secret. `index.html` porte
   `<link rel="icon" href="data:," />` (pas de requête `/favicon.ico`, la CSP autorise `data:` en images).
+- **Déploiement GitHub Pages (#54, #81)** : `.github/workflows/deploy-pages.yml` (« Deploy to Pages »)
+  construit ce paquet avec `VITE_BASE=/duel-ultimate/` et `VITE_BUILD_SHA` (7 premiers caractères de
+  `GITHUB_SHA`, dérivés en shell) puis publie `dist/` sur `https://jonas-eve.github.io/duel-ultimate/`.
+  **Manuel** (`workflow_dispatch` seul : Actions > « Deploy to Pages » > Run workflow, sur `main`, depuis
+  un `main` vert : il ne lance ni tests, ni Clippy, ni `fmt`, ni e2e). Pour vérifier la version en ligne,
+  lire sur l'accueil « Version : <SHA à 7 caractères> » (à comparer à `git rev-parse --short origin/main`)
+  et « Données : starter@1.0.0 ». **Cache** : Pages envoie `Cache-Control: max-age=600` (en-têtes non
+  réglables) ; pendant ~10 minutes après un redéploiement, un `index.html` périmé peut référencer des assets
+  hachés disparus et afficher l'écran d'erreur `wasm_load_failed` avec « Recharger » : attendre ou recharger.
+  Le garde est le bloc « deploy-pages.yml » de `tests/ci-policy.test.ts` (déclencheur, permissions,
+  épinglage des actions, aucun `${{ }}` dans un `run`) ; pour réajouter le déclencheur `push`, ajouter
+  `push: branches: [main]` sous `on:` du workflow **et** adapter le garde du déclencheur. Action unique du
+  propriétaire : Settings > Pages > Source « GitHub Actions » (règle de branche de l'environnement
+  `github-pages` : autoriser `main`). Le sous-chemin n'est pas rejoué par les e2e : le test de sortie
+  construite de #80 le couvre.
 - `npm test` — tests (Vitest + Testing Library + `user-event`), dont un test de fumée contre le vrai `.wasm`
 - `npm run e2e` — tests de bout en bout (Playwright) contre le build de production : voir « Tests de bout en bout »
 
