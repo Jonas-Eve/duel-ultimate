@@ -47,10 +47,10 @@ test.describe("7. Mobile 360 px", () => {
     await settle(page);
     await expectMobileSound(page, "partie, après le tour de l'ordinateur");
 
-    // The hand is a row that scrolls inside itself; the page does not.
+    // The hand is a row that scrolls inside itself (overflow-x: auto), but five compact cards (#92) fit a 360 px screen: it no longer overflows.
     const row = await ownHand(page).evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth, overflowX: getComputedStyle(el).overflowX }));
     expect(row.overflowX).toBe("auto");
-    expect(row.scroll, "a hand of several 9.5 rem cards is wider than a 360 px screen").toBeGreaterThan(row.client);
+    expect(row.scroll, "a hand of five compact cards fits a 360 px screen without overflowing").toBeLessThanOrEqual(row.client);
     await expectNoHorizontalScroll(page);
 
     await page.getByRole("button", { name: "Journal" }).tap();

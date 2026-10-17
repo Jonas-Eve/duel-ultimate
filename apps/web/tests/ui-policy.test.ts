@@ -40,6 +40,19 @@ describe("index.css", () => {
     expect(stripComments(css)).not.toMatch(/:hover/);
   });
 
+  test("a compact card face is a fixed box, its three values are at least 10px (in px, not rem)", () => {
+    const code = stripComments(css);
+    expect(code).toMatch(/--card-w:\s*62px/);
+    const face = /\.card-face\s*\{([^}]*)\}/.exec(code)?.[1] ?? "";
+    expect(face).toMatch(/width:\s*var\(--card-w\)/);
+    expect(face).toMatch(/height:\s*112px/);
+    expect(face).toMatch(/box-sizing:\s*border-box/);
+    const value = /\.card-value\s*\{([^}]*)\}/.exec(code)?.[1] ?? "";
+    const size = /font-size:\s*(\d+(?:\.\d+)?)px/.exec(value);
+    expect(size, ".card-value font-size in px").not.toBeNull();
+    expect(Number(size![1])).toBeGreaterThanOrEqual(10);
+  });
+
   test("the page column is centred and at most 48rem wide; card rows scroll inside", () => {
     expect(css).toMatch(/max-width:\s*48rem/);
     expect(css).toMatch(/overflow-x:\s*auto/);

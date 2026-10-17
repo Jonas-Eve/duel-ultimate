@@ -7,14 +7,12 @@ import { messageFor } from "../src/ui/errors.fr";
 import { decorateSession, newSession } from "./support/engine";
 import { faultyFactory } from "./support/faulty";
 import { playHuman, playUntil, randomPreview, settle, stallPolicy, stallPreview } from "./support/policies";
+import { expectedCardLabel } from "./support/card-label";
 import { inAct, makeController, mountGame, useRealEngine } from "./support/ui";
 
 useRealEngine();
 
-const label = (c: CardView, extra = ""): string =>
-  `${c.name}, coût ${c.cost}, force ${c.force}, coût d'attaque ${c.attack_cost}, PV ${c.health}${extra}` +
-  (c.provocation ? ", provocation" : "") +
-  (c.riposte > 0 ? `, riposte ${c.riposte}` : "");
+const label = (c: CardView): string => expectedCardLabel(c);
 
 const hand = () => screen.getByRole("group", { name: "Ta main" });
 const handButtons = () => within(hand()).getAllByRole("button") as HTMLButtonElement[];
@@ -80,9 +78,10 @@ describe("the permanent information", () => {
       expect(names).toEqual(cards.map((x) => label(x)));
       for (const g of within(board(mine)).getAllByRole(mine ? "button" : "group")) {
         const text = g.textContent ?? "";
-        expect(text).toMatch(/Force \d+/);
-        expect(text).toMatch(/Attaque \d+/);
-        expect(text).toMatch(/PV \d+/);
+        // Three values on every card, riposte included even at 0, and never a cost on a board.
+        expect(g.querySelectorAll(".card-values .card-value")).toHaveLength(3);
+        expect(g.querySelector(".card-cost")).toBeNull();
+        expect(text).not.toMatch(/Coût/);
       }
     }
   });
@@ -112,8 +111,7 @@ describe("the permanent information", () => {
     const v = c.getSnapshot().views.One!;
     const shown = [...v.you.hand, ...v.you.board, ...v.opponent.board];
     expect(screen.getAllByText("Provocation")).toHaveLength(shown.filter((x) => x.provocation).length);
-    expect(screen.getAllByText("Riposte 1").length).toBe(shown.filter((x) => x.riposte === 1).length);
-    expect(screen.getAllByText("Riposte 1").length).toBeGreaterThan(0);
+    expect(shown.some((x) => x.riposte >= 1)).toBe(true);
     for (const svg of document.querySelectorAll("svg")) expect(svg.getAttribute("aria-hidden")).toBe("true");
   });
 });
@@ -161,11 +159,20 @@ describe("cost and hand-over come from the engine preview", () => {
     v.you.hand.forEach((card, i) => {
       const p = previews.find((x) => isPlay(x.action) && x.action.play.card === card.id) as ActionPreview;
       const text = buttons[i].textContent ?? "";
-      expect(text, card.name ?? "").toContain(`Coût ${p.cost}`);
+      // The cost is shown once, in the pill beside the name (the number alone), never twice.
+      const pills = buttons[i].querySelectorAll(".card-cost");
+      expect(pills, card.name ?? "").toHaveLength(1);
+      expect(pills[0].textContent).toBe(String(p.cost));
       expect(/Passe la main/.test(text), `${card.name} hand-over`).toBe(p.hands_over);
-      expect(/passe la main/.test(buttons[i].getAttribute("aria-label") ?? "")).toBe(p.hands_over);
-      if (!p.hands_over) expect(text).toContain(`Il te restera ${p.budget_after} de temps`);
-      else expect(text).toContain(`l'adversaire aura ${p.budget_after} de temps`);
+      expect(buttons[i].getAttribute("aria-label")).toBe(
+        expectedCardLabel(card, {
+          inHand: true,
+          cost: p.cost ?? 0,
+          handsOver: p.hands_over,
+          timeLeft: p.hands_over ? undefined : `il te restera ${p.budget_after} de temps`,
+        }),
+      );
+      if (!p.hands_over) expect(text).toContain(`Reste ${p.budget_after}`);
     });
 
     const actions = screen.getByRole("group", { name: "Actions" });

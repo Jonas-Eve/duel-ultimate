@@ -7,6 +7,7 @@ import { CARDS_JSON, DECKS_JSON } from "../src/data/starter";
 import type { CardView, Seat } from "../src/engine/types";
 import { isPlay } from "../src/engine/types";
 import type { Snapshot } from "../src/game/controller";
+import { expectedCardLabel } from "./support/card-label";
 import { newSession } from "./support/engine";
 import { launch, renderApp, useAppEngine } from "./support/app";
 import { playHuman, playUntil, randomPreview, stallPreview } from "./support/policies";
@@ -19,10 +20,7 @@ const CAMP1 = "Camp 1 — Ruée";
 const CAMP2 = "Camp 2 — Rempart";
 const group = (name: string) => screen.getByRole("group", { name });
 const buttonsIn = (name: string) => within(group(name)).queryAllByRole("button") as HTMLButtonElement[];
-const baseLabel = (c: CardView) =>
-  `${c.name}, coût ${c.cost}, force ${c.force}, coût d'attaque ${c.attack_cost}, PV ${c.health}` +
-  (c.provocation ? ", provocation" : "") +
-  (c.riposte > 0 ? `, riposte ${c.riposte}` : "");
+const baseLabel = (c: CardView) => expectedCardLabel(c, { inHand: true });
 const seats: Seat[] = ["One", "Two"];
 
 /** First seed where the camp holding the main (rush, One) has a summon that hands the main over without ending the game. */
@@ -291,8 +289,8 @@ describe("wording of the consequence lines in two camps", () => {
     const c = makeCampsController("rush", "bulwark", seed);
     mountGame(c);
     const tile = buttonsIn(`${CAMP1} : main`)[handOverIndex(c.getSnapshot())];
-    expect(tile.textContent).toMatch(/Passe la main : l'autre camp aura \d+ de temps/);
-    const notes = buttonsIn(`${CAMP1} : main`).map((b) => b.textContent).join(" ");
+    expect(tile.textContent).toContain("Passe la main");
+    const notes = buttonsIn(`${CAMP1} : main`).map((b) => `${b.textContent} ${b.getAttribute("aria-label")}`).join(" ");
     expect(notes).not.toMatch(/te restera|adversaire/);
   });
 });

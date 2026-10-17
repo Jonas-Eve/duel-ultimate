@@ -1,7 +1,7 @@
 import type { ActionPreview, CardView } from "../engine/types";
 import { isPlay } from "../engine/types";
-import { CardTile } from "./CardTile";
-import { describeConsequence, type ConsequenceLabels } from "./consequence";
+import { CardTile, type TimeLeft } from "./CardTile";
+import type { ConsequenceLabels } from "./consequence";
 import { fr } from "./fr";
 
 interface HandProps {
@@ -17,6 +17,13 @@ interface HandProps {
   readOnly?: boolean;
 }
 
+/** "Reste N" under the card when the play keeps the main: N is the preview's `budget_after`, never computed here. */
+function keepsTime(preview: ActionPreview | undefined, labels: ConsequenceLabels): TimeLeft | undefined {
+  if (preview === undefined || preview.hands_over || preview.ends_game !== null || preview.budget_after === null) return undefined;
+  const spoken = labels.timeLeft(preview.budget_after);
+  return { legend: fr.keepsLegend(preview.budget_after), spoken: spoken.charAt(0).toLowerCase() + spoken.slice(1) };
+}
+
 /** A hand. Each card's cost and consequence come from its engine preview (found by card id). */
 export function Hand({ cards, legal, enabled, labels, onPlay, label, readOnly = false }: HandProps) {
   return (
@@ -30,7 +37,7 @@ export function Hand({ cards, legal, enabled, labels, onPlay, label, readOnly = 
             key={card.id}
             card={card}
             cost={preview?.cost ?? card.cost}
-            notes={preview ? describeConsequence(preview, labels).slice(preview.cost === null ? 0 : 1) : []}
+            timeLeft={keepsTime(preview, labels)}
             handsOver={preview?.hands_over ?? false}
             disabled={!enabled || preview === undefined}
             onPress={() => preview && onPlay(preview)}

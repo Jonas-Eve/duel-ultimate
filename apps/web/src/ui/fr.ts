@@ -66,6 +66,13 @@ export const fr = {
   attackCost: (n: number) => `Attaque ${n}`,
   cost: (n: number) => `Coût ${n}`,
   provocation: "Provocation",
+  // Compact card (#92): words of the accessible name, and the hand legends under the card.
+  costWord: "coût",
+  attackWord: "attaque",
+  riposteWord: "riposte",
+  lifeWord: "vie",
+  keepsLegend: (n: number) => `Reste ${n}`,
+  passesLegend: "Passe la main",
   riposte: (n: number) => `Riposte ${n}`,
   noCreature: "Aucune créature",
 
