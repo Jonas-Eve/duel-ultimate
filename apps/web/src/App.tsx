@@ -1,9 +1,10 @@
 // Assembles the screens: the engine is loaded first (loading screen), then the home screen, then
-// the game. `App` is the only place that reads the starter data and the build identifier, and knows the engine factory;
+// the game. `App` is the only place that reads the starter data, the card art and the build identifier, and knows the engine factory;
 // `ui/` and `game/` get what they need by props and closures. The controller is created in an
 // event handler (never in an effect: StrictMode replays effects, and a cleanup would free the
 // second mount's instance), through `startGame`, which never throws.
 import { useEffect, useRef, useState } from "react";
+import { ART } from "./data/art";
 import { BUILD_ID } from "./data/build";
 import { CARDS_JSON, DATA_VERSION, DECKS, DECKS_JSON } from "./data/starter";
 import { parseEngineError, type EngineError } from "./engine/errors";
@@ -13,6 +14,7 @@ import { createWasmSession } from "./engine/wasm-session";
 import type { ComputerPolicy } from "./game/computer";
 import type { ControllerDeps, GameController, Mode, SessionRequest } from "./game/controller";
 import { startGame } from "./game/start";
+import { ArtProvider } from "./ui/ArtContext";
 import { fr } from "./ui/fr";
 import { GameScreen } from "./ui/GameScreen";
 import { Home, type StartFailure } from "./ui/Home";
@@ -118,31 +120,33 @@ export function App({ deps = {} }: { deps?: AppDeps }) {
   };
 
   return (
-    <main className="app">
-      <h1>{fr.appTitle}</h1>
-      {running === null ? (
-        <Home
-          decks={DECKS}
-          dataVersion={DATA_VERSION}
-          buildId={BUILD_ID}
-          status={factory !== null ? "ready" : loadError !== null ? "failed" : "loading"}
-          loadError={loadError}
-          startError={startError}
-          onStart={startFromHome}
-          onReload={() => {
-            setLoadError(null);
-            setAttempt((n) => n + 1);
-          }}
-        />
-      ) : (
-        <GameScreen
-          key={running.key}
-          controller={running.controller}
-          onReplaySameSeed={() => replay(true)}
-          onReplayNewSeed={() => replay(false)}
-          onHome={release}
-        />
-      )}
-    </main>
+    <ArtProvider lookup={ART}>
+      <main className="app">
+        <h1>{fr.appTitle}</h1>
+        {running === null ? (
+          <Home
+            decks={DECKS}
+            dataVersion={DATA_VERSION}
+            buildId={BUILD_ID}
+            status={factory !== null ? "ready" : loadError !== null ? "failed" : "loading"}
+            loadError={loadError}
+            startError={startError}
+            onStart={startFromHome}
+            onReload={() => {
+              setLoadError(null);
+              setAttempt((n) => n + 1);
+            }}
+          />
+        ) : (
+          <GameScreen
+            key={running.key}
+            controller={running.controller}
+            onReplaySameSeed={() => replay(true)}
+            onReplayNewSeed={() => replay(false)}
+            onHome={release}
+          />
+        )}
+      </main>
+    </ArtProvider>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { importsOf, sourceFiles } from "./support/source-scan";
+import { importsOf, sourceFiles, stripComments } from "./support/source-scan";
 
 // Layers (apps/web/README.md), dependencies go down only: engine/ <- game/ <- ui/.
 // Read as text, so it also covers files added later without any change here.
@@ -75,5 +75,26 @@ describe("architecture of apps/web/src", () => {
         expect(ok, `${f.rel} imports ${spec}`).toBe(true);
       }
     }
+  });
+
+  test("no layer imports data/ at all: only App.tsx does (#101)", () => {
+    for (const f of [...inDir("engine"), ...inDir("game"), ...inDir("ui")]) {
+      for (const spec of importsOf(f.text)) expect(/(^|\/)data(\/|$)/.test(spec), `${f.rel} imports ${spec}`).toBe(false);
+    }
+  });
+
+  test("only App.tsx imports data/art", () => {
+    const importers = files.filter((f) => importsOf(f.text).some((s) => /(^|\/)data\/art$/.test(s))).map((f) => f.rel);
+    expect(importers).toEqual(["App.tsx"]);
+  });
+
+  test("no import.meta.glob, ?raw, ?url or data/ path string in engine/, game/ or ui/ (importsOf does not see globs)", () => {
+    const forbidden = [/import\.meta\.glob/, /\?raw\b/, /\?url\b/, /["'`][^"'`\n]*\bdata\/[^"'`\n]*["'`]/];
+    for (const f of [...inDir("engine"), ...inDir("game"), ...inDir("ui")]) {
+      const code = stripComments(f.text);
+      for (const re of forbidden) expect(re.test(code), `${f.rel} matches ${re}`).toBe(false);
+    }
+    expect(forbidden[0].test("const g = import.meta.glob('x')")).toBe(true);
+    expect(forbidden[3].test('const p = "../data/starter/art.json";')).toBe(true);
   });
 });

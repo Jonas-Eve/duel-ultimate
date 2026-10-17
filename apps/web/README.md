@@ -73,10 +73,11 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
 | Dossier | Contenu |
 |---|---|
 | `src/engine/` | contrat JSON typé (`types.ts`, écrit depuis les sources Rust), `GameSession` (`session.ts`, le seul accès au moteur), adaptateur `createWasmSession` (`wasm-session.ts`), chargeur mémoïsé `loadEngine` (`load.ts`), erreurs (`errors.ts`) |
-| `src/game/` | logique du client sans React ni WASM : la graine (`seed.ts`), les enregistrements de journal (`records.ts`), la politique de l'ordinateur (`computer.ts`), le contrôleur de la partie locale (`controller.ts`), le démarrage sans exception (`start.ts`) et le modèle d'écran (`screen-model.ts`) |
-| `src/ui/` | composants et textes français : écrans (`Home`, `GameScreen`, `EndScreen`, `FatalScreen`), éléments (`HeroBar`, `TimeBand`, `Board`, `CardTile`, `Hand`, `ActionBar`, `ThinkingIndicator`, `ErrorBanner`, `LogBar`, `LogHistory`), dialogues (`Dialog`, `ConfirmDialog`, `AttackSheet`, `LogDrawer`, `DiscardDialog`), textes (`fr.ts`, `errors.fr.ts`), `consequence.ts`, l'état du flux d'attaque `attack-state.ts` et le formateur du journal `log-format.ts` |
-| `src/App.tsx` | assemble les écrans ; le seul à lire `data/starter`, `data/build` et `engine/load` |
+| `src/game/` | logique du client sans React ni WASM : la graine (`seed.ts`), les types de l'art (`art.ts` : `ArtInfo`, `ArtLookup`), les enregistrements de journal (`records.ts`), la politique de l'ordinateur (`computer.ts`), le contrôleur de la partie locale (`controller.ts`), le démarrage sans exception (`start.ts`) et le modèle d'écran (`screen-model.ts`) |
+| `src/ui/` | composants et textes français : écrans (`Home`, `GameScreen`, `EndScreen`, `FatalScreen`), éléments (`HeroBar`, `TimeBand`, `Board`, `CardTile`, `Hand`, `ActionBar`, `ThinkingIndicator`, `ErrorBanner`, `LogBar`, `LogHistory`), dialogues (`Dialog`, `ConfirmDialog`, `AttackSheet`, `LogDrawer`, `DiscardDialog`), textes (`fr.ts`, `errors.fr.ts`), le contexte d'art `ArtContext.tsx` (`ArtProvider`, `useArtLookup`), `consequence.ts`, l'état du flux d'attaque `attack-state.ts` et le formateur du journal `log-format.ts` |
+| `src/App.tsx` | assemble les écrans ; le seul à lire `data/starter`, `data/art`, `data/build` et `engine/load` |
 | `src/data/starter.ts` | données `starter` importées en `?raw` |
+| `src/data/art.ts` | art optionnel du set (`art.json`, `art/`) : `buildArtIndex` (pure), `ART` (`ArtLookup`), `ART_LICENSES` ; lu par `App` seul (#101) |
 | `src/data/build.ts` | `buildIdFrom`, `BUILD_ID` : identifiant de build (`VITE_BUILD_SHA`), lu par `App` seul |
 | `vite/csp-plugin.ts` | plugin Vite de la CSP de build |
 | `vite/base.ts` | `resolveBase` : le `base` de Vite depuis `VITE_BASE` (#80) |
@@ -90,6 +91,16 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
   « Denied ID ») ; `allow` remplace la liste par défaut de Vite, donc elle contient `apps/web` et
   `data/`, jamais la racine du dépôt (`data/build.ts`, lui, ne lit que `import.meta.env`). `DATA_VERSION` (`starter@1.0.0`) est la seule constante de
   version ; `tests/data-version.test.ts` la compare au chemin importé.
+- **Art des cartes (#101)** : un set peut avoir `art.json` et `art/` (format et licences : `crates/cards/src/art.rs`,
+  le moteur n'y touche pas). `data/art.ts` les lit par deux `import.meta.glob` à chemins littéraux (même version
+  que `DATA_VERSION`, tolérants à l'absence : `starter@1.0.0` n'a pas d'art, donc aucune image pour l'instant) et
+  `buildArtIndex` (pure, ne lève jamais) construit la recherche par nom d'affichage exact. `file` n'est jamais
+  concaténé en URL : c'est la clé d'une table fermée d'images, une clé absente laisse l'illustration de
+  substitution. Un nom partagé par plusieurs cartes, une licence hors `CC0-1.0`/`CC-BY-4.0` ou une entrée invalide
+  = pas d'image. `author`, `license` et `source` sont du texte seulement (jamais un lien actif). `App` est le seul
+  lecteur de `data/art` et enveloppe l'arbre dans `ArtProvider` (`ui/ArtContext.tsx`) ; `ui/` n'importe rien de
+  `data/` (`tests/architecture.test.ts`). `CardTile` et le placeholder `.card-art` ne changent pas ici : l'image
+  dans la carte est #89. Tests : `tests/art.test.ts`.
 - **Erreurs** : toute erreur est une `EngineError { code, message, fatal }` (`parseEngineError`) ; le
   `message` anglais n'est jamais affiché, la table `ui/errors.fr.ts` fait foi. **Une nouvelle erreur
   Rust casse `tests/error-codes.test.ts` : ajouter son texte français** (et son code dans
@@ -323,8 +334,8 @@ même, alimenté par `toScreenModel` :
 - **Pastille de deck (#94)** : une pastille ronde SVG (`aria-hidden`, décorative, classes `card-emblem
   card-emblem-bolt|battlements`) en haut à droite de l'illustration : éclair (Ruée), créneaux (Rempart) ; le
   cadre reste commun. Type fermé `DeckEmblem` et `DeckRef.emblem?` dans `game/controller.ts` (absent = pas de
-  pastille, pas de trou) ; `DeckInfo.emblem?` et la table provisoire `DECK_EMBLEMS` (un seul export, `#88`
-  la remplacera) dans `data/starter.ts`, lues par `App` seul comme le reste de `data/` : l'emblème voyage
+  pastille, pas de trou) ; `DeckInfo.emblem?` et la table provisoire `DECK_EMBLEMS` (un seul export, qui
+  reste provisoire : l'art de deck est hors de `#88`) dans `data/starter.ts`, lues par `App` seul comme le reste de `data/` : l'emblème voyage
   dans `DeckRef` -> `snapshot.players` -> `SideModel.emblem` (`toScreenModel`), `ui/` et `game/` n'importent
   jamais `data/`. `Board`, `Hand` et `DiscardDialog` reçoivent l'emblème du camp propriétaire (le siège de la
   carte, jamais le joueur courant : plateaux, deux mains, défausses). Le nom accessible ne change pas (le
