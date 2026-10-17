@@ -73,7 +73,7 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
 | Dossier | Contenu |
 |---|---|
 | `src/engine/` | contrat JSON typé (`types.ts`, écrit depuis les sources Rust), `GameSession` (`session.ts`, le seul accès au moteur), adaptateur `createWasmSession` (`wasm-session.ts`), chargeur mémoïsé `loadEngine` (`load.ts`), erreurs (`errors.ts`) |
-| `src/game/` | logique du client sans React ni WASM : la graine (`seed.ts`), les types de l'art (`art.ts` : `ArtInfo`, `ArtLookup`), les enregistrements de journal (`records.ts`), la politique de l'ordinateur (`computer.ts`), le contrôleur de la partie locale (`controller.ts`), le démarrage sans exception (`start.ts`) et le modèle d'écran (`screen-model.ts`) |
+| `src/game/` | logique du client sans React ni WASM : la graine (`seed.ts`), les types de l'art (`art.ts` : `ArtInfo`, `ArtLookup`), les enregistrements de journal (`records.ts`), les limites de l'ordinateur (`computer.ts`), le contrôleur de la partie locale (`controller.ts`), le démarrage sans exception (`start.ts`) et le modèle d'écran (`screen-model.ts`) |
 | `src/ui/` | composants et textes français : écrans (`Home`, `GameScreen`, `EndScreen`, `FatalScreen`), éléments (`HeroBar`, `TimeBand`, `Board`, `CardTile`, `Hand`, `ActionBar`, `ThinkingIndicator`, `ErrorBanner`, `LogBar`, `LogHistory`), dialogues (`Dialog`, `ConfirmDialog`, `AttackSheet`, `LogDrawer`, `DiscardDialog`, `CardDetailSheet`), détail de carte (`CardDetail`, `card-effects.ts`, `keywords.fr.ts`, `card-icons.tsx`), textes (`fr.ts`, `errors.fr.ts`), le contexte d'art `ArtContext.tsx` (`ArtProvider`, `useArtLookup`), `consequence.ts`, l'état du flux d'attaque `attack-state.ts` et le formateur du journal `log-format.ts` |
 | `src/App.tsx` | assemble les écrans ; le seul à lire `data/starter`, `data/art`, `data/build` et `engine/load` |
 | `src/data/starter.ts` | données `starter` importées en `?raw` |
@@ -112,7 +112,8 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
   `message` anglais n'est jamais affiché, la table `ui/errors.fr.ts` fait foi. **Une nouvelle erreur
   Rust casse `tests/error-codes.test.ts` : ajouter son texte français** (et son code dans
   `ENGINE_CODES`). Les erreurs de règle laissent l'état intact ; les codes `internal_error`,
-  `serialization_failed`, `computer_stuck` et `computer_chain_limit` sont fatals.
+  `serialization_failed`, `computer_stuck` et `computer_chain_limit` sont fatals. `not_active_seat`,
+  `invalid_policy` et `computer_stuck` viennent du binding (`ENGINE_CODES`) ; `computer_chain_limit` est un code du client.
 - **Contrat JSON** : `EVENT_KINDS` doit égaler les variantes de `enum Event`
   (`crates/engine/src/rules.rs`) ; `tests/wasm.contract.test.ts` vérifie les clés exactes de chaque
   événement, action et aperçu sur 80 parties réelles. Ajouter une variante côté Rust casse ce test.
@@ -156,15 +157,24 @@ les deux sièges, aucun pilote).
   d'un aperçu du snapshot courant : un aperçu périmé (double appui) donne `stale`, sans appel au moteur
   ni bandeau d'erreur ; hors tour, `not-your-turn`. Le moteur reste le juge : une erreur de règle
   (`refused`) laisse état, vues et `legal` inchangés et pose `snapshot.error`.
-- **Ordinateur** (`computer.ts`) : `ComputerPolicy(actions, rng) => indice`, `randomPolicy` par défaut.
-  Le pilote filtre `"concede"` avant la politique : **l'ordinateur ne reçoit jamais l'abandon** ; si
-  seule `"concede"` reste, erreur `computer_stuck` (phase `fatal`, partie intacte), jamais un abandon
-  silencieux. Au-delà de `MAX_COMPUTER_ACTIONS_PER_CHAIN` = 1000 actions de suite : `computer_chain_limit`,
-  jamais une troncature. Le premier snapshot (`computer-turn`, 0 action) est publié avant la première
-  action, suivi d'un `yield` ; ensuite un snapshot et un `yield` toutes les `COMPUTER_SLICE_MS` = 12 ms
-  pour que le navigateur reste réactif (0,06 ms par action sous Node : garantie de non-gel, pas une
-  nécessité). Un seul générateur `mulberry32(deriveAiSeed(seed))` pour toute la partie : même graine et
-  mêmes actions humaines = même partie, ordinateur compris.
+- **Ordinateur** : **le moteur choisit**, le client ne contient ni politique ni règle. Le pilote appelle
+  `GameSession.computerAction(seat, draw)` (`Game.computer_action(seat, "random", draw)` du binding, la
+  politique `"random"` étant la constante `COMPUTER_POLICY` de `engine/wasm-session.ts`, jamais de `game/` ni
+  de `ui/`) : l'action rendue est toujours une action légale, **jamais `"concede"`** ; si seule `"concede"`
+  reste, le binding lève `computer_stuck` (fatal : phase `fatal`, partie intacte), jamais un abandon
+  silencieux. `draw` est un `u32` validé côté client (sinon `internal_error`, jamais réduit en silence par le
+  binding). `src/game/computer.ts` ne garde que `MAX_COMPUTER_ACTIONS_PER_CHAIN` = 1000 (au-delà :
+  `computer_chain_limit`, jamais une troncature), `COMPUTER_SLICE_MS` = 12 et `COMPUTER_STEP_DELAY_MS` = 0.
+  Le premier snapshot (`computer-turn`, 0 action) est publié avant la première action, suivi d'un `yield` ;
+  ensuite un snapshot et un `yield` toutes les `COMPUTER_SLICE_MS` ms pour que le navigateur reste réactif
+  (garantie de non-gel, pas une nécessité). **Une tirée de `mulberry32(deriveAiSeed(seed))` par action de
+  l'ordinateur** (`Math.floor(rng() * 2 ** 32)`) : même graine et mêmes actions humaines = même partie,
+  ordinateur compris. **Depuis #121/#142 la suite d'actions de l'ordinateur pour une graine donnée n'est
+  plus celle d'avant** (le moteur tire par `ChaCha8Rng`, plus par `floor(mulberry32() * n)`) : changement
+  unique, rien n'est persisté. Tout test qui épingle une séquence de l'ordinateur doit être une propriété ou
+  chercher sa graine (`seedWithComputerOpening`, `seedWithQuietHumanAction` dans `tests/support/policies.ts`).
+  `ControllerDeps.chooseAction` (et `App({ deps }).chooseAction`) est un point d'injection **réservé aux
+  tests** (absent en production).
 - **Enregistrements de journal** (`records.ts`, pur) : un `StepRecord` par pas (`seq` 0 = démarrage),
   avec les événements bruts, les noms et PV courants **d'après** l'action des cartes citées (lus dans
   les vues fournies) et les héros. Contre l'ordinateur le contrôleur ne demande que `view("One")` : un
@@ -182,7 +192,7 @@ les deux sièges, aucun pilote).
   null`, seulement `handCount`), libellés « Toi — deck » / « Ordinateur — deck ». Deux camps : le camp
   actif en bas, mains des deux camps visibles, pioches en nombre seulement, libellés « Camp 1 — deck » /
   « Camp 2 — deck » (le numéro de camp distingue le miroir). `budget` et `active` viennent de la vue.
-- **Tests** : `tests/support/policies.ts` porte `stallPolicy`, **de test seulement** : une politique
+- **Tests** : `tests/support/policies.ts` porte `stallPolicy` (forme `chooseAction`), **de test seulement** : une politique
   d'usure (effet de héros, puis invocation, puis attaque d'une créature, en dernier attaque du héros ;
   première action après un tri stable, `concede` exclue). L'**épuisement n'arrive jamais au hasard**
   (240 parties aléatoires : toutes finissent par `hero_down`) ; avec `stallPolicy` jouée par les deux
@@ -224,7 +234,7 @@ même, alimenté par `toScreenModel` :
 - **`App`** (`src/App.tsx`) : charge le moteur pendant l'écran de chargement (« Lancer la partie » reste
   inactif ; échec : message français et « Recharger »), garde la `GameFactory`, puis assemble la session
   de façon **synchrone** (`createWasmSession` avec `CARDS_JSON`, `DECKS_JSON`, `DATA_VERSION`). Elle reçoit
-  des dépendances par prop pour les tests (`App({ deps })` : `engine`, `crypto`, `policy`, `scheduler`,
+  des dépendances par prop pour les tests (`App({ deps })` : `engine`, `crypto`, `chooseAction`, `scheduler`,
   `now`), **sans mock du moteur** : les tests fournissent le vrai WASM, et une graine aléatoire se
   contrôle par un `crypto` factice (`null` simule l'absence d'entropie). `Home` reçoit les decks et la
   version par props : `ui/` n'importe ni `data/starter` ni `engine/load` (`tests/architecture.test.ts`).
