@@ -18,7 +18,8 @@ Format détaillé : `README.md` à la racine (« Format du rapport du simulateur
 comment en tirer un verdict.
 
 - **Une section par politique.** Chaque politique rejoue les mêmes graines de moteur : les
-  sections se comparent deux à deux (comparaison appariée).
+  sections se comparent deux à deux (comparaison appariée). Cela vaut **entre politiques d'un même
+  jeu de données**, pas entre deux versions du jeu (voir « Lire un diff »).
 - **Tableau 1** : taux de victoire de chaque deck, part des parties gagnées par le siège One,
   part du premier joueur, parties interrompues. Chaque taux porte son intervalle de Wilson à 95 %.
   **Un taux hors de la bande avec un intervalle qui chevauche la bande n'est pas un déséquilibre
@@ -49,6 +50,29 @@ parties terminées ; les seuils sont des constantes publiques de `duel_simulator
 - Une alerte, une paire hors bande ou un miroir au-dessus de 57 % sont des **lignes d'information** :
   le programme sort avec le code 0. Seul un rapport qui contredit ses propres invariants sort avec
   le code 1, sans rien écrire sur stdout.
+
+### Lire un diff (`--against`)
+
+`duel-simulator 2000 --set starter@2.0.0 --against starter@1.1.0 --seed 1` imprime le diff seul,
+« 2.0.0 contre 1.1.0 » : la référence (avant) est `--against`, le candidat (après) est `--set`,
+delta = après - avant, en points (différence des pour-mille entiers affichés).
+
+- **Deux échantillons indépendants.** La graine d'une partie dépend de l'indice de son matchup, et
+  des données différentes changent de toute façon les parties : un delta de l'ordre de l'intervalle
+  de Wilson (environ +-2,2 points à 2000 parties) est du **bruit d'échantillonnage**, pas un effet
+  du jeu de données. Seul `--set X --against X` rejoue exactement les mêmes parties (tous les deltas
+  valent 0). La ligne `NOTE: the two batches are independent samples` le rappelle chaque fois que
+  les jeux diffèrent.
+- **`significant`** : `yes` quand les intervalles de Wilson à 95 % de la part de A (paire croisée)
+  ou du premier joueur (miroir) ne se chevauchent pas ; heuristique conservatrice (elle manque de
+  petits effets réels, elle ne crie presque jamais au loup), jamais un test statistique complet.
+- **`new` / `removed`** : paire (ou politique) présente d'un seul côté. L'appariement se fait par la
+  clé `(deck A, deck B, type)`, pas par l'indice ; une paire croisée dont l'ordre des decks est
+  inversé d'une version à l'autre apparaît `removed` + `new` (l'ordre de `decks.json` est canonique).
+- **`NOTE:`** : un paramètre (graine, parties, plafond, règles, politiques) qui diffère rend les
+  deltas non comparables ; jamais un échec, jamais un code de sortie.
+- La synthèse reprend celle du rapport (pire paire, bande 45-55 %, premier joueur en miroir) sous la
+  forme `avant -> après`.
 
 ### « Équilibré » n'est pas un test
 
