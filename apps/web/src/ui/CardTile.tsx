@@ -16,12 +16,10 @@ export interface CardTileProps {
   /** A real `<button>` only when given (the attack flow of #66 adds the selection); else a plain element. */
   onPress?: () => void;
   disabled?: boolean;
-  /** `aria-disabled` instead of `disabled`: still focusable and announced, a press does nothing. */
+  /** `aria-disabled` instead of `disabled`: still focusable and announced, a press does nothing (target choice: unavailable cards). */
   inactive?: boolean;
   /** The press opens a dialog (the card detail): `aria-haspopup="dialog"`. */
   opensDialog?: boolean;
-  /** `aria-pressed` (a toggle) when defined. */
-  pressed?: boolean;
   mark?: CardMark;
   /** A card in a discard: a "destroyed" icon and legend instead of the life (never "PV 0"). Not interactive. */
   destroyed?: boolean;
@@ -80,7 +78,7 @@ export function CardFace({ card, cost, destroyed = false, emblem }: { card: Card
   );
 }
 
-export function CardTile({ card, cost, timeLeft, handsOver = false, destroyed = false, emblem, onPress, disabled = false, inactive = false, pressed, mark, opensDialog = false }: CardTileProps) {
+export function CardTile({ card, cost, timeLeft, handsOver = false, destroyed = false, emblem, onPress, disabled = false, inactive = false, mark, opensDialog = false }: CardTileProps) {
   // The visible mark is part of the accessible name too (label in name).
   const label = cardLabel(card, { cost, handsOver, timeLeft, mark, destroyed });
   const hasTags = card.provocation || cost !== undefined || mark !== undefined || destroyed;
@@ -114,7 +112,6 @@ export function CardTile({ card, cost, timeLeft, handsOver = false, destroyed = 
     <button
       type="button"
       aria-label={label}
-      aria-pressed={pressed}
       aria-haspopup={opensDialog ? "dialog" : undefined}
       aria-disabled={inactive ? true : undefined}
       className={classes}

@@ -10,3 +10,12 @@ export async function playTile(user: ReturnType<typeof userEvent.setup>, tile: H
   await user.click(tile);
   await user.click(playButton());
 }
+
+/** The effect line "Attaque (N) : inflige D dégâts" of an open detail: the attack's button (#106). */
+export const attackLine = () => within(screen.getByRole("dialog")).getByRole("button", { name: /^Attaque \(/ });
+
+/** Opens the detail of one of my board tiles and presses its attack line: the attacker is selected. */
+export async function selectAttacker(user: ReturnType<typeof userEvent.setup>, tile: HTMLElement): Promise<void> {
+  await user.click(tile);
+  await user.click(attackLine());
+}

@@ -76,6 +76,10 @@ export const fr = {
   playCost: (n: number) => `Jouer (${n} temps)`,
   playUnavailableComputer: "C'est le tour de l'ordinateur : tu pourras jouer cette carte à ton tour.",
   playUnavailable: "Cette carte ne peut pas être jouée maintenant.",
+  // Attacking from the detail of a board creature (#106).
+  chooseTarget: "Choisis une cible",
+  attackUnavailableComputer: "C'est le tour de l'ordinateur : tu pourras attaquer à ton tour.",
+  attackUnavailable: "Cette créature ne peut pas attaquer maintenant.",
   noCreature: "Aucune créature",
 
   // Card detail (#104). The effect line's words live in `card-effects.ts` next to its one builder.

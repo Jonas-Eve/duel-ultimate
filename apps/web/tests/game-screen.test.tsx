@@ -73,7 +73,7 @@ describe("the permanent information", () => {
       [true, v.you.board],
       [false, v.opponent.board],
     ] as const) {
-      // Mine are the attack flow's buttons (#66), the opponent's open the read-only detail (#104).
+      // Every tile of a board opens the card detail (#104, #106): mine from there start an attack.
       const names = within(board(mine))
         .getAllByRole("button")
         .map((g) => g.getAttribute("aria-label"));
@@ -326,7 +326,7 @@ describe("the computer's turn", () => {
     let t = 0;
     const c = makeController("bulwark", "rush", 4, { now: () => (t += 50) }); // every action overruns the slice
     const { container } = mountGame(c);
-    const live = container.querySelector("[aria-live='polite']") as HTMLElement;
+    const live = container.querySelector(".announce") as HTMLElement;
     const seen: string[] = [];
     const publications: number[] = [];
     c.subscribe(() => publications.push(c.getSnapshot().computerSteps));
@@ -344,7 +344,7 @@ describe("the computer's turn", () => {
     const c = makeController("bulwark", "rush", 4);
     const { container } = mountGame(c);
     await waitFor(() => expect(c.getSnapshot().phase).toBe("human-turn"));
-    const live = container.querySelector("[aria-live='polite']") as HTMLElement;
+    const live = container.querySelector(".announce") as HTMLElement;
     expect(live.textContent).toMatch(/L'ordinateur a joué \d+ actions?\. À toi de jouer\./);
 
     const snap = c.getSnapshot();
@@ -368,7 +368,7 @@ describe("the computer's turn", () => {
     const snap = c.getSnapshot();
     const handOver = snap.legal.findIndex((p) => p.hands_over && p.ends_game === null);
     expect(handOver).toBeGreaterThanOrEqual(0);
-    expect(container.querySelector("[aria-live='polite']")?.textContent ?? "").toBe("");
+    expect(container.querySelector(".announce")?.textContent ?? "").toBe("");
     await act(async () => {
       c.submit(snap.legal[handOver]);
     });

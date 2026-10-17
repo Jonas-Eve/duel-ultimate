@@ -57,7 +57,6 @@ describe("the compact card", () => {
         cost={2}
         timeLeft="Reste 3"
         onPress={() => undefined}
-        pressed={false}
         mark="selected"
       />,
     );
@@ -68,6 +67,8 @@ describe("the compact card", () => {
     expect(button.querySelector(".card-tags")!.textContent).toContain("Reste 3");
     expect(button.querySelector(".card-tags .card-mark")!.textContent).toBe("Sélectionnée");
     expect(button.classList.contains("card-selected")).toBe(true);
+    // The selection is shown by the mark and the border, never as a toggle.
+    expect(button.hasAttribute("aria-pressed")).toBe(false);
   });
 
   test("a hand-over reads 'Passe la main' under the card and in the name", () => {

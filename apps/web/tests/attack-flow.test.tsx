@@ -3,10 +3,12 @@ import { describe, expect, test } from "vitest";
 import type { ActionPreview, CardView } from "../src/engine/types";
 import { isActivate, isAttack, isAttackBy, isPlay } from "../src/engine/types";
 import type { Snapshot } from "../src/game/controller";
+import { effectLineLabel } from "../src/ui/card-effects";
 import { decorateSession, newSession, type SessionProbe } from "./support/engine";
 import { GameController } from "../src/game/controller";
 import { config } from "./support/config";
 import { playUntil, realDeps, settle } from "./support/policies";
+import { attackLine, selectAttacker } from "./support/play";
 import { inAct, makeController, mountGame, useRealEngine } from "./support/ui";
 
 useRealEngine();
@@ -110,54 +112,110 @@ const targetOf = (p: ActionPreview): "hero" | number => {
 };
 
 describe("selecting an attacker", () => {
-  test("a press selects (aria-pressed, visible text), a second press, Escape or the cancel button deselect", async () => {
+  test("the attack line selects (visible text, no aria-pressed), the cancel button or Escape deselect; a touch on the tile alone selects nothing", async () => {
     const g = await findGame("rush", "bulwark", summoner, withoutTaunt);
     const { user } = mountGame(g.c);
     const { index } = attackerOf(g.c.getSnapshot());
 
-    expect(myTiles()[index].getAttribute("aria-pressed")).toBe("false");
+    expect(myTiles()[index].hasAttribute("aria-pressed")).toBe(false);
     expect(screen.queryByText("Sélectionnée")).toBeNull();
 
     await user.click(myTiles()[index]);
-    expect(myTiles()[index].getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.queryByText("Sélectionnée")).toBeNull();
+    await user.keyboard("{Escape}");
+
+    await selectAttacker(user, myTiles()[index]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(myTiles()[index].hasAttribute("aria-pressed")).toBe(false);
     expect(within(myTiles()[index]).getByText("Sélectionnée")).toBeTruthy();
+    expect(myTiles()[index].getAttribute("aria-label")).toContain("sélectionnée");
 
-    await user.click(myTiles()[index]);
-    expect(myTiles()[index].getAttribute("aria-pressed")).toBe("false");
-    expect(screen.queryByText("Sélectionnée")).toBeNull();
-
-    await user.click(myTiles()[index]);
     await user.click(screen.getByRole("button", { name: "Annuler la sélection" }));
-    expect(myTiles()[index].getAttribute("aria-pressed")).toBe("false");
+    expect(screen.queryByText("Sélectionnée")).toBeNull();
     expect(screen.queryByRole("button", { name: "Annuler la sélection" })).toBeNull();
 
-    await user.click(myTiles()[index]);
+    await selectAttacker(user, myTiles()[index]);
     await user.keyboard("{Escape}");
-    expect(myTiles()[index].getAttribute("aria-pressed")).toBe("false");
+    expect(screen.queryByText("Sélectionnée")).toBeNull();
     expect(g.probe.calls.apply).toBe(g.probe.applied.length);
+  });
+
+  test("pressing the attack line again is idempotent: the creature stays selected", async () => {
+    const g = await findGame("rush", "bulwark", summoner, withoutTaunt);
+    const { user } = mountGame(g.c);
+    const { index } = attackerOf(g.c.getSnapshot());
+    await selectAttacker(user, myTiles()[index]);
+    await selectAttacker(user, myTiles()[index]);
+    expect(within(myTiles()[index]).getByText("Sélectionnée")).toBeTruthy();
+    expect(screen.getAllByText("Sélectionnée")).toHaveLength(1);
+  });
+
+  test("the attack line is a 44 px button named by the single effect-line function, and says 'Choisis une cible' politely once pressed", async () => {
+    const g = await findGame("rush", "bulwark", summoner, withoutTaunt);
+    const { user } = mountGame(g.c);
+    const { index, card } = attackerOf(g.c.getSnapshot());
+    await user.click(myTiles()[index]);
+    const line = attackLine();
+    expect(line.tagName).toBe("BUTTON");
+    expect(line.className).toContain("btn");
+    expect(line.getAttribute("aria-label") ?? line.textContent).toBe(effectLineLabel({ name: "Attaque", cost: card.attack_cost, damage: card.force }));
+    expect(line.textContent).toContain(`inflige ${card.force} dégât`);
+    expect(screen.queryByText("Choisis une cible")).toBeNull();
+    await user.click(line);
+    const hint = screen.getByText("Choisis une cible");
+    expect(hint.closest("[aria-live='polite']")).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "Annuler la sélection" }));
+    expect(screen.queryByText("Choisis une cible")).toBeNull();
+  });
+
+  test("Escape inside the detail closes only the detail and keeps a selection; Escape outside removes it", async () => {
+    const g = await findGame("rush", "bulwark", summoner, (s) => withoutTaunt(s) && mine(s).length >= 2);
+    const { user } = mountGame(g.c);
+    await selectAttacker(user, myTiles()[0]);
+    await user.click(myTiles()[1]);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(within(myTiles()[0]).getByText("Sélectionnée")).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByText("Sélectionnée")).toBeNull();
+  });
+
+  test("during the choice of a target, a touch on another creature of mine opens its detail, and its line changes the attacker", async () => {
+    const g = await findGame("rush", "bulwark", summoner, (s) => withoutTaunt(s) && mine(s).length >= 2);
+    const { user } = mountGame(g.c);
+    const before = g.probe.calls.apply;
+    await selectAttacker(user, myTiles()[0]);
+    await user.click(myTiles()[1]);
+    expect(screen.getByRole("dialog", { name: mine(g.c.getSnapshot())[1].name! })).toBeTruthy();
+    expect(sheet()).toBeNull();
+    await user.click(attackLine());
+    expect(within(myTiles()[0]).queryByText("Sélectionnée")).toBeNull();
+    expect(within(myTiles()[1]).getByText("Sélectionnée")).toBeTruthy();
+    expect(g.probe.calls.apply).toBe(before);
+  });
+
+  test("the focus goes back to the attacker's tile once the detail has closed", async () => {
+    const g = await findGame("rush", "bulwark", summoner, withoutTaunt);
+    const { user } = mountGame(g.c);
+    const { index } = attackerOf(g.c.getSnapshot());
+    await selectAttacker(user, myTiles()[index]);
+    expect(document.activeElement).toBe(myTiles()[index]);
   });
 
   test("the cancel-selection button is a real 44 px target (class with the tap token)", async () => {
     const g = await findGame("rush", "bulwark", summoner, withoutTaunt);
     const { user } = mountGame(g.c);
-    await user.click(myTiles()[attackerOf(g.c.getSnapshot()).index]);
+    await selectAttacker(user, myTiles()[attackerOf(g.c.getSnapshot()).index]);
     const b = screen.getByRole("button", { name: "Annuler la sélection" });
     expect(b.tagName).toBe("BUTTON");
     expect(b.className).toContain("btn");
   });
-
-  test("selecting another creature moves the selection", async () => {
-    const g = await findGame("rush", "bulwark", summoner, (s) => withoutTaunt(s) && mine(s).length >= 2);
-    const { user } = mountGame(g.c);
-    await user.click(myTiles()[0]);
-    await user.click(myTiles()[1]);
-    expect(myTiles()[0].getAttribute("aria-pressed")).toBe("false");
-    expect(myTiles()[1].getAttribute("aria-pressed")).toBe("true");
-  });
 });
 
-describe("a creature with no legal attack is not selectable", () => {
-  test("during the computer's turn every creature of mine is aria-disabled and a press does nothing", async () => {
+describe("the attack line of a creature with no legal attack is inactive", () => {
+  test("during the computer's turn every tile opens its detail, whose attack line is aria-disabled with its reason and does nothing", async () => {
     // A gate that never opens keeps the computer "thinking": the board is mine, the main is not.
     const gate = { yield: () => new Promise<void>(() => undefined) };
     const c = makeController("rush", "bulwark", 3, { scheduler: gate });
@@ -171,23 +229,33 @@ describe("a creature with no legal attack is not selectable", () => {
     const tiles = myTiles();
     expect(tiles.length).toBeGreaterThan(0);
     for (const t of tiles) {
-      expect(disabled(t)).toBe(true);
+      // A tile is always openable; its attack line is inactive (focusable, with the reason as text) and does nothing.
+      expect(disabled(t)).toBe(false);
       await user.click(t);
-      expect(t.getAttribute("aria-pressed")).not.toBe("true");
+      const line = attackLine();
+      expect(disabled(line)).toBe(true);
+      expect(line.tabIndex).not.toBe(-1);
+      expect(within(screen.getByRole("dialog")).getByText("C'est le tour de l'ordinateur : tu pourras attaquer à ton tour.")).toBeTruthy();
+      await user.click(line);
+      expect(screen.queryByText("Sélectionnée")).toBeNull();
+      expect(screen.queryByText("Choisis une cible")).toBeNull();
+      await user.keyboard("{Escape}");
     }
-    expect(screen.queryByText("Sélectionnée")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("button", { name: "Annuler la sélection" })).toBeNull();
   });
 
-  test("a creature the engine lists no attack for is aria-disabled at my turn too", async () => {
+  test("the line is aria-disabled exactly when no `isAttackBy` preview exists, at my turn too", async () => {
     // Fresh summon: still, the engine lists attacks for every creature on a human turn, so this
-    // only asserts the rule: aria-disabled exactly when no `isAttackBy` preview exists.
+    // only asserts the rule.
     const g = await findGame("rush", "bulwark", summoner, withoutTaunt);
-    mountGame(g.c);
+    const { user } = mountGame(g.c);
     const s = g.c.getSnapshot();
-    mine(s).forEach((card, i) => {
-      expect(disabled(myTiles()[i])).toBe(!s.legal.some((p) => isAttackBy(card.id)(p.action)));
-    });
+    for (const [i, card] of mine(s).entries()) {
+      await user.click(myTiles()[i]);
+      expect(disabled(attackLine())).toBe(!s.legal.some((p) => isAttackBy(card.id)(p.action)));
+      await user.keyboard("{Escape}");
+    }
   });
 });
 
@@ -197,7 +265,7 @@ describe("without a taunt: the displayed targets are the engine's previews", () 
     const { user } = mountGame(g.c);
     const s = g.c.getSnapshot();
     const { index, attacks } = attackerOf(s);
-    await user.click(myTiles()[index]);
+    await selectAttacker(user, myTiles()[index]);
 
     const offered = new Set(attacks.map(targetOf));
     expect(offered.has("hero")).toBe(true);
@@ -215,7 +283,7 @@ describe("facing a taunt", () => {
     const { user } = mountGame(g.c);
     const s = g.c.getSnapshot();
     const { index, attacks } = attackerOf(s);
-    await user.click(myTiles()[index]);
+    await selectAttacker(user, myTiles()[index]);
 
     const offered = new Set(attacks.map(targetOf));
     expect(offered.has("hero")).toBe(false);
@@ -270,7 +338,7 @@ describe("facing a taunt", () => {
     const { user } = mountGame(g.c);
     const { index, attacks } = attackerOf(g.c.getSnapshot());
     expect(attacks.some((p) => targetOf(p) === "hero")).toBe(true);
-    await user.click(myTiles()[index]);
+    await selectAttacker(user, myTiles()[index]);
     expect(disabled(heroTarget())).toBe(false);
     expect(within(heroGroup()).getByText("Cible possible")).toBeTruthy();
   });
@@ -288,7 +356,7 @@ describe("the confirmation", () => {
     let handOvers = 0;
 
     for (const p of attacks) {
-      await user.click(myTiles()[index]);
+      await selectAttacker(user, myTiles()[index]);
       const target = targetOf(p);
       const tile = target === "hero" ? heroTarget() : theirTiles()[theirs(s).findIndex((x) => x.id === target)];
       await user.click(tile);
@@ -312,8 +380,8 @@ describe("the confirmation", () => {
 
       await user.click(within(box).getByRole("button", { name: "Annuler" }));
       expect(sheet()).toBeNull();
-      expect(myTiles()[index].getAttribute("aria-pressed"), "Annuler keeps the selection").toBe("true");
-      await user.click(myTiles()[index]);
+      expect(within(myTiles()[index]).getByText("Sélectionnée"), "Annuler keeps the selection").toBeTruthy();
+      await user.click(screen.getByRole("button", { name: "Annuler la sélection" }));
     }
     expect(g.probe.calls.apply).toBe(before);
     expect(handOvers).toBeGreaterThanOrEqual(0);
@@ -328,7 +396,7 @@ describe("the confirmation", () => {
       const s = g.c.getSnapshot();
       const p = s.legal.find((x) => isAttack(x.action) && x.hands_over === wantHandOver && x.ends_game === null)!;
       const attacker = (p.action as { attack: { attacker: number } }).attack.attacker;
-      await user.click(myTiles()[mine(s).findIndex((x) => x.id === attacker)]);
+      await selectAttacker(user, myTiles()[mine(s).findIndex((x) => x.id === attacker)]);
       const target = targetOf(p);
       await user.click(target === "hero" ? heroTarget() : theirTiles()[theirs(s).findIndex((x) => x.id === target)]);
       expect(/Passe la main/.test(sheet()!.textContent ?? "")).toBe(wantHandOver);
@@ -339,14 +407,14 @@ describe("the confirmation", () => {
     const g = await findGame("rush", "bulwark", summoner, withoutTaunt);
     const { user } = mountGame(g.c);
     const { index } = attackerOf(g.c.getSnapshot());
-    await user.click(myTiles()[index]);
+    await selectAttacker(user, myTiles()[index]);
     const tile = theirTiles()[0];
     await user.click(tile);
     expect(sheet()).not.toBeNull();
     expect(within(sheet()!).getByRole("button", { name: "Annuler" })).toBe(document.activeElement);
     await user.keyboard("{Escape}");
     expect(sheet()).toBeNull();
-    expect(myTiles()[index].getAttribute("aria-pressed")).toBe("true");
+    expect(within(myTiles()[index]).getByText("Sélectionnée")).toBeTruthy();
     expect(document.activeElement).toBe(theirTiles()[0]);
   });
 
@@ -358,7 +426,7 @@ describe("the confirmation", () => {
     const p = attacks.find((x) => targetOf(x) !== "hero") as ActionPreview;
     const before = g.probe.applied.length;
 
-    await user.click(myTiles()[index]);
+    await selectAttacker(user, myTiles()[index]);
     await user.click(theirTiles()[theirs(s).findIndex((x) => x.id === targetOf(p))]);
     await user.click(within(sheet()!).getByRole("button", { name: "Confirmer" }));
     await waitFor(() => expect(g.c.getSnapshot().phase).not.toBe("computer-turn"));
@@ -367,7 +435,6 @@ describe("the confirmation", () => {
     expect(sheet()).toBeNull();
     expect(screen.queryByText("Sélectionnée")).toBeNull();
     expect(screen.queryByRole("button", { name: "Annuler la sélection" })).toBeNull();
-    for (const t of screen.queryAllByRole("button")) expect(t.getAttribute("aria-pressed")).not.toBe("true");
     if (g.c.getSnapshot().phase !== "over") expect(document.activeElement).toBe(region());
     expect(screen.queryByRole("alert")).toBeNull();
   });
@@ -380,7 +447,7 @@ describe("the confirmation", () => {
     const p = attacks[0];
     const before = g.probe.calls.apply;
 
-    await user.click(myTiles()[index]);
+    await selectAttacker(user, myTiles()[index]);
     const target = targetOf(p);
     await user.click(target === "hero" ? heroTarget() : theirTiles()[theirs(s).findIndex((x) => x.id === target)]);
     await user.dblClick(within(sheet()!).getByRole("button", { name: "Confirmer" }));
@@ -420,7 +487,7 @@ describe("the confirmation", () => {
     const s = g.c.getSnapshot();
     const lethal = s.legal.find((p) => isAttack(p.action) && p.ends_game?.reason === "hero_down")!;
     const attacker = (lethal.action as { attack: { attacker: number } }).attack.attacker;
-    await user.click(myTiles()[mine(s).findIndex((x) => x.id === attacker)]);
+    await selectAttacker(user, myTiles()[mine(s).findIndex((x) => x.id === attacker)]);
     await user.click(heroTarget());
     const text = sheet()!.textContent ?? "";
     expect(text).toContain(`Coût d'attaque : ${lethal.cost}`);
@@ -452,7 +519,7 @@ describe("a selection never outlives the position it was made in", () => {
       const { user } = mountGame(g.c);
       const s = g.c.getSnapshot();
       const { index, card } = attackerOf(s);
-      await user.click(myTiles()[index]);
+      await selectAttacker(user, myTiles()[index]);
       const handOver = s.legal.find((p) => p.hands_over && p.ends_game === null && !isAttack(p.action) && p.action !== "concede") as ActionPreview;
       await inAct(async () => {
         g.c.submit(handOver);
@@ -462,7 +529,6 @@ describe("a selection never outlives the position it was made in", () => {
       if (after.phase !== "human-turn" || !mine(after).some((x) => x.id === card.id)) continue;
       meaningful += 1;
       expect(screen.queryByText("Sélectionnée")).toBeNull();
-      for (const t of myTiles()) expect(t.getAttribute("aria-pressed")).not.toBe("true");
       expect(screen.queryByRole("button", { name: "Annuler la sélection" })).toBeNull();
     }
     expect(meaningful).toBe(1);
@@ -473,7 +539,7 @@ describe("a selection never outlives the position it was made in", () => {
     const { user } = mountGame(g.c);
     const s = g.c.getSnapshot();
     const { index } = attackerOf(s);
-    await user.click(myTiles()[index]);
+    await selectAttacker(user, myTiles()[index]);
     await user.click(theirTiles()[0]);
     expect(sheet()).not.toBeNull();
     const handOver = s.legal.find((p) => p.hands_over && p.ends_game === null && !isAttack(p.action) && p.action !== "concede") as ActionPreview;
@@ -497,7 +563,7 @@ describe("riposte", () => {
     const s = g.c.getSnapshot();
     const { index } = attackerOf(s);
     const wolfIndex = theirs(s).findIndex((x) => x.name === "Loup hérissé");
-    await user.click(myTiles()[index]);
+    await selectAttacker(user, myTiles()[index]);
     const wolf = theirTiles()[wolfIndex];
     expect(wolf.getAttribute("aria-label")).toContain("riposte 1");
     expect(within(wolf).getByText("Cible possible")).toBeTruthy();
@@ -543,8 +609,8 @@ describe("two camps", () => {
     campNames = { bottom: camp(active), top: camp(active === "One" ? "Two" : "One") };
     const v = s.views[active]!;
     const attacker = v.you.board.findIndex((x) => s.legal.some((p) => isAttackBy(x.id)(p.action)));
-    await user.click(myTiles()[attacker]);
-    expect(myTiles()[attacker].getAttribute("aria-pressed")).toBe("true");
+    await selectAttacker(user, myTiles()[attacker]);
+    expect(within(myTiles()[attacker]).getByText("Sélectionnée")).toBeTruthy();
     const offered = new Set(s.legal.filter((p) => isAttackBy(v.you.board[attacker].id)(p.action)).map(targetOf));
     v.opponent.board.forEach((card, i) => expect(disabled(theirTiles()[i])).toBe(!offered.has(card.id)));
     expect(disabled(heroTarget())).toBe(!offered.has("hero"));
