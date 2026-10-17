@@ -160,6 +160,7 @@ impl Report {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use duel_engine::RuleSet;
 
     #[allow(clippy::too_many_arguments)]
     fn matchup(
@@ -191,11 +192,16 @@ mod tests {
 
     /// Deck names deliberately not in sorted order.
     fn sample() -> Report {
+        sample_with(RuleSet::legacy())
+    }
+
+    fn sample_with(rules: RuleSet) -> Report {
         Report {
             set: "fixture@1.0.0".into(),
             seed: 7,
             games_per_matchup: 100,
             max_actions: 10_000,
+            rules,
             matchups: vec![
                 matchup(
                     "Ruée",
@@ -235,7 +241,7 @@ mod tests {
     }
 
     const GOLDEN: &str = "\
-set: fixture@1.0.0 | seed: 7 | games per matchup: 100 | action cap: 10000
+set: fixture@1.0.0 | seed: 7 | games per matchup: 100 | action cap: 10000 | rules: hero_riposte=off board_limit=none
 matchup          games             wins A             wins B       first player  mean actions  hero down  exhaustion  concede  interrupted
 ---------------  -----  -----------------  -----------------  -----------------  ------------  ---------  ----------  -------  -----------
 Ruée vs Rempart    100  60.0% [50.2-69.1]  40.0% [30.9-49.8]  55.0% [45.2-64.4]          40.0         70          20       10            0
@@ -246,6 +252,35 @@ Aigle (mirror)      20                  -                  -                n/a 
     #[test]
     fn golden_render() {
         assert_eq!(sample().render(), GOLDEN);
+    }
+
+    #[test]
+    fn non_default_rules_only_change_the_header_line() {
+        let rules = RuleSet {
+            hero_riposte: true,
+            board_limit: Some(5),
+        };
+        let text = sample_with(rules).render();
+        let (header, rest) = text.split_once('\n').expect("a header line");
+        assert_eq!(
+            header,
+            "set: fixture@1.0.0 | seed: 7 | games per matchup: 100 | action cap: 10000 | rules: hero_riposte=on board_limit=5"
+        );
+        assert_eq!(rest, GOLDEN.split_once('\n').expect("a header line").1);
+    }
+
+    #[test]
+    fn rules_label_writes_both_options_in_declaration_order() {
+        let label = |hero_riposte, board_limit| {
+            rules_label(&RuleSet {
+                hero_riposte,
+                board_limit,
+            })
+        };
+        assert_eq!(label(false, None), "hero_riposte=off board_limit=none");
+        assert_eq!(label(true, Some(5)), "hero_riposte=on board_limit=5");
+        assert_eq!(label(false, Some(1)), "hero_riposte=off board_limit=1");
+        assert_eq!(label(true, None), "hero_riposte=on board_limit=none");
     }
 
     #[test]

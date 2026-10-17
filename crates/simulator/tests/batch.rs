@@ -30,6 +30,7 @@ fn config(games: u64, seed: u64) -> BatchConfig {
         seed,
         max_actions: DEFAULT_MAX_ACTIONS,
         data_versions: vec!["test@0".to_owned()],
+        rules: RuleSet::default(),
     }
 }
 
@@ -567,4 +568,24 @@ fn a_higher_initiative_in_the_data_alone_always_starts() {
         report.matchups[0].first_player_wins,
         report.matchups[0].wins_b
     );
+}
+
+// Rules: the report names the rules the batch was given.
+
+#[test]
+fn the_report_carries_the_rules_of_the_config() {
+    for rules in [
+        RuleSet::default(),
+        RuleSet::legacy(),
+        RuleSet {
+            hero_riposte: true,
+            board_limit: Some(5),
+        },
+    ] {
+        let config = BatchConfig {
+            rules,
+            ..config(2, 1)
+        };
+        assert_eq!(run_batch(&fixture(), &config, &random_policy).rules, rules);
+    }
 }

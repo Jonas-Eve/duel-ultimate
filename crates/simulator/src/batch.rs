@@ -242,3 +242,41 @@ fn tally_game(tally: &mut MatchupReport, record: &GameRecord) {
     }
     tally.total_actions += u64::from(record.actions);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn contender(id: &str) -> Contender {
+        let contenders = contenders_from(
+            include_str!("../../../data/fixture/1.0.0/cards.json"),
+            include_str!("../../../data/fixture/1.0.0/decks.json"),
+        )
+        .expect("the fixture is valid");
+        contenders
+            .into_iter()
+            .find(|contender| contender.id == id)
+            .expect("a deck of the fixture")
+    }
+
+    #[test]
+    fn game_setup_copies_the_rules_and_the_data_versions_of_the_config() {
+        let contenders = [contender("aggro"), contender("control")];
+        let rules = RuleSet {
+            hero_riposte: true,
+            board_limit: Some(5),
+        };
+        let config = BatchConfig {
+            games: 1,
+            seed: 0,
+            max_actions: DEFAULT_MAX_ACTIONS,
+            data_versions: vec!["test@0".to_owned()],
+            rules,
+        };
+        let setup = game_setup(&contenders, &config, 1, 0);
+        assert_eq!(setup.rules, rules);
+        assert_eq!(setup.data_versions, ["test@0"]);
+        assert_eq!(setup.one.hero, contenders[1].player.hero);
+        assert_eq!(setup.two.hero, contenders[0].player.hero);
+    }
+}

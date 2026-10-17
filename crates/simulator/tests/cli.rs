@@ -1,6 +1,8 @@
 //! Runs the real binary: the report's structure and determinism (never a win rate), and a bad
 //! command line is a message on stderr and exit code 2, never a panic.
 
+use duel_engine::RuleSet;
+use duel_simulator::rules_label;
 use std::process::{Command, Output};
 
 fn run(args: &[&str]) -> Output {
@@ -105,6 +107,19 @@ fn a_bad_command_line_never_panics() {
         &["0"],
         &["--set", "starter@9.9.9"],
         &["--seed", "1", "--seed", "2"],
+        &["--hero-riposte"],
+        &["--hero-riposte", "ON"],
+        &["--hero-riposte", "yes"],
+        &["--hero-riposte", "1"],
+        &["--hero-riposte", "on", "--hero-riposte", "off"],
+        &["--board-limit"],
+        &["--board-limit", "0"],
+        &["--board-limit", "31"],
+        &["--board-limit", "-1"],
+        &["--board-limit", "abc"],
+        &["--board-limit", "1.5"],
+        &["--board-limit", "99999999999"],
+        &["--board-limit", "5", "--board-limit", "none"],
     ] {
         let output = run(args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
@@ -114,5 +129,85 @@ fn a_bad_command_line_never_panics() {
             !message.is_empty() && !message.contains("panicked"),
             "{message}"
         );
+    }
+}
+
+/// The first line of a report.
+fn header(args: &[&str]) -> String {
+    let output = run(args);
+    assert!(output.status.success(), "{args:?}");
+    stdout(&output)
+        .lines()
+        .next()
+        .expect("a header line")
+        .to_owned()
+}
+
+#[test]
+fn the_header_names_the_default_rules_of_the_engine() {
+    assert_eq!(
+        header(&["20"]),
+        format!(
+            "set: starter@1.1.0 | seed: 0 | games per matchup: 20 | action cap: 10000 | rules: {}",
+            rules_label(&RuleSet::default())
+        )
+    );
+}
+
+#[test]
+fn the_header_names_the_rules_given_on_the_command_line() {
+    let args = ["20", "--hero-riposte", "on", "--board-limit", "5"];
+    assert_eq!(
+        header(&args),
+        "set: starter@1.1.0 | seed: 0 | games per matchup: 20 | action cap: 10000 | rules: hero_riposte=on board_limit=5"
+    );
+    assert_eq!(stdout(&run(&args)), stdout(&run(&args)));
+}
+
+#[test]
+fn a_rule_not_given_keeps_the_engine_default() {
+    let default = RuleSet::default();
+    assert_eq!(
+        header(&["20", "--hero-riposte", "on"])
+            .rsplit_once("rules: ")
+            .map(|(_, rules)| rules.to_owned()),
+        Some(rules_label(&RuleSet {
+            hero_riposte: true,
+            ..default
+        }))
+    );
+    assert_eq!(
+        header(&["20", "--board-limit", "7"])
+            .rsplit_once("rules: ")
+            .map(|(_, rules)| rules.to_owned()),
+        Some(rules_label(&RuleSet {
+            board_limit: Some(7),
+            ..default
+        }))
+    );
+}
+
+/// The options change nothing yet: this module is deleted or rewritten on purpose by #127,
+/// which gives them their behaviour. Until then a batch with options plays the default batch.
+mod while_inert {
+    use super::*;
+
+    #[test]
+    fn the_matchup_lines_of_a_batch_with_options_are_those_of_the_default_batch() {
+        for set in ["starter", "fixture"] {
+            let base = stdout(&run(&["30", "--set", set, "--seed", "4"]));
+            let optioned = stdout(&run(&[
+                "30",
+                "--set",
+                set,
+                "--seed",
+                "4",
+                "--hero-riposte",
+                "on",
+                "--board-limit",
+                "5",
+            ]));
+            assert_eq!(matchup_lines(&base), matchup_lines(&optioned), "{set}");
+        }
     }
 }
