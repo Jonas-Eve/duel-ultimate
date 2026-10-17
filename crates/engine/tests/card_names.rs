@@ -4,7 +4,8 @@
 
 use duel_cards::{CardsError, MAX_NAME_LEN, parse_cards, parse_decks};
 use duel_engine::{
-    Action, GameSetup, PlayerSetup, SetupError, apply, legal_actions, new_game, player_setup,
+    Action, GameSetup, PlayerSetup, RuleSet, SetupError, apply, legal_actions, new_game,
+    player_setup,
 };
 
 const STARTER_CARDS: &str = include_str!("../../../data/starter/1.0.0/cards.json");
@@ -25,6 +26,7 @@ fn named_setup() -> GameSetup {
         one: side_of(0),
         two: side_of(1),
         data_versions: vec![],
+        rules: RuleSet::default(),
     }
 }
 
@@ -71,6 +73,7 @@ fn a_setup_json_round_trips_its_names() {
 fn refused(setup: GameSetup) -> CardsError {
     match new_game(setup, 1) {
         Err(SetupError::Invalid(error)) => error,
+        Err(other) => panic!("expected a card error, got {other}"),
         Ok(_) => panic!("the setup should have been refused"),
     }
 }

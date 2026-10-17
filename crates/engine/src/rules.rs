@@ -2,6 +2,7 @@
 
 use crate::combat;
 use crate::effects;
+use crate::ruleset::RuleSet;
 use crate::state::{CardInstanceId, GameState, PlayerId, WinReason};
 use crate::time::{self, Spend};
 use duel_cards::HeroEffect;
@@ -39,13 +40,16 @@ pub enum Target {
 #[serde(rename_all = "snake_case")]
 pub enum Event {
     /// The game began. `data_versions` is the opaque list of the setup, copied as is; it is
-    /// last, and absent from the JSON when empty, so a journal without versions keeps the
-    /// exact form it had before the field existed.
+    /// absent from the JSON when empty. `rules` is last: the complete option object of the
+    /// game, absent when it is the engine default. A journal with neither versions nor
+    /// non-default options keeps the exact form it had before these fields existed.
     GameStarted {
         first: PlayerId,
         budget: u32,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         data_versions: Vec<String>,
+        #[serde(default, skip_serializing_if = "RuleSet::is_default")]
+        rules: RuleSet,
     },
     EffectActivated {
         player: PlayerId,

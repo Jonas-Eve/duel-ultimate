@@ -3,7 +3,7 @@
 
 use duel_cards::{CreatureStats, Effect, Hero, HeroEffect};
 use duel_engine::{
-    Action, CardInstanceId, Event, GameSetup, GameState, PlayerId, PlayerSetup, apply,
+    Action, CardInstanceId, Event, GameSetup, GameState, PlayerId, PlayerSetup, RuleSet, apply,
     legal_actions, new_game,
 };
 use serde_json::{Value, json};
@@ -54,6 +54,7 @@ fn setup_with(versions: &[&str]) -> GameSetup {
             card_names: Vec::new(),
         },
         data_versions: versions.iter().map(|v| (*v).to_owned()).collect(),
+        rules: RuleSet::default(),
     }
 }
 
@@ -112,6 +113,7 @@ fn an_empty_list_leaves_the_json_of_game_started_untouched() {
 
 #[test]
 fn a_non_empty_list_adds_the_key_last() {
+    // With the default rules: `rules`, when not the default, comes after (`tests/ruleset.rs`).
     let events = start(&["fixture@1.0.0", "other@2"]);
     let json = started_json(&events);
     assert!(json.starts_with(r#"{"game_started":{"first":""#), "{json}");

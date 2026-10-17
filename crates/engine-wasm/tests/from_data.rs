@@ -4,7 +4,7 @@
 //! on each of the five strings.
 
 use duel_cards::{parse_cards, parse_decks, resolve_deck};
-use duel_engine::{GameSetup, PlayerSetup};
+use duel_engine::{GameSetup, PlayerSetup, RuleSet};
 use duel_engine_wasm::{Duel, MAX_INPUT_BYTES};
 use serde_json::Value;
 
@@ -49,6 +49,7 @@ fn by_hand(cards: &str, decks: &str, one: &str, two: &str, versions: &[&str]) ->
         one: side(one),
         two: side(two),
         data_versions: versions.iter().map(|v| (*v).to_owned()).collect(),
+        rules: RuleSet::default(),
     })
     .unwrap()
 }

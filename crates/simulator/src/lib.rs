@@ -20,7 +20,7 @@ pub use report::{Kind, MatchupReport, Report};
 pub use stats::{fmt_mean, fmt_share, percent, wilson_95};
 
 use duel_cards::{parse_cards, parse_decks};
-use duel_engine::{GameSetup, PlayerSetup, player_setup};
+use duel_engine::{GameSetup, PlayerSetup, RuleSet, player_setup};
 
 /// The first deck of `decks` as player One and the second as player Two, with `cards` resolving
 /// their card ids, and `data_versions` recorded in the game. Pure: nothing is read from disk;
@@ -42,6 +42,7 @@ pub fn setup_from(
         one: side(0)?,
         two: side(1)?,
         data_versions,
+        rules: RuleSet::default(),
     })
 }
 

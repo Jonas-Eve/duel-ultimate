@@ -3,7 +3,7 @@
 
 use std::cell::RefCell;
 
-use duel_engine::{Action, GameSetup, Observation, PlayerId, WinReason};
+use duel_engine::{Action, GameSetup, Observation, PlayerId, RuleSet, WinReason};
 use duel_simulator::{
     BatchConfig, Contender, DEFAULT_MAX_ACTIONS, GameRecord, Policy, Report, contenders_from,
     derive_seed, game_seed, play_game, policy_rng, random_policy, run_batch, run_batch_observed,
@@ -182,6 +182,7 @@ fn fixture_setup() -> GameSetup {
         one: contenders[0].player.clone(),
         two: contenders[1].player.clone(),
         data_versions: vec!["test@0".to_owned()],
+        rules: RuleSet::default(),
     }
 }
 

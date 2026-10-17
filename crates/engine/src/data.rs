@@ -3,6 +3,7 @@
 //! instead of resolving decks themselves. Pure: no disk, no clock; the JSON is analysed by
 //! `duel-cards`, which re-validates everything, and nothing here panics.
 
+use crate::ruleset::RuleSet;
 use crate::setup::{GameSetup, PlayerSetup};
 use duel_cards::{Card, CardsError, Deck, parse_cards, parse_decks, resolve_deck_named};
 
@@ -62,5 +63,6 @@ pub fn game_setup_from_data(
         one: player_setup(one, &cards)?,
         two: player_setup(two, &cards)?,
         data_versions,
+        rules: RuleSet::default(),
     })
 }

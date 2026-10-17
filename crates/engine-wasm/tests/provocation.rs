@@ -2,7 +2,7 @@
 //! stable code `target_forbidden_by_provocation`, and `legal_actions` does not offer it.
 
 use duel_cards::{parse_cards, parse_decks, resolve_deck};
-use duel_engine::{GameSetup, PlayerSetup};
+use duel_engine::{GameSetup, PlayerSetup, RuleSet};
 use duel_engine_wasm::Duel;
 use serde_json::{Value, json};
 
@@ -23,6 +23,7 @@ fn setup() -> Value {
         one: side(0),
         two: side(1),
         data_versions: vec!["fixture@1.0.0".into()],
+        rules: RuleSet::default(),
     })
     .unwrap();
     for (side, provocation) in [("one", false), ("two", true)] {

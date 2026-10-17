@@ -7,8 +7,8 @@ use crate::report::{Kind, MatchupReport, Report};
 use duel_ai::{Policy, derive_seed, policy_rng};
 use duel_cards::{parse_cards, parse_decks};
 use duel_engine::{
-    Action, Event, GameSetup, Observation, PlayerId, PlayerSetup, WinReason, apply, new_game,
-    player_setup,
+    Action, Event, GameSetup, Observation, PlayerId, PlayerSetup, RuleSet, WinReason, apply,
+    new_game, player_setup,
 };
 
 /// Defensive cap on the actions of one game: every game ends by itself, but a rule bug must
@@ -201,6 +201,7 @@ pub fn run_batch_observed(
                 one: contenders[one].player.clone(),
                 two: contenders[two].player.clone(),
                 data_versions: config.data_versions.clone(),
+                rules: RuleSet::default(),
             };
             let seed = game_seed(config.seed, matchup, index);
             let mut record = play_game(setup, seed, policy, config.max_actions, |_, _| {});
