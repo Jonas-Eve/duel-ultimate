@@ -25,14 +25,17 @@ export interface CardTileProps {
   /** `aria-pressed` (a toggle) when defined. */
   pressed?: boolean;
   mark?: CardMark;
+  /** A card in a discard: a "destroyed" icon and legend instead of the life (never "PV 0"). Not interactive. */
+  destroyed?: boolean;
 }
 
 /** The complete accessible name: "Pillard, coût 2, attaque 3, riposte 0, vie 2, provocation, passe la main, sélectionnée". */
-export function cardLabel(card: CardView, opts: { cost?: number; handsOver?: boolean; timeLeft?: TimeLeft; mark?: CardMark } = {}): string {
+export function cardLabel(card: CardView, opts: { cost?: number; handsOver?: boolean; timeLeft?: TimeLeft; mark?: CardMark; destroyed?: boolean } = {}): string {
   return (
     `${card.name ?? fr.unknownCard}` +
     (opts.cost === undefined ? "" : `, ${fr.costWord} ${opts.cost}`) +
-    `, ${fr.attackWord} ${card.force}, ${fr.riposteWord} ${card.riposte}, ${fr.lifeWord} ${card.health}` +
+    `, ${fr.attackWord} ${card.force}, ${fr.riposteWord} ${card.riposte}` +
+    (opts.destroyed ? `, ${fr.destroyed.toLowerCase()}` : `, ${fr.lifeWord} ${card.health}`) +
     (card.provocation ? `, ${fr.provocation.toLowerCase()}` : "") +
     (opts.handsOver ? `, ${fr.passesLegend.toLowerCase()}` : opts.timeLeft === undefined ? "" : `, ${opts.timeLeft.spoken}`) +
     (opts.mark === undefined ? "" : `, ${markText[opts.mark].toLowerCase()}`)
@@ -82,6 +85,15 @@ function ShieldIcon() {
   );
 }
 
+/** Distinct from the heart (a broken cross on a square): the life slot of a destroyed card. */
+function DestroyedIcon() {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 12 12" width="8" height="8" className="icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M1.5 1.5h9v9h-9zM3.5 3.5l5 5M8.5 3.5l-5 5" />
+    </svg>
+  );
+}
+
 /** The art slot: a placeholder drawn inline (no image to load, no hole), until real illustrations come. */
 function ArtPlaceholder() {
   return (
@@ -99,7 +111,7 @@ function ArtPlaceholder() {
  * in hand only), art slot, then the three values attack / riposte / life, riposte shown even at 0.
  * Purely visual: no state, no handler, no accessible name of its own (the tile around it carries it).
  */
-export function CardFace({ card, cost }: { card: CardView; cost?: number }) {
+export function CardFace({ card, cost, destroyed = false }: { card: CardView; cost?: number; destroyed?: boolean }) {
   return (
     <span className="card-face">
       <span className="card-head">
@@ -122,21 +134,21 @@ export function CardFace({ card, cost }: { card: CardView; cost?: number }) {
           {card.riposte}
         </span>
         <span className="card-value">
-          <HeartIcon />
-          {card.health}
+          {destroyed ? <DestroyedIcon /> : <HeartIcon />}
+          {destroyed ? null : card.health}
         </span>
       </span>
     </span>
   );
 }
 
-export function CardTile({ card, cost, timeLeft, handsOver = false, onPress, disabled = false, inactive = false, pressed, mark }: CardTileProps) {
+export function CardTile({ card, cost, timeLeft, handsOver = false, destroyed = false, onPress, disabled = false, inactive = false, pressed, mark }: CardTileProps) {
   // The visible mark is part of the accessible name too (label in name).
-  const label = cardLabel(card, { cost, handsOver, timeLeft, mark });
-  const hasTags = card.provocation || cost !== undefined || mark !== undefined;
+  const label = cardLabel(card, { cost, handsOver, timeLeft, mark, destroyed });
+  const hasTags = card.provocation || cost !== undefined || mark !== undefined || destroyed;
   const body = (
     <>
-      <CardFace card={card} cost={cost} />
+      <CardFace card={card} cost={cost} destroyed={destroyed} />
       {hasTags && (
         <span className="card-tags">
           {card.provocation && (
@@ -146,6 +158,7 @@ export function CardTile({ card, cost, timeLeft, handsOver = false, onPress, dis
             </span>
           )}
           {cost !== undefined && (handsOver ? <span className="card-legend">{fr.passesLegend}</span> : timeLeft !== undefined && <span className="card-legend">{timeLeft.legend}</span>)}
+          {destroyed && <span className="card-legend">{fr.destroyed}</span>}
           {mark !== undefined && <span className="card-mark">{markText[mark]}</span>}
         </span>
       )}

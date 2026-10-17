@@ -1,24 +1,13 @@
 import type { CardView } from "../engine/types";
+import { CardTile } from "./CardTile";
 import { Dialog } from "./Dialog";
 import { fr } from "./fr";
 
-/** A dead card. Its current health is always 0 in a discard, so it reads "Détruite", never "PV 0" (the starting health is not in the view). */
+/** A dead card: the compact face, a "destroyed" icon in place of the life (its starting health is not in the view, never "PV 0"). */
 function DiscardCard({ card }: { card: CardView }) {
   return (
-    <li className="card discard-card">
-      <span className="card-name">{card.name ?? fr.unknownCard}</span>
-      <span className="card-stats">
-        <span>{fr.cost(card.cost)}</span>
-        <span>{fr.force(card.force)}</span>
-        <span>{fr.attackCost(card.attack_cost)}</span>
-      </span>
-      {(card.provocation || card.riposte > 0) && (
-        <span className="card-badges">
-          {card.provocation && <span className="badge">{fr.provocation}</span>}
-          {card.riposte > 0 && <span className="badge">{fr.riposte(card.riposte)}</span>}
-        </span>
-      )}
-      <span className="card-note">{fr.destroyed}</span>
+    <li className="discard-item">
+      <CardTile card={card} destroyed />
     </li>
   );
 }

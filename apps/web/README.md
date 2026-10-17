@@ -284,8 +284,9 @@ même, alimenté par `toScreenModel` :
   seule annonce de fin de chaîne, jamais deux) ; il redevient poli à l'action suivante. `LogDrawer` (bouton
   « Journal », `Dialog` titré « Journal ») et le journal complet de `EndScreen` sont des listes non vives.
 - **Défausses** (`DiscardDialog`) : bouton « Défausse (N) » dans chaque `HeroBar`, les cartes dans
-  l'ordre de mort (`view.discard`), « Détruite » au lieu de « PV 0 » (les PV initiaux ne sont pas dans la
-  vue). Le journal et les défausses restent consultables pendant le tour de l'ordinateur.
+  l'ordre de mort (`view.discard`), en cartes compactes (`CardTile` avec `destroyed`, #93) : attaque et
+  riposte (même à 0), une icône « détruite » et la légende « Détruite » à la place de la vie, jamais
+  « PV 0 » (les PV initiaux ne sont pas dans la vue) ; liste `ol.discard-list` repliée en grille. Le journal et les défausses restent consultables pendant le tour de l'ordinateur.
 
 ## Flux d'attaque
 
