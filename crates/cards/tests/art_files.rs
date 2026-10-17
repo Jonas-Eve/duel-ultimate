@@ -339,7 +339,11 @@ fn folder_with_valid_svg_and_webp_passes() {
 fn folder_rejects_missing_file() {
     let t = TempDir::new("missing");
     t.art_json("raider.svg");
-    assert!(check_set_dir(&t.0).is_err());
+    let err = check_set_dir(&t.0).unwrap_err();
+    assert!(
+        err.starts_with("raider.svg:") && err.contains("No such file"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -356,9 +360,11 @@ fn folder_rejects_bad_webp_signature() {
     let t = TempDir::new("sig");
     t.art_json("raider.webp");
     t.put("raider.webp", b"RIFF\0\0\0\0WEBX");
-    assert!(check_set_dir(&t.0).is_err());
+    let err = check_set_dir(&t.0).unwrap_err();
+    assert!(err.contains("not a WebP file"), "{err}");
     t.put("raider.webp", b"RIFF");
-    assert!(check_set_dir(&t.0).is_err());
+    let err = check_set_dir(&t.0).unwrap_err();
+    assert!(err.contains("not a WebP file"), "{err}");
 }
 
 #[test]
@@ -368,7 +374,8 @@ fn folder_enforces_image_size_limit() {
     t.put("raider.webp", &webp(MAX_IMAGE_BYTES as usize));
     assert_eq!(check_set_dir(&t.0), Ok(()));
     t.put("raider.webp", &webp(MAX_IMAGE_BYTES as usize + 1));
-    assert!(check_set_dir(&t.0).is_err());
+    let err = check_set_dir(&t.0).unwrap_err();
+    assert!(err.contains("larger than"), "{err}");
 }
 
 #[cfg(unix)]
@@ -378,11 +385,13 @@ fn folder_rejects_symlink_and_subdirectory() {
     t.art_json("raider.webp");
     t.put("real.webp", &webp(100));
     std::os::unix::fs::symlink(t.0.join("art/real.webp"), t.0.join("art/raider.webp")).unwrap();
-    assert!(check_set_dir(&t.0).is_err());
+    let err = check_set_dir(&t.0).unwrap_err();
+    assert!(err.contains("not a regular file"), "{err}");
     fs::remove_file(t.0.join("art/raider.webp")).unwrap();
     fs::remove_file(t.0.join("art/real.webp")).unwrap();
     fs::create_dir(t.0.join("art/raider.webp")).unwrap();
-    assert!(check_set_dir(&t.0).is_err());
+    let err = check_set_dir(&t.0).unwrap_err();
+    assert!(err.contains("not a regular file"), "{err}");
 }
 
 #[test]
@@ -390,5 +399,94 @@ fn folder_rejects_unsafe_svg_content() {
     let t = TempDir::new("svg");
     t.art_json("raider.svg");
     t.put("raider.svg", svg_with("<script/>").as_bytes());
-    assert!(check_set_dir(&t.0).is_err());
+    let err = check_set_dir(&t.0).unwrap_err();
+    assert!(
+        err.starts_with("raider.svg:") && err.contains("`script` is not allowed"),
+        "{err}"
+    );
+}
+
+/// A folder with `n` creatures `c0..c{n-1}`, each citing `c{i}.webp` of `sizes[i]` bytes.
+fn many_webp_folder(tag: &str, sizes: &[usize]) -> TempDir {
+    let t = TempDir::new(tag);
+    let cards: Vec<String> = (0..sizes.len())
+        .map(|i| {
+            format!(
+                r#"{{"kind":"creature","id":"c{i}","name":"C{i}","cost":1,"force":1,"attack_cost":1,"health":1}}"#
+            )
+        })
+        .collect();
+    fs::write(t.0.join("cards.json"), format!("[{}]", cards.join(","))).unwrap();
+    let arts: Vec<String> = (0..sizes.len())
+        .map(|i| {
+            format!(
+                r#"{{"id":"c{i}","file":"c{i}.webp","author":"A","license":"CC0-1.0","source":"s"}}"#
+            )
+        })
+        .collect();
+    fs::write(t.0.join("art.json"), format!("[{}]", arts.join(","))).unwrap();
+    for (i, len) in sizes.iter().enumerate() {
+        t.put(&format!("c{i}.webp"), &webp(*len));
+    }
+    t
+}
+
+#[test]
+fn folder_enforces_total_size_limit() {
+    let each = MAX_IMAGE_BYTES as usize;
+    // 11 x 40 KiB = 440 KiB, every image within its own limit.
+    let t = many_webp_folder("total-over", &[each; 11]);
+    let err = check_set_dir(&t.0).unwrap_err();
+    assert!(err.contains("totals more than"), "{err}");
+    // 10 x 40 KiB = exactly 400 KiB passes.
+    let t = many_webp_folder("total-exact", &[each; 10]);
+    assert_eq!(check_set_dir(&t.0), Ok(()));
+    // One byte over the limit fails (a 12-byte eleventh image makes 400 KiB + 12).
+    let mut sizes = vec![each; 10];
+    sizes.push(12);
+    let t = many_webp_folder("total-plus", &sizes);
+    let err = check_set_dir(&t.0).unwrap_err();
+    assert!(err.contains("totals more than"), "{err}");
+}
+
+#[test]
+fn folder_rejects_art_dir_without_art_json() {
+    let t = TempDir::new("noartjson");
+    t.put("raider.svg", VALID_SVG.as_bytes());
+    let err = check_set_dir(&t.0).unwrap_err();
+    assert!(err.contains("without art.json"), "{err}");
+}
+
+#[test]
+fn folder_without_art_dir_nor_art_json_passes() {
+    let t = TempDir::new("noart");
+    fs::remove_dir_all(t.0.join("art")).unwrap();
+    assert_eq!(check_set_dir(&t.0), Ok(()));
+}
+
+#[test]
+fn svg_rejects_nodes_over_limit() {
+    let body = "<g/>".repeat(10_001);
+    let err = check_svg(&svg_with(&body)).unwrap_err();
+    assert!(err.to_lowercase().contains("nodes limit"), "{err}");
+    assert_eq!(check_svg(&svg_with(&"<g/>".repeat(100))), Ok(()));
+}
+
+#[test]
+fn svg_rejects_processing_instructions() {
+    for (label, svg) in [
+        (
+            "stylesheet before root",
+            format!("<?xml-stylesheet href=\"http://a/b.css\"?>{VALID_SVG}"),
+        ),
+        ("inside root", svg_with("<?foo bar?>")),
+        ("after root", format!("{VALID_SVG}<?foo bar?>")),
+    ] {
+        let err = check_svg(&svg).unwrap_err();
+        assert!(err.contains("processing instruction"), "{label}: {err}");
+    }
+    assert_eq!(
+        check_svg(&format!("<?xml version=\"1.0\"?>{VALID_SVG}")),
+        Ok(())
+    );
 }
