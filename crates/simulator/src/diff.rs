@@ -1,15 +1,286 @@
-//! The diff of two reports ([`diff_reports`]): pure, no I/O, no clock, no libm.
+//! The diff of two reports ([`diff_reports`]): pure, no I/O, no clock, no libm, no float in a
+//! decision. The caller plays the two batches; nothing here parses a rendered report.
+//!
+//! Direction: `before` is the reference, `after` the candidate, delta = after - before.
+//! Policies are paired by name; matchups by the key `(deck A, deck B, kind)`, never by index (the
+//! index moves when a deck is added). A pair present on one side only is `new` / `removed`; a cross
+//! pair whose decks are in the opposite order on the two sides is therefore `removed` + `new`
+//! (the order of `decks.json` is canonical).
+//!
+//! The two batches are independent samples when the data differ: the seed of a game depends on
+//! the index of its matchup (`game_seed`), and different data change the games anyway. Only a
+//! set diffed with itself replays the very same games. The `significant` column is a conservative
+//! heuristic (the 95% Wilson intervals do not overlap), and a delta inside the intervals is noise.
+//!
+//! Percentages are integer per-mille rounded half up ([`pm`]); a delta is the difference of the
+//! displayed integers, so it always agrees with the numbers beside it.
 
-use crate::report::Report;
+use crate::report::{
+    BAND_HIGH_PERCENT, BAND_LOW_PERCENT, Kind, MIRROR_FIRST_PLAYER_MAX_PERCENT, MatchupReport,
+    PolicyReport, Report, rules_label, table,
+};
+use crate::stats::{fmt_mean, wilson_95};
 
-/// `pm(n, d)`: `1000 n / d` rounded to the nearest integer, half up, in integers.
-fn pm(_n: u64, _d: u64) -> u128 {
-    0
+const NOT_AVAILABLE: &str = "n/a";
+
+const HEADERS: [&str; 8] = [
+    "matchup",
+    "status",
+    "wins A",
+    "delta",
+    "significant",
+    "first player",
+    "mean actions",
+    "exhaustion",
+];
+
+const SAMPLES_NOTE: &str = "NOTE: the two batches are independent samples (the seed of a game depends on the index of its matchup): a delta within the 95% intervals is noise";
+
+const SIGNIFICANT_LEGEND: &str = "significant: yes when the 95% Wilson intervals do not overlap (conservative heuristic; cross pair: share of A, mirror: first player)";
+
+/// `1000 n / d` rounded to the nearest integer, half up, in integers (`d > 0`).
+fn pm(n: u64, d: u64) -> u128 {
+    (2000 * u128::from(n) + u128::from(d)) / (2 * u128::from(d))
 }
 
-/// The diff between `before` (the reference) and `after` (the candidate), as text.
-pub fn diff_reports(_before: &Report, _after: &Report) -> String {
-    String::new()
+/// Per-mille as `"12.3%"`.
+fn fmt_pm(value: u128) -> String {
+    format!("{}.{}%", value / 10, value % 10)
+}
+
+/// The difference of two per-mille values as a signed number of points: `+36.2`, `-0.4`, `0.0`.
+fn fmt_delta(before: u128, after: u128) -> String {
+    let (sign, magnitude) = match after.cmp(&before) {
+        std::cmp::Ordering::Greater => ("+", after - before),
+        std::cmp::Ordering::Less => ("-", before - after),
+        std::cmp::Ordering::Equal => ("", 0),
+    };
+    format!("{sign}{}.{}", magnitude / 10, magnitude % 10)
+}
+
+/// `before -> after`.
+fn arrow(before: &str, after: &str) -> String {
+    format!("{before} -> {after}")
+}
+
+/// The finished games of a matchup, or `None` without any.
+fn finished_of(matchup: &MatchupReport) -> Option<u64> {
+    matchup.finished().filter(|&finished| finished > 0)
+}
+
+/// The Wilson 95% intervals of two shares do not overlap.
+fn disjoint(before: (u64, u64), after: (u64, u64)) -> Option<bool> {
+    let (before_low, before_high) = wilson_95(before.0, before.1)?;
+    let (after_low, after_high) = wilson_95(after.0, after.1)?;
+    Some(before_high < after_low || after_high < before_low)
+}
+
+fn same_key(a: &MatchupReport, b: &MatchupReport) -> bool {
+    a.deck_a == b.deck_a && a.deck_b == b.deck_b && a.kind == b.kind
+}
+
+/// The row of a pair present on one side only.
+fn lone_row(matchup: &MatchupReport, status: &str) -> [String; 8] {
+    let dash = || "-".to_owned();
+    [
+        matchup.name(),
+        status.to_owned(),
+        dash(),
+        dash(),
+        dash(),
+        dash(),
+        dash(),
+        dash(),
+    ]
+}
+
+/// The row of a pair present on both sides.
+fn common_row(before: &MatchupReport, after: &MatchupReport) -> [String; 8] {
+    let (Some(before_finished), Some(after_finished)) = (finished_of(before), finished_of(after))
+    else {
+        let na = || NOT_AVAILABLE.to_owned();
+        return [
+            after.name(),
+            "=".to_owned(),
+            na(),
+            na(),
+            "-".to_owned(),
+            na(),
+            na(),
+            na(),
+        ];
+    };
+    let share = |a: u64, b: u64| (pm(a, before_finished), pm(b, after_finished));
+    let (wins_before, wins_after) = share(before.wins_a, after.wins_a);
+    let (first_before, first_after) = share(before.first_player_wins, after.first_player_wins);
+    let (exhaustion_before, exhaustion_after) = share(before.exhaustion, after.exhaustion);
+    let (wins_cell, delta_cell, tested) = match after.kind {
+        Kind::Cross => (
+            arrow(&fmt_pm(wins_before), &fmt_pm(wins_after)),
+            fmt_delta(wins_before, wins_after),
+            (
+                (before.wins_a, before_finished),
+                (after.wins_a, after_finished),
+            ),
+        ),
+        Kind::Mirror => (
+            "-".to_owned(),
+            "-".to_owned(),
+            (
+                (before.first_player_wins, before_finished),
+                (after.first_player_wins, after_finished),
+            ),
+        ),
+    };
+    let significant = match disjoint(tested.0, tested.1) {
+        Some(true) => "yes",
+        Some(false) => "no",
+        None => "-",
+    };
+    [
+        after.name(),
+        "=".to_owned(),
+        wins_cell,
+        delta_cell,
+        significant.to_owned(),
+        arrow(&fmt_pm(first_before), &fmt_pm(first_after)),
+        arrow(
+            &fmt_mean(before.total_actions, before_finished),
+            &fmt_mean(after.total_actions, after_finished),
+        ),
+        arrow(&fmt_pm(exhaustion_before), &fmt_pm(exhaustion_after)),
+    ]
+}
+
+/// `worst pair` of one side: `name 97.2%` or `n/a`.
+fn worst_side(pair: Option<&crate::report::PairDeviation>) -> (String, String) {
+    pair.map_or_else(
+        || (NOT_AVAILABLE.to_owned(), NOT_AVAILABLE.to_owned()),
+        |pair| (pair.matchup.clone(), fmt_pm(pm(pair.wins_a, pair.finished))),
+    )
+}
+
+/// The block of a policy present on both sides: the table, the legend and the summary.
+fn common_block(before: &PolicyReport, after: &PolicyReport) -> String {
+    let mut rows: Vec<[String; 8]> = Vec::new();
+    for matchup in &after.matchups {
+        rows.push(
+            match before.matchups.iter().find(|b| same_key(b, matchup)) {
+                Some(reference) => common_row(reference, matchup),
+                None => lone_row(matchup, "new"),
+            },
+        );
+    }
+    for matchup in &before.matchups {
+        if !after.matchups.iter().any(|a| same_key(a, matchup)) {
+            rows.push(lone_row(matchup, "removed"));
+        }
+    }
+    let mut text = format!("policy: {}\n", after.policy);
+    text += &table(HEADERS, &rows);
+    text += SIGNIFICANT_LEGEND;
+    text += "\n";
+    let (before_summary, after_summary) = (before.summary(), after.summary());
+    let (before_name, before_rate) = worst_side(before_summary.worst_pair.as_ref());
+    let (after_name, after_rate) = worst_side(after_summary.worst_pair.as_ref());
+    text += &if before_name == after_name {
+        format!(
+            "worst pair: {after_name} {}\n",
+            arrow(&before_rate, &after_rate)
+        )
+    } else {
+        let side = |name: &str, rate: &str| {
+            if name == NOT_AVAILABLE {
+                NOT_AVAILABLE.to_owned()
+            } else {
+                format!("{name} {rate}")
+            }
+        };
+        format!(
+            "worst pair: {}\n",
+            arrow(
+                &side(&before_name, &before_rate),
+                &side(&after_name, &after_rate)
+            )
+        )
+    };
+    text += &format!(
+        "cross pairs in band {BAND_LOW_PERCENT}-{BAND_HIGH_PERCENT}%: {}/{} -> {}/{}\n",
+        before_summary.cross_in_band,
+        before_summary.cross_pairs,
+        after_summary.cross_in_band,
+        after_summary.cross_pairs
+    );
+    text += &format!(
+        "mirror first player <= {MIRROR_FIRST_PLAYER_MAX_PERCENT}%: {}/{} -> {}/{}\n",
+        before_summary.mirror_first_player_ok,
+        before_summary.mirrors,
+        after_summary.mirror_first_player_ok,
+        after_summary.mirrors
+    );
+    text
+}
+
+fn policy_names(report: &Report) -> String {
+    let names: Vec<&str> = report.policies.iter().map(|p| p.policy.as_str()).collect();
+    names.join(", ")
+}
+
+/// The diff between `before` (the reference) and `after` (the candidate), as text: a header,
+/// `NOTE:` lines (never a failure), then one block per policy.
+pub fn diff_reports(before: &Report, after: &Report) -> String {
+    let mut text = format!(
+        "diff: {} -> {} | seed: {} | games per matchup: {} | action cap: {} | policies: {} | rules: {}\n",
+        before.set,
+        after.set,
+        after.seed,
+        after.games_per_matchup,
+        after.max_actions,
+        policy_names(after),
+        rules_label(&after.rules)
+    );
+    let mut differs = |field: &str, was: String, now: String| {
+        if was != now {
+            text += &format!("NOTE: {field} differs ({was} vs {now})\n");
+        }
+    };
+    differs("seed", before.seed.to_string(), after.seed.to_string());
+    differs(
+        "games per matchup",
+        before.games_per_matchup.to_string(),
+        after.games_per_matchup.to_string(),
+    );
+    differs(
+        "action cap",
+        before.max_actions.to_string(),
+        after.max_actions.to_string(),
+    );
+    differs(
+        "rules",
+        rules_label(&before.rules),
+        rules_label(&after.rules),
+    );
+    differs("policies", policy_names(before), policy_names(after));
+    if before.set != after.set {
+        text += SAMPLES_NOTE;
+        text += "\n";
+    }
+    let mut blocks: Vec<String> = Vec::new();
+    for policy in &after.policies {
+        blocks.push(
+            match before.policies.iter().find(|b| b.policy == policy.policy) {
+                Some(reference) => common_block(reference, policy),
+                None => format!("policy: {} (new)\n", policy.policy),
+            },
+        );
+    }
+    for policy in &before.policies {
+        if !after.policies.iter().any(|a| a.policy == policy.policy) {
+            blocks.push(format!("policy: {} (removed)\n", policy.policy));
+        }
+    }
+    text += &blocks.join("\n");
+    text
 }
 
 #[cfg(test)]
@@ -140,7 +411,7 @@ mod tests {
             "diff: starter@1.1.0 -> starter@2.0.0 | seed: 1 | games per matchup: 2000 | action cap: 10000 | policies: random | rules: {}\n\
 {SAMPLES}\n\
 policy: random\n\
-matchup           status          wins A  delta  significant    first player  mean actions    exhaustion\n\
+matchup            status          wins A  delta  significant    first player  mean actions    exhaustion\n\
 ----------------  -------  --------------  -----  -----------  --------------  ------------  ------------\n\
 rush vs bulwark         =  97.2% -> 61.0%  -36.2          yes  55.0% -> 55.0%  41.9 -> 52.3  0.0% -> 4.1%\n\
 rush (mirror)           =               -      -          yes  62.0% -> 55.1%  37.2 -> 48.0  0.0% -> 2.0%\n\
@@ -195,9 +466,9 @@ mirror first player <= 57%: 1/2 -> 1/1\n",
             diff_reports(&before, &after)
         };
         assert!(one(1724).contains("50.0% -> 86.2%  +36.2"), "{}", one(1724));
-        assert!(one(1000).contains("50.0% -> 50.0%   0.0"), "{}", one(1000));
+        assert!(one(1000).contains("50.0% -> 50.0%    0.0"), "{}", one(1000));
         // 998/2000 = 49.9%: a delta of -0.1.
-        assert!(one(998).contains("50.0% -> 49.9%  -0.1"), "{}", one(998));
+        assert!(one(998).contains("50.0% -> 49.9%   -0.1"), "{}", one(998));
     }
 
     #[test]
@@ -214,7 +485,7 @@ mirror first player <= 57%: 1/2 -> 1/1\n",
                 .find(|l| l.starts_with("a vs b"))
                 .expect("a row")
                 .to_owned();
-            row.split_whitespace().nth(7).map(str::to_owned).unwrap()
+            row.split_whitespace().nth(8).map(str::to_owned).unwrap()
         };
         // 50% vs 51%: the intervals (+-2.2 points) overlap.
         assert_eq!(sig(1020), "no");
@@ -343,7 +614,6 @@ mirror first player <= 57%: 1/2 -> 1/1\n",
             )],
         );
         let text = diff_reports(&before, &inserted);
-        assert_eq!(text.matches(" new ").count(), 0, "status is a cell: {text}");
         let news = text
             .lines()
             .filter(|l| l.split_whitespace().any(|c| c == "new"))

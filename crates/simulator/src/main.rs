@@ -1,12 +1,17 @@
 //! Plays seeded AI-vs-AI games between the decks of an embedded data set and prints the
 //! balance report. Usage: `duel-simulator [games] [--set <name>[@<version>]] [--seed <u64>]
-//! [--hero-riposte <on|off>] [--board-limit <none|N>] [--timing]`, in any order: `games` per matchup (1000
+//! [--hero-riposte <on|off>] [--board-limit <none|N>] [--timing] [--against <name>[@<version>]]`, in any order: `games` per matchup (1000
 //! by default), the `starter` set (its latest version by default), seed 0 by default, and the
 //! engine's default rules for each rule option not given (the report names them in its header).
 //! The two rule options have no effect on the games before #127 gives them their behaviour. The
 //! batch itself is `duel_simulator::run_batch` (one policy, `random`: uniformly random among the
 //! legal actions other than `Concede`); this file only reads the command line, picks the data and
 //! prints the checked `Report::render()` ([`finish`]).
+//!
+//! `--against <B>` (same closed list as `--set`, never a path) plays the batch of `--set` (the
+//! candidate, "after") and the batch of `B` (the reference, "before") in this process, with the same
+//! seed, rules, policy, games and cap, and prints the diff alone (`duel_simulator::diff_reports`,
+//! a pure function of the two reports); each report is checked first.
 //!
 //! Exit codes: 0 (a report, whatever its alerts), 2 (bad command line), 1 (the report contradicts
 //! its own invariants: a message on stderr, nothing on stdout).
@@ -22,8 +27,8 @@
 
 use duel_engine::RuleSet;
 use duel_simulator::{
-    BatchConfig, DEFAULT_MAX_ACTIONS, NamedPolicy, Report, contenders_from, random_policy,
-    run_batch_observed,
+    BatchConfig, DEFAULT_MAX_ACTIONS, GameRecord, NamedPolicy, Report, contenders_from,
+    diff_reports, random_policy, run_batch_observed,
 };
 use std::time::Instant;
 
@@ -62,7 +67,7 @@ const SETS: [Set; 3] = [
 const DEFAULT_GAMES: u64 = 1000;
 const DEFAULT_SEED: u64 = 0;
 const DEFAULT_SET: &str = "starter";
-const USAGE: &str = "[games] [--set <name>[@<version>]] [--seed <u64>] [--hero-riposte <on|off>] [--board-limit <none|N>] [--timing]";
+const USAGE: &str = "[games] [--set <name>[@<version>]] [--seed <u64>] [--hero-riposte <on|off>] [--board-limit <none|N>] [--timing] [--against <name>[@<version>]]";
 
 /// What the command line asks for.
 #[derive(Debug, PartialEq, Eq)]
@@ -154,6 +159,7 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
     let mut games = None;
     let mut seed = None;
     let mut set = None;
+    let mut against = None;
     let mut hero_riposte = None;
     let mut board_limit = None;
     let mut timing = false;
@@ -165,6 +171,16 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
             })?;
             if set.replace(resolve_set(&SETS, spec)?).is_some() {
                 return Err("--set given twice".to_owned());
+            }
+        } else if arg == "--against" {
+            let spec = rest.next().ok_or_else(|| {
+                format!(
+                    "--against needs a value (available: {})",
+                    available_sets(&SETS)
+                )
+            })?;
+            if against.replace(resolve_set(&SETS, spec)?).is_some() {
+                return Err("--against given twice".to_owned());
             }
         } else if arg == "--seed" {
             let value = rest
@@ -217,7 +233,7 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
         games: games.unwrap_or(DEFAULT_GAMES),
         seed: seed.unwrap_or(DEFAULT_SEED),
         set: set.unwrap_or(default_set),
-        against: None,
+        against,
         rules: RuleSet {
             hero_riposte: hero_riposte.unwrap_or(default_rules.hero_riposte),
             board_limit: board_limit.unwrap_or(default_rules.board_limit),
@@ -235,41 +251,55 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let contenders =
-        contenders_from(config.set.cards, config.set.decks).expect("the embedded data is valid");
-    let batch = BatchConfig {
-        games: config.games,
-        seed: config.seed,
-        max_actions: DEFAULT_MAX_ACTIONS,
-        data_versions: vec![format!("{}@{}", config.set.name, config.set.version)],
-        rules: config.rules,
-    };
     let policies = [NamedPolicy {
         name: "random",
         policy: &random_policy,
     }];
-    let report = if config.timing {
-        // The clock is read around the batch only: the arguments and the contenders are
-        // already done, and the report is checked, rendered and printed after the last reading.
-        let (mut games, mut actions) = (0u64, 0u64);
-        let start = Instant::now();
-        let report = run_batch_observed(&contenders, &batch, &policies, |record| {
-            games += 1;
-            actions += u64::from(record.actions);
-        });
-        let elapsed = start.elapsed();
-        eprintln!("{}", timing_line(games, actions, elapsed.as_secs_f64()));
-        report
-    } else {
-        run_batch_observed(&contenders, &batch, &policies, |_| {})
+    // The clock is read around the batches only (`--timing`): the arguments and the contenders
+    // are built before, and the reports are checked, rendered and printed after the last reading.
+    let (mut games, mut actions) = (0u64, 0u64);
+    let mut observe = |record: &GameRecord| {
+        games += 1;
+        actions += u64::from(record.actions);
     };
-    match finish(&report) {
+    let start = Instant::now();
+    let after = play(config.set, &config, &policies, &mut observe);
+    let before = config
+        .against
+        .map(|set| play(set, &config, &policies, &mut observe));
+    let elapsed = start.elapsed();
+    if config.timing {
+        eprintln!("{}", timing_line(games, actions, elapsed.as_secs_f64()));
+    }
+    let result = match &before {
+        Some(before) => finish_diff(before, &after),
+        None => finish(&after),
+    };
+    match result {
         Ok(text) => print!("{text}"),
         Err(message) => {
             eprintln!("duel-simulator: {message}");
             std::process::exit(1);
         }
     }
+}
+
+/// Plays the batch of `set` with the settings of `config`; `observe` sees every game.
+fn play(
+    set: &Set,
+    config: &Config,
+    policies: &[NamedPolicy],
+    observe: &mut impl FnMut(&GameRecord),
+) -> Report {
+    let contenders = contenders_from(set.cards, set.decks).expect("the embedded data is valid");
+    let batch = BatchConfig {
+        games: config.games,
+        seed: config.seed,
+        max_actions: DEFAULT_MAX_ACTIONS,
+        data_versions: vec![format!("{}@{}", set.name, set.version)],
+        rules: config.rules,
+    };
+    run_batch_observed(&contenders, &batch, policies, |record| observe(record))
 }
 
 /// The text to print for `report`, or the message that refuses it: a report whose counters
@@ -280,6 +310,14 @@ fn finish(report: &Report) -> Result<String, String> {
         .check()
         .map_err(|message| format!("inconsistent report: {message}"))?;
     Ok(report.render())
+}
+
+/// The diff to print for the reference `before` and the candidate `after`: both reports must
+/// pass the checks of [`finish`], otherwise nothing is printed (exit code 1). Pure.
+fn finish_diff(before: &Report, after: &Report) -> Result<String, String> {
+    finish(before)?;
+    finish(after)?;
+    Ok(diff_reports(before, after))
 }
 
 /// The `--timing` line. Plain division, no libm; a zero duration gives `n/a` rates, never
@@ -383,7 +421,6 @@ mod tests {
         assert!(error.contains("1.0.0, 1.1.0"), "{error}");
     }
 
-    #[test]
     #[test]
     fn no_argument_means_1000_games_seed_0_of_the_starter_set() {
         parsed_is(&[], 1000, 0, "starter@1.1.0");

@@ -336,7 +336,13 @@ fn against_the_same_set_has_only_zero_deltas() {
         "{text:?}"
     );
     assert!(!text.contains("NOTE"), "{text:?}");
-    assert!(!text.contains("yes"), "{text:?}");
+    assert!(
+        !text
+            .lines()
+            .filter(|l| !l.starts_with("significant:"))
+            .any(|l| l.split_whitespace().any(|c| c == "yes")),
+        "{text:?}"
+    );
     assert!(!text.contains('+'), "{text:?}");
     assert!(
         !text.contains("new") && !text.contains("removed"),
