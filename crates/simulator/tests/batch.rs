@@ -5,8 +5,9 @@ use std::cell::RefCell;
 
 use duel_engine::{Action, GameSetup, Observation, PlayerId, RuleSet, WinReason};
 use duel_simulator::{
-    BatchConfig, Contender, DEFAULT_MAX_ACTIONS, GameRecord, Policy, Report, contenders_from,
-    derive_seed, game_seed, play_game, policy_rng, random_policy, run_batch, run_batch_observed,
+    BatchConfig, Contender, DEFAULT_MAX_ACTIONS, GameRecord, NamedPolicy, Policy, Report,
+    contenders_from, derive_seed, game_seed, play_game, policy_rng, random_policy, run_batch,
+    run_batch_observed,
 };
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -22,6 +23,14 @@ fn fixture() -> Vec<Contender> {
 
 fn starter() -> Vec<Contender> {
     contenders_from(STARTER_CARDS, STARTER_DECKS).expect("the starter set is valid")
+}
+
+/// A batch of this one policy, named `random` whatever it is (the tests below do not read the name).
+fn solo(policy: &dyn Policy) -> [NamedPolicy<'_>; 1] {
+    [NamedPolicy {
+        name: "random",
+        policy,
+    }]
 }
 
 fn config(games: u64, seed: u64) -> BatchConfig {
@@ -41,7 +50,9 @@ fn observed(
     policy: &dyn Policy,
 ) -> (Report, Vec<GameRecord>) {
     let mut records = Vec::new();
-    let report = run_batch_observed(contenders, config, policy, |record| records.push(*record));
+    let report = run_batch_observed(contenders, config, &solo(policy), |record| {
+        records.push(*record);
+    });
     (report, records)
 }
 
@@ -58,8 +69,8 @@ fn of_matchup(records: &[GameRecord], matchup: usize) -> Vec<GameRecord> {
 #[test]
 fn the_same_batch_gives_the_same_report_and_text() {
     for contenders in [fixture(), starter()] {
-        let first = run_batch(&contenders, &config(40, 9), &random_policy);
-        let second = run_batch(&contenders, &config(40, 9), &random_policy);
+        let first = run_batch(&contenders, &config(40, 9), &solo(&random_policy));
+        let second = run_batch(&contenders, &config(40, 9), &solo(&random_policy));
         assert_eq!(first, second);
         assert_eq!(first.render(), second.render());
     }
@@ -68,16 +79,16 @@ fn the_same_batch_gives_the_same_report_and_text() {
 #[test]
 fn another_batch_seed_gives_another_report() {
     for contenders in [fixture(), starter()] {
-        let one = run_batch(&contenders, &config(60, 1), &random_policy);
-        let two = run_batch(&contenders, &config(60, 2), &random_policy);
-        assert_ne!(one.matchups, two.matchups);
+        let one = run_batch(&contenders, &config(60, 1), &solo(&random_policy));
+        let two = run_batch(&contenders, &config(60, 2), &solo(&random_policy));
+        assert_ne!(one.policies[0].matchups, two.policies[0].matchups);
         assert_ne!(one.render(), two.render());
     }
 }
 
 #[test]
 fn the_report_records_the_settings_and_the_versions() {
-    let report = run_batch(&starter(), &config(5, 77), &random_policy);
+    let report = run_batch(&starter(), &config(5, 77), &solo(&random_policy));
     assert_eq!(report.set, "test@0");
     assert_eq!(report.seed, 77);
     assert_eq!(report.games_per_matchup, 5);
@@ -207,9 +218,9 @@ fn always_last(obs: &Observation<'_>, _: &mut ChaCha8Rng) -> usize {
 fn simple_policies_run_whole_batches() {
     let policies: [&dyn Policy; 2] = [&always_first, &always_last];
     for policy in policies {
-        let report = run_batch(&fixture(), &config(10, 0), policy);
+        let report = run_batch(&fixture(), &config(10, 0), &solo(policy));
         assert!(report.check().is_ok());
-        assert_eq!(report.matchups.len(), 3);
+        assert_eq!(report.policies[0].matchups.len(), 3);
     }
 }
 
@@ -220,7 +231,7 @@ fn out_of_bounds(obs: &Observation<'_>, _: &mut ChaCha8Rng) -> usize {
 #[test]
 #[should_panic(expected = "policy returned index")]
 fn an_index_out_of_bounds_is_a_contract_violation() {
-    run_batch(&fixture(), &config(1, 0), &out_of_bounds);
+    run_batch(&fixture(), &config(1, 0), &solo(&out_of_bounds));
 }
 
 fn refuses_concede(obs: &Observation<'_>, rng: &mut ChaCha8Rng) -> usize {
@@ -234,8 +245,13 @@ fn refuses_concede(obs: &Observation<'_>, rng: &mut ChaCha8Rng) -> usize {
 #[test]
 fn concede_is_never_offered_nor_played() {
     for contenders in [fixture(), starter()] {
-        let report = run_batch(&contenders, &config(30, 4), &refuses_concede);
-        assert!(report.matchups.iter().all(|matchup| matchup.concede == 0));
+        let report = run_batch(&contenders, &config(30, 4), &solo(&refuses_concede));
+        assert!(
+            report.policies[0]
+                .matchups
+                .iter()
+                .all(|matchup| matchup.concede == 0)
+        );
     }
     let mut steps = 0;
     play_game(
@@ -281,8 +297,8 @@ fn the_deck_with_the_lowest_index_alternates_seats_in_a_cross_matchup() {
         by_identity, by_seat_one,
         "the test data tells the two apart"
     );
-    assert_eq!(report.matchups[0].wins_a, by_identity);
-    assert_eq!(report.matchups[0].wins_b, 100 - by_identity);
+    assert_eq!(report.policies[0].matchups[0].wins_a, by_identity);
+    assert_eq!(report.policies[0].matchups[0].wins_b, 100 - by_identity);
 }
 
 /// The starter decks plus a third deck, to get three cross matchups.
@@ -297,7 +313,7 @@ fn three_decks() -> Vec<Contender> {
 #[test]
 fn every_cross_matchup_alternates_from_its_own_first_game() {
     let (report, records) = observed(&three_decks(), &config(5, 3), &random_policy);
-    let names: Vec<(String, String)> = report
+    let names: Vec<(String, String)> = report.policies[0]
         .matchups
         .iter()
         .map(|m| (m.deck_a.clone(), m.deck_b.clone()))
@@ -336,12 +352,15 @@ fn every_cross_matchup_alternates_from_its_own_first_game() {
 #[test]
 fn a_mirror_matchup_has_the_same_deck_on_both_sides() {
     let (report, _) = observed(&starter(), &config(10, 3), &random_policy);
-    for matchup in &report.matchups[1..] {
+    for matchup in &report.policies[0].matchups[1..] {
         assert_eq!(matchup.deck_a, matchup.deck_b);
         assert_eq!(matchup.kind, duel_simulator::Kind::Mirror);
     }
-    assert_eq!(report.matchups[0].kind, duel_simulator::Kind::Cross);
-    assert_eq!(report.matchups.len(), 3);
+    assert_eq!(
+        report.policies[0].matchups[0].kind,
+        duel_simulator::Kind::Cross
+    );
+    assert_eq!(report.policies[0].matchups.len(), 3);
 }
 
 // 5. Mirrors.
@@ -383,9 +402,9 @@ fn a_cap_of_3_interrupts_every_game() {
     let mut capped = config(20, 0);
     capped.max_actions = 3;
     for contenders in [fixture(), starter()] {
-        let report = run_batch(&contenders, &capped, &random_policy);
+        let report = run_batch(&contenders, &capped, &solo(&random_policy));
         assert!(report.check().is_ok());
-        for matchup in &report.matchups {
+        for matchup in &report.policies[0].matchups {
             assert_eq!(matchup.interrupted, 20);
             assert_eq!((matchup.wins_a, matchup.wins_b), (0, 0));
             assert_eq!(matchup.first_player_wins, 0);
@@ -402,8 +421,13 @@ fn a_cap_of_3_interrupts_every_game() {
 #[test]
 fn the_default_cap_interrupts_nothing() {
     for contenders in [fixture(), starter()] {
-        let report = run_batch(&contenders, &config(50, 0), &random_policy);
-        assert!(report.matchups.iter().all(|m| m.interrupted == 0));
+        let report = run_batch(&contenders, &config(50, 0), &solo(&random_policy));
+        assert!(
+            report.policies[0]
+                .matchups
+                .iter()
+                .all(|m| m.interrupted == 0)
+        );
     }
 }
 
@@ -430,12 +454,12 @@ fn a_game_ending_exactly_at_the_cap_is_finished_and_one_action_less_interrupts_i
     let mut at_cap = config(1, 0);
     at_cap.max_actions = n;
     assert_eq!(
-        run_batch(&fixture(), &at_cap, &random_policy).matchups[0].interrupted,
+        run_batch(&fixture(), &at_cap, &solo(&random_policy)).policies[0].matchups[0].interrupted,
         0
     );
     at_cap.max_actions = n - 1;
     assert_eq!(
-        run_batch(&fixture(), &at_cap, &random_policy).matchups[0].interrupted,
+        run_batch(&fixture(), &at_cap, &solo(&random_policy)).policies[0].matchups[0].interrupted,
         1
     );
 }
@@ -449,9 +473,9 @@ fn interrupted_games_count_apart_and_leave_every_other_figure_alone() {
     let cap = actions[actions.len() / 2];
     let mut capped = config(100, 6);
     capped.max_actions = cap;
-    let report = run_batch(&contenders, &capped, &random_policy);
+    let report = run_batch(&contenders, &capped, &solo(&random_policy));
     assert!(report.check().is_ok());
-    for (index, matchup) in report.matchups.iter().enumerate() {
+    for (index, matchup) in report.policies[0].matchups.iter().enumerate() {
         // The cap only truncates: a game's course does not depend on it.
         let finished: Vec<GameRecord> = of_matchup(&records, index)
             .into_iter()
@@ -500,7 +524,7 @@ fn every_game_ends_by_a_hero_going_down_or_exhaustion() {
                 Some((_, WinReason::HeroDown | WinReason::Exhaustion))
             ));
         }
-        for matchup in &report.matchups {
+        for matchup in &report.policies[0].matchups {
             assert_eq!(matchup.interrupted, 0);
             assert_eq!(matchup.hero_down + matchup.exhaustion, 100);
             assert_eq!(matchup.concede, 0);
@@ -539,8 +563,8 @@ fn a_huge_health_in_the_data_alone_wins_almost_always() {
     for (strong, weak) in [(0, 1), (1, 0)] {
         let decks = set_number(FIXTURE_DECKS, "health", strong, 10_000);
         let decks = set_number(&decks, "health", weak, 1);
-        let report = run_batch(&with_decks(&decks), &config(100, 5), &random_policy);
-        let cross = &report.matchups[0];
+        let report = run_batch(&with_decks(&decks), &config(100, 5), &solo(&random_policy));
+        let cross = &report.policies[0].matchups[0];
         let strong_wins = if strong == 0 {
             cross.wins_a
         } else {
@@ -565,8 +589,8 @@ fn a_higher_initiative_in_the_data_alone_always_starts() {
     }
     // The first player is always deck B, so its wins are the first player's wins.
     assert_eq!(
-        report.matchups[0].first_player_wins,
-        report.matchups[0].wins_b
+        report.policies[0].matchups[0].first_player_wins,
+        report.policies[0].matchups[0].wins_b
     );
 }
 
@@ -586,6 +610,107 @@ fn the_report_carries_the_rules_of_the_config() {
             rules,
             ..config(2, 1)
         };
-        assert_eq!(run_batch(&fixture(), &config, &random_policy).rules, rules);
+        assert_eq!(
+            run_batch(&fixture(), &config, &solo(&random_policy)).rules,
+            rules
+        );
     }
+}
+
+#[test]
+fn seat_one_wins_equals_wins_a_in_a_mirror() {
+    for contenders in [fixture(), starter()] {
+        let (report, records) = observed(&contenders, &config(60, 2), &random_policy);
+        for (index, matchup) in report.policies[0].matchups.iter().enumerate() {
+            let one_wins = of_matchup(&records, index)
+                .iter()
+                .filter(|record| {
+                    record
+                        .winner
+                        .is_some_and(|(winner, _)| winner == PlayerId::One)
+                })
+                .count() as u64;
+            // Counted from the records: the seat of the winner, whatever the deck.
+            assert_eq!(matchup.seat_one_wins, one_wins, "{}", matchup.deck_a);
+            if matchup.kind == duel_simulator::Kind::Mirror {
+                assert_eq!(matchup.seat_one_wins, matchup.wins_a);
+            }
+        }
+    }
+}
+
+#[test]
+fn the_duration_histogram_matches_the_total_and_the_finished_games() {
+    for cap in [DEFAULT_MAX_ACTIONS, 30] {
+        let mut capped = config(80, 5);
+        capped.max_actions = cap;
+        let (report, records) = observed(&fixture(), &capped, &random_policy);
+        assert!(report.check().is_ok());
+        let mut interrupted_somewhere = false;
+        for (index, matchup) in report.policies[0].matchups.iter().enumerate() {
+            let finished = matchup.games - matchup.interrupted;
+            assert_eq!(matchup.durations.values().sum::<u64>(), finished);
+            let total: u64 = matchup
+                .durations
+                .iter()
+                .map(|(&a, &n)| u64::from(a) * n)
+                .sum();
+            assert_eq!(total, matchup.total_actions);
+            // The keys are exactly the lengths of the finished games, none above the cap.
+            let mut expected = std::collections::BTreeMap::new();
+            for record in of_matchup(&records, index)
+                .iter()
+                .filter(|r| !r.interrupted)
+            {
+                *expected.entry(record.actions).or_insert(0u64) += 1;
+            }
+            assert_eq!(matchup.durations, expected);
+            assert!(matchup.durations.keys().all(|&actions| actions <= cap));
+            interrupted_somewhere |= matchup.interrupted > 0;
+        }
+        assert_eq!(interrupted_somewhere, cap == 30, "cap {cap}");
+    }
+}
+
+#[test]
+fn a_policy_report_does_not_depend_on_its_position_or_its_neighbours() {
+    let random = NamedPolicy {
+        name: "random",
+        policy: &random_policy,
+    };
+    let first = NamedPolicy {
+        name: "always_first",
+        policy: &always_first,
+    };
+    let alone = run_batch(&fixture(), &config(30, 3), &[random]);
+    let after = run_batch(&fixture(), &config(30, 3), &[first, random]);
+    let before = run_batch(&fixture(), &config(30, 3), &[random, first]);
+    assert_eq!(after.policies.len(), 2);
+    assert_eq!(after.policies[0].policy, "always_first");
+    assert_eq!(after.policies[1], alone.policies[0]);
+    assert_eq!(before.policies[0], alone.policies[0]);
+    assert_eq!(before.policies[1], after.policies[0]);
+    assert!(after.check().is_ok());
+}
+
+#[test]
+fn two_policies_replay_the_same_seeds() {
+    // The same policy under two names plays the very same games: the index of the policy never
+    // enters the seed of a game.
+    let twin = |name| NamedPolicy {
+        name,
+        policy: &random_policy,
+    };
+    let mut records = Vec::new();
+    let report = run_batch_observed(
+        &fixture(),
+        &config(20, 8),
+        &[twin("one"), twin("two")],
+        |record| records.push(*record),
+    );
+    assert_eq!(report.policies[0].matchups, report.policies[1].matchups);
+    // `on_game` is called for every game of every policy, policy after policy.
+    assert_eq!(records.len(), 2 * 3 * 20);
+    let (one, two) = records.split_at(records.len() / 2);
+    assert_eq!(one, two);
 }

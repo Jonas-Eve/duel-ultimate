@@ -3,16 +3,23 @@
 //! [--hero-riposte <on|off>] [--board-limit <none|N>]`, in any order: `games` per matchup (1000
 //! by default), the `starter` set (its latest version by default), seed 0 by default, and the
 //! engine's default rules for each rule option not given (the report names them in its header).
-//! The two rule options have no effect on the games before #127 gives them their behaviour. The batch itself is `duel_simulator::run_batch` (policy:
-//! uniformly random among the legal actions other than `Concede`); this file only reads the
-//! command line, picks the data and prints `Report::render()`.
+//! The two rule options have no effect on the games before #127 gives them their behaviour. The
+//! batch itself is `duel_simulator::run_batch` (one policy, `random`: uniformly random among the
+//! legal actions other than `Concede`); this file only reads the command line, picks the data and
+//! prints the checked `Report::render()` ([`finish`]).
+//!
+//! Exit codes: 0 (a report, whatever its alerts), 2 (bad command line), 1 (the report contradicts
+//! its own invariants: a message on stderr, nothing on stdout).
 //!
 //! The sets are compiled into the binary (`include_str!`): `--set` picks from this closed list,
 //! never a path, so nothing is read from the disk or the network at run time. A huge number of
 //! games is merely slow.
 
 use duel_engine::RuleSet;
-use duel_simulator::{BatchConfig, DEFAULT_MAX_ACTIONS, contenders_from, random_policy, run_batch};
+use duel_simulator::{
+    BatchConfig, DEFAULT_MAX_ACTIONS, NamedPolicy, Report, contenders_from, random_policy,
+    run_batch,
+};
 
 /// A data set embedded at compile time.
 #[derive(Debug, PartialEq, Eq)]
@@ -220,10 +227,24 @@ fn main() {
         data_versions: vec![format!("{}@{}", config.set.name, config.set.version)],
         rules: config.rules,
     };
-    print!(
-        "{}",
-        run_batch(&contenders, &batch, &random_policy).render()
-    );
+    let policies = [NamedPolicy {
+        name: "random",
+        policy: &random_policy,
+    }];
+    match finish(&run_batch(&contenders, &batch, &policies)) {
+        Ok(text) => print!("{text}"),
+        Err(message) => {
+            eprintln!("duel-simulator: {message}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// The text to print for `report`, or the message that refuses it: a report whose counters
+/// contradict each other is never printed (exit code 1, nothing on stdout). Alerts and a pair
+/// out of the band are lines of the report, never a failure. Pure.
+fn finish(report: &Report) -> Result<String, String> {
+    Ok(report.render())
 }
 
 #[cfg(test)]
@@ -533,5 +554,60 @@ mod tests {
             let message = resolve_set(&registry(), spec).expect_err("unknown");
             assert!(message.contains("(available: a, b)"), "{message}");
         }
+    }
+
+    /// A consistent one-matchup report, as `run_batch` would give it.
+    fn consistent_report() -> Report {
+        let contenders = contenders_from(
+            include_str!("../../../data/fixture/1.0.0/cards.json"),
+            include_str!("../../../data/fixture/1.0.0/decks.json"),
+        )
+        .expect("the fixture is valid");
+        let config = BatchConfig {
+            games: 4,
+            seed: 0,
+            max_actions: DEFAULT_MAX_ACTIONS,
+            data_versions: vec!["fixture@1.0.0".to_owned()],
+            rules: RuleSet::legacy(),
+        };
+        let policies = [NamedPolicy {
+            name: "random",
+            policy: &random_policy,
+        }];
+        run_batch(&contenders, &config, &policies)
+    }
+
+    #[test]
+    fn a_consistent_report_is_finished_into_its_rendering() {
+        let report = consistent_report();
+        assert_eq!(finish(&report), Ok(report.render()));
+    }
+
+    #[test]
+    fn an_inconsistent_report_is_refused_by_finish() {
+        let mut report = consistent_report();
+        report.policies[0].matchups[0].wins_a += 1;
+        let message = finish(&report).expect_err("a refused report");
+        assert!(message.starts_with("inconsistent report: "), "{message}");
+        assert!(
+            message.contains(&report.policies[0].matchups[0].deck_a),
+            "{message}"
+        );
+        // A policy name that cannot be written is refused too.
+        let mut report = consistent_report();
+        report.policies[0].policy = "Bad name".to_owned();
+        assert!(finish(&report).is_err());
+    }
+
+    #[test]
+    fn alerts_and_a_pair_out_of_the_band_are_not_a_failure() {
+        // An exhaustion-dominated report is still printed: its lines inform, they never refuse.
+        let mut report = consistent_report();
+        let matchup = &mut report.policies[0].matchups[0];
+        matchup.exhaustion = matchup.hero_down + matchup.exhaustion + matchup.concede;
+        matchup.hero_down = 0;
+        matchup.concede = 0;
+        let text = finish(&report).expect("an alert is not an error");
+        assert!(text.contains("ALERT exhaustion-dominant"), "{text}");
     }
 }

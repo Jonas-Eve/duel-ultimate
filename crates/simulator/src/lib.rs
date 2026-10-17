@@ -12,11 +12,15 @@ pub mod report;
 pub mod stats;
 
 pub use batch::{
-    BatchConfig, Contender, DEFAULT_MAX_ACTIONS, GameRecord, contenders_from, game_seed, play_game,
-    run_batch, run_batch_observed,
+    BatchConfig, Contender, DEFAULT_MAX_ACTIONS, GameRecord, NamedPolicy, contenders_from,
+    game_seed, play_game, run_batch, run_batch_observed,
 };
 pub use duel_ai::{Policy, TAG_POLICY_ONE, TAG_POLICY_TWO, derive_seed, policy_rng, random_policy};
-pub use report::{Kind, MatchupReport, Report, rules_label};
+pub use report::{
+    BAND_HIGH_PERCENT, BAND_LOW_PERCENT, DURATION_TARGET_ACTIONS, Dispersion,
+    EXHAUSTION_ALERT_PERCENT, Kind, MIRROR_FIRST_PLAYER_MAX_PERCENT, MatchupReport, PairDeviation,
+    PolicyReport, PolicySummary, Report, rules_label,
+};
 pub use stats::{fmt_mean, fmt_share, percent, wilson_95};
 
 use duel_cards::{parse_cards, parse_decks};

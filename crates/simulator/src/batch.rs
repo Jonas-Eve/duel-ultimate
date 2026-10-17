@@ -3,7 +3,9 @@
 //! source of randomness other than [`BatchConfig::seed`] (no clock, no `thread_rng`, no
 //! `HashMap`): the same batch always gives the same [`Report`].
 
-use crate::report::{Kind, MatchupReport, Report};
+use std::collections::BTreeMap;
+
+use crate::report::{Kind, MatchupReport, PolicyReport, Report};
 use duel_ai::{Policy, derive_seed, policy_rng};
 use duel_cards::{parse_cards, parse_decks};
 use duel_engine::{
@@ -163,16 +165,33 @@ fn matchups(decks: usize) -> Vec<(usize, usize)> {
     list
 }
 
-/// Plays `config.games` games of every matchup of `contenders` and reports them.
-pub fn run_batch(contenders: &[Contender], config: &BatchConfig, policy: &dyn Policy) -> Report {
-    run_batch_observed(contenders, config, policy, |_| {})
+/// A policy and the name its section of the report carries (`[a-z0-9_-]`, unique in a batch:
+/// checked by [`Report::check`], since the name is written in the rendering).
+#[derive(Clone, Copy)]
+pub struct NamedPolicy<'a> {
+    pub name: &'a str,
+    pub policy: &'a dyn Policy,
 }
 
-/// [`run_batch`], showing `on_game` every game once it is over.
+/// Plays `config.games` games of every matchup of `contenders` with each of `policies` and
+/// reports them: one section per policy, in the order given.
+pub fn run_batch(
+    contenders: &[Contender],
+    config: &BatchConfig,
+    policies: &[NamedPolicy],
+) -> Report {
+    run_batch_observed(contenders, config, policies, |_| {})
+}
+
+/// [`run_batch`], showing `on_game` every game once it is over (those of every policy).
+///
+/// The index of a policy never enters [`game_seed`]: every policy replays the same engine seeds
+/// (paired comparisons), and the section of a policy depends neither on its position nor on its
+/// neighbours.
 pub fn run_batch_observed(
     contenders: &[Contender],
     config: &BatchConfig,
-    policy: &dyn Policy,
+    policies: &[NamedPolicy],
     mut on_game: impl FnMut(&GameRecord),
 ) -> Report {
     let mut report = Report {
@@ -181,43 +200,60 @@ pub fn run_batch_observed(
         games_per_matchup: config.games,
         max_actions: config.max_actions,
         rules: config.rules,
-        matchups: Vec::new(),
+        policies: Vec::new(),
     };
-    for (matchup, (a, b)) in matchups(contenders.len()).into_iter().enumerate() {
-        let mut tally = MatchupReport {
-            deck_a: contenders[a].id.clone(),
-            deck_b: contenders[b].id.clone(),
-            kind: if a == b { Kind::Mirror } else { Kind::Cross },
-            games: config.games,
-            interrupted: 0,
-            wins_a: 0,
-            wins_b: 0,
-            first_player_wins: 0,
-            hero_down: 0,
-            exhaustion: 0,
-            concede: 0,
-            total_actions: 0,
+    for named in policies {
+        let mut section = PolicyReport {
+            policy: named.name.to_owned(),
+            matchups: Vec::new(),
         };
-        for index in 0..config.games {
-            // In a cross matchup A alternates between the seats; in a mirror, A is One.
-            let a_is_one = a == b || index % 2 == 0;
-            let (one, two) = if a_is_one { (a, b) } else { (b, a) };
-            let setup = game_setup(contenders, config, one, two);
-            let seed = game_seed(config.seed, matchup, index);
-            let mut record = play_game(setup, seed, policy, config.max_actions, |_, _| {});
-            record.matchup = matchup;
-            record.index = index;
-            record.seat_of_a = if a_is_one {
-                PlayerId::One
-            } else {
-                PlayerId::Two
+        for (matchup, (a, b)) in matchups(contenders.len()).into_iter().enumerate() {
+            let mut tally = MatchupReport {
+                deck_a: contenders[a].id.clone(),
+                deck_b: contenders[b].id.clone(),
+                kind: if a == b { Kind::Mirror } else { Kind::Cross },
+                games: config.games,
+                interrupted: 0,
+                wins_a: 0,
+                wins_b: 0,
+                seat_one_wins: 0,
+                first_player_wins: 0,
+                hero_down: 0,
+                exhaustion: 0,
+                concede: 0,
+                total_actions: 0,
+                durations: BTreeMap::new(),
             };
-            tally_game(&mut tally, &record);
-            on_game(&record);
+            for index in 0..config.games {
+                // In a cross matchup A alternates between the seats; in a mirror, A is One.
+                let a_is_one = a == b || index % 2 == 0;
+                let (one, two) = if a_is_one { (a, b) } else { (b, a) };
+                let setup = game_setup(contenders, config, one, two);
+                let seed = game_seed(config.seed, matchup, index);
+                let mut record =
+                    play_game(setup, seed, named.policy, config.max_actions, |_, _| {});
+                record.matchup = matchup;
+                record.index = index;
+                record.seat_of_a = if a_is_one {
+                    PlayerId::One
+                } else {
+                    PlayerId::Two
+                };
+                tally_game(&mut tally, &record);
+                on_game(&record);
+            }
+            section.matchups.push(tally);
         }
-        report.matchups.push(tally);
+        report.policies.push(section);
     }
-    debug_assert!(report.check().is_ok(), "{:?}", report.check());
+    // Only a debug check here (silent in release): the binary calls `Report::check` itself and
+    // refuses an inconsistent report with exit code 1. The policy names, given by the caller,
+    // are not part of it.
+    debug_assert!(
+        report.check_counters().is_ok(),
+        "{:?}",
+        report.check_counters()
+    );
     report
 }
 
