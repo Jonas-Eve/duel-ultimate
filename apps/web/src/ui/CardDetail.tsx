@@ -127,7 +127,7 @@ export function CardDetail({ card, emblem, deckName, summaryId, deckId, attack }
         </span>
         {emblem !== undefined && <EmblemChip emblem={emblem} size={36} label={fr.detailDeck(deckName)} id={deckId} />}
       </div>
-      <DetailArt />
+      <DetailArt name={card.name} />
       <div className="card-detail-effects" role="region" aria-label={fr.detailEffects} tabIndex={0}>
         {active.map((line) => (attack === undefined ? <EffectLineView key={line.name} line={line} /> : <AttackLineButton key={line.name} line={line} attack={attack} />))}
         {passive.map((k) => (

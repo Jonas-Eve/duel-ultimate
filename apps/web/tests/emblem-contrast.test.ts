@@ -33,4 +33,16 @@ describe("the emblem chip contrast (WCAG 1.4.11, 3:1 for non-text)", () => {
   test("the chip ring against the frame colour that surrounds the art", () => {
     expect(ratio(token("--emblem-ring"), token("--card-border"))).toBeGreaterThanOrEqual(3);
   });
+
+  test("the chip against any art background: for every luminance, the disc or the ring stands out by 3:1", () => {
+    // The art is now an arbitrary image: whatever its luminance L (0..1), the dark disc or the light ring is at 3:1.
+    const lumOf = (hex: string) => lum(hex);
+    const ratioL = (a: number, b: number) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    const disc = lumOf(token("--emblem-fill"));
+    const ring = lumOf(token("--emblem-ring"));
+    for (let i = 0; i <= 100; i++) {
+      const L = i / 100;
+      expect(Math.max(ratioL(disc, L), ratioL(ring, L)), `background luminance ${L}`).toBeGreaterThanOrEqual(3);
+    }
+  });
 });

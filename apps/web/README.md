@@ -93,14 +93,21 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
   version ; `tests/data-version.test.ts` la compare au chemin importé.
 - **Art des cartes (#101)** : un set peut avoir `art.json` et `art/` (format et licences : `crates/cards/src/art.rs`,
   le moteur n'y touche pas). `data/art.ts` les lit par deux `import.meta.glob` à chemins littéraux (même version
-  que `DATA_VERSION`, tolérants à l'absence : `starter@1.1.0` n'a pas encore d'art, donc aucune image pour l'instant) et
+  que `DATA_VERSION`, tolérants à l'absence : `starter@1.1.0` n'a pas encore d'art, donc l'index est vide et les cartes gardent le paysage de substitution) et
   `buildArtIndex` (pure, ne lève jamais) construit la recherche par nom d'affichage exact. `file` n'est jamais
   concaténé en URL : c'est la clé d'une table fermée d'images, une clé absente laisse l'illustration de
   substitution. Un nom partagé par plusieurs cartes, une licence hors `CC0-1.0`/`CC-BY-4.0` ou une entrée invalide
   = pas d'image. `author`, `license` et `source` sont du texte seulement (jamais un lien actif). `App` est le seul
   lecteur de `data/art` et enveloppe l'arbre dans `ArtProvider` (`ui/ArtContext.tsx`) ; `ui/` n'importe rien de
-  `data/` (`tests/architecture.test.ts`). `CardTile` et le placeholder `.card-art` ne changent pas ici : l'image
-  dans la carte est #89. Tests : `tests/art.test.ts`.
+  `data/` (`tests/architecture.test.ts`). Les emplacements (#113) : `ArtPlaceholder` (carte compacte, défausses) et
+  `DetailArt` (détail), dans `ui/card-icons.tsx`, appellent `useArtLookup()(card.name)` ; avec une image, un
+  `<img src alt="" draggable={false} decoding="async">` (décoratif : jamais de `title`, pas d'`onError`, le fond rayé
+  reste derrière une image qui échoue), sinon le paysage de substitution (nom `null` compris). `.card-art img,
+  .card-detail-art img` : `object-fit: cover` sur tout l'emplacement (recadrage identique), aucun `z-index`, l'image
+  vient après la pastille dans le DOM. `build.assetsInlineLimit` (`vite.config.ts`) refuse d'inliner un `.svg` : sinon
+  Vite met en `data:` dans le JavaScript tout fichier de moins de 4 Kio, invisible aux tests réseau. Tests :
+  `tests/art.test.ts`, `tests/card-art.test.tsx`, `tests/ui-policy.test.ts`, `tests/emblem-contrast.test.ts` (disque ou
+  anneau à 3:1 de toute luminance de fond ; l'anneau ne fait que 1 px, la vérification visuelle reste nécessaire).
 - **Erreurs** : toute erreur est une `EngineError { code, message, fatal }` (`parseEngineError`) ; le
   `message` anglais n'est jamais affiché, la table `ui/errors.fr.ts` fait foi. **Une nouvelle erreur
   Rust casse `tests/error-codes.test.ts` : ajouter son texte français** (et son code dans
@@ -365,8 +372,8 @@ même, alimenté par `toScreenModel` :
   (« Reste N », `fr.keepsLegend`). Les e2e jouent désormais depuis le détail (#107, voir « Tests de bout en bout »).
 - **Détail de carte en lecture seule (#104)** : toucher une créature du plateau adverse ou une carte de la main
   de l'autre camp (deux camps) ouvre `CardDetailSheet`, une feuille modale (`Dialog`) : coût en gros avec
-  sablier, nom, symbole du deck (`EmblemChip` en `role="img"`, « Deck Rempart »), illustration de substitution
-  de 230 px fixes (`DetailArt`, que #89 remplacera), zone d'effets défilante et focusable, attaque et riposte
+  sablier, nom, symbole du deck (`EmblemChip` en `role="img"`, « Deck Rempart »), illustration de 230 px
+  (`DetailArt`, qui affiche l'image de la carte ou le paysage de substitution), zone d'effets défilante et focusable, attaque et riposte
   (toujours affichée, même à 0) à gauche, vie courante à droite (jamais « N / max » : `CardView` n'a pas de vie
   maximale), « Fermer » de 48 px ; la carte fait 520 px, c'est `.dialog` qui défile sur un petit écran. Sans
   emplacement `actions`, aucun autre bouton : ouvrir ou fermer ne soumet rien (les actions passent par

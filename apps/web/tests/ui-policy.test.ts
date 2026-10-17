@@ -67,4 +67,21 @@ describe("index.css", () => {
     expect(css).toMatch(/max-width:\s*48rem/);
     expect(css).toMatch(/overflow-x:\s*auto/);
   });
+
+  test("art images fill their slot and crop identically (cover), without z-index", () => {
+    const code = stripComments(css);
+    const rule = /\.card-art img,\s*\.card-detail-art img\s*\{([^}]*)\}/.exec(code)?.[1] ?? "";
+    expect(rule).toMatch(/width:\s*100%/);
+    expect(rule).toMatch(/height:\s*100%/);
+    expect(rule).toMatch(/object-fit:\s*cover/);
+    expect(rule).toMatch(/display:\s*block/);
+    expect(code).not.toMatch(/z-index/);
+  });
+});
+
+describe("vite.config.ts", () => {
+  test("SVG files are never inlined as data: URIs (they stay separate requests, invisible otherwise to the network tests)", () => {
+    const config = readFileSync(join(webRoot, "vite.config.ts"), "utf8");
+    expect(config).toMatch(/assetsInlineLimit:\s*\(\w+\)\s*=>\s*\(\w+\.endsWith\("\.svg"\)\s*\?\s*false\s*:\s*undefined\)/);
+  });
 });
