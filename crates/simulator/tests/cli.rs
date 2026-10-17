@@ -16,11 +16,16 @@ fn stdout(output: &Output) -> String {
     String::from_utf8(output.stdout.clone()).expect("utf-8 output")
 }
 
-/// The matchup lines of a report: the three after the header and its rule.
+/// The matchup lines of the first table of the first policy block: the three after the header
+/// of the table and its rule.
 fn matchup_lines(text: &str) -> Vec<&str> {
     let lines: Vec<&str> = text.lines().collect();
-    assert!(lines.len() >= 3, "{text:?}");
-    lines[3..].to_vec()
+    let block = lines
+        .iter()
+        .position(|line| line.starts_with("policy: "))
+        .unwrap_or_else(|| panic!("a policy block in {text:?}"));
+    assert!(lines.len() >= block + 6, "{text:?}");
+    lines[block + 3..block + 6].to_vec()
 }
 
 #[test]
@@ -34,9 +39,10 @@ fn a_run_prints_the_report_structure_for_the_three_starter_matchups() {
         "{text:?}"
     );
     assert!(text.ends_with('\n'));
+    assert_eq!(text.lines().nth(1), Some("policy: random"));
     assert!(
         text.lines()
-            .nth(1)
+            .nth(2)
             .is_some_and(|l| l.starts_with("matchup"))
     );
     let lines = matchup_lines(&text);
@@ -52,6 +58,44 @@ fn a_run_prints_the_report_structure_for_the_three_starter_matchups() {
         assert_eq!(rest.split_whitespace().next(), Some("20"), "{line:?}");
         assert!(line.contains('[') && line.contains(']'), "{line:?}");
     }
+}
+
+#[test]
+fn a_run_prints_one_policy_block_with_two_tables_and_a_summary() {
+    let output = run(&["20"]);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let text = stdout(&output);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines.iter().filter(|l| l.starts_with("policy: ")).count(),
+        1
+    );
+    // Two tables: the games and the durations.
+    let heads: Vec<&&str> = lines.iter().filter(|l| l.starts_with("matchup ")).collect();
+    assert_eq!(heads.len(), 2, "{text:?}");
+    assert!(heads[0].contains("seat One") && heads[0].contains("interrupted"));
+    assert!(
+        heads[1].contains("median") && heads[1].contains("p90") && heads[1].contains("vs target")
+    );
+    // The five verdict lines close the block, in this order, informational whatever they say.
+    let verdict: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|l| {
+            [
+                "worst pair:",
+                "dispersion (",
+                "cross pairs in band ",
+                "mirror first player ",
+                "duration target:",
+            ]
+            .iter()
+            .any(|prefix| l.starts_with(prefix))
+        })
+        .collect();
+    assert_eq!(verdict.len(), 5, "{text:?}");
+    assert_eq!(&lines[lines.len() - 5..], verdict.as_slice());
 }
 
 #[test]
@@ -149,7 +193,7 @@ fn the_header_names_the_default_rules_of_the_engine() {
     assert_eq!(
         header(&["20"]),
         format!(
-            "set: starter@1.1.0 | seed: 0 | games per matchup: 20 | action cap: 10000 | rules: {}",
+            "set: starter@1.1.0 | seed: 0 | games per matchup: 20 | action cap: 10000 | policies: random | rules: {}",
             rules_label(&RuleSet::default())
         )
     );
@@ -160,7 +204,7 @@ fn the_header_names_the_rules_given_on_the_command_line() {
     let args = ["20", "--hero-riposte", "on", "--board-limit", "5"];
     assert_eq!(
         header(&args),
-        "set: starter@1.1.0 | seed: 0 | games per matchup: 20 | action cap: 10000 | rules: hero_riposte=on board_limit=5"
+        "set: starter@1.1.0 | seed: 0 | games per matchup: 20 | action cap: 10000 | policies: random | rules: hero_riposte=on board_limit=5"
     );
     assert_eq!(stdout(&run(&args)), stdout(&run(&args)));
 }

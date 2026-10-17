@@ -4,6 +4,18 @@
 //! ([`Policy`], from `duel-ai`); every seed derives from the batch seed ([`derive_seed`], also
 //! from `duel-ai`).
 //!
+//! A batch plays every matchup once per policy ([`NamedPolicy`]) and the report has one
+//! [`PolicyReport`] section per policy, in the order given. The index of a policy never enters a
+//! game seed: every policy replays the same engine seeds, and a section depends neither on its
+//! position nor on its neighbours.
+//!
+//! The report is pure: integer counters (wins, seat and first-player wins, end causes, a
+//! histogram of the durations of the finished games), exact integer decisions (the alert, the
+//! band, the thresholds, the target marker: cross products in `u128`, named constants such as
+//! [`EXHAUSTION_ALERT_PERCENT`] and [`BAND_LOW_PERCENT`]) and a deterministic rendering
+//! ([`Report::render`]) pinned by golden tests. [`Report::check`] verifies the invariants of the
+//! counters; the binary refuses an inconsistent report with exit code 1.
+//!
 //! This library never reads the disk or the network: the data comes in as strings
 //! ([`contenders_from`], [`setup_from`]). Only the `duel-simulator` binary embeds data files.
 
@@ -12,11 +24,15 @@ pub mod report;
 pub mod stats;
 
 pub use batch::{
-    BatchConfig, Contender, DEFAULT_MAX_ACTIONS, GameRecord, contenders_from, game_seed, play_game,
-    run_batch, run_batch_observed,
+    BatchConfig, Contender, DEFAULT_MAX_ACTIONS, GameRecord, NamedPolicy, contenders_from,
+    game_seed, play_game, run_batch, run_batch_observed,
 };
 pub use duel_ai::{Policy, TAG_POLICY_ONE, TAG_POLICY_TWO, derive_seed, policy_rng, random_policy};
-pub use report::{Kind, MatchupReport, Report, rules_label};
+pub use report::{
+    BAND_HIGH_PERCENT, BAND_LOW_PERCENT, DURATION_TARGET_ACTIONS, Dispersion,
+    EXHAUSTION_ALERT_PERCENT, Kind, MIRROR_FIRST_PLAYER_MAX_PERCENT, MatchupReport, PairDeviation,
+    PolicyReport, PolicySummary, Report, rules_label,
+};
 pub use stats::{fmt_mean, fmt_share, percent, wilson_95};
 
 use duel_cards::{parse_cards, parse_decks};

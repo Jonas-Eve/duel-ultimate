@@ -60,6 +60,7 @@ Le seuil n'est épinglé dans aucun test et aucune mesure de débit ne tourne en
 | Date | SHA | Règles (options explicites) | Machine | Parties/s (médiane, min-max) | Actions/s (médiane) | Seuil (0,8 x) |
 |---|---|---|---|---|---|---|
 | 2026-10-17 | `e798210` | `--hero-riposte off --board-limit none`, `starter@1.1.0`, graine 1 | Intel Xeon 2,10 GHz, 4 coeurs (`nproc`), rustc 1.97.0 (2026-07-07), conteneur Linux | 14 151,4 (13 690,3 - 14 906,7) | 776 602,2 | 11 321,1 parties/s |
+| 2026-10-17 | `f21f1c5` | idem, **nouveau format de rapport** (#153, histogramme des durées) | idem (Intel Xeon 2,10 GHz, 4 coeurs, rustc 1.97.0) | 14 136,9 (13 402,5 - 14 778,1) | 775 810,0 | **non gardante** (informative) |
 
 Détail de la mesure du 2026-10-17 : 6 passes de 30 000 parties (1 646 347 actions chacune), la
 première écartée ; passes retenues en parties/s : 14 151,4 ; 13 954,7 ; 14 906,7 ; 13 690,3 ;
@@ -67,6 +68,15 @@ première écartée ; passes retenues en parties/s : 14 151,4 ; 13 954,7 ; 14 90
 (min-max 751 298,6 - 818 053,2). Réserve : la machine n'était pas strictement inactive (charge
 moyenne d'environ 1,6 sur 4 coeurs, un autre développeur travaillant en parallèle dans le même
 conteneur) ; l'exécution est monocoeur, et la dispersion observée est d'environ 9 %.
+
+Ligne `f21f1c5` (informative, **non gardante** ; le seuil gardant reste celui de la référence
+`e798210`, 11 321,1 parties/s) : coût de l'histogramme et des compteurs du nouveau format de rapport
+(#153), même protocole (1 passe de chauffe écartée à 14 121,4 parties/s, 5 passes retenues en parties/s :
+13 402,5 ; 14 600,9 ; 14 778,1 ; 14 136,9 ; 13 603,8 ; actions/s retenues : 735 504,1 ; 801 273,7 ;
+810 998,2 ; 775 810,0 ; 746 551,6). Mêmes 30 000 parties et 1 646 347 actions que la référence : seul
+le débit varie. La médiane est à 99,9 % de celle de `e798210` (14 151,4), soit bien dans la dispersion
+d'environ 9 % observée : le surcoût de l'histogramme n'est pas mesurable sur cette machine (charge
+moyenne d'environ 1 sur 4 coeurs).
 
 La ligne « nouveaux défauts de #127 » est ajoutée par #127 avec le même protocole : c'est elle
 qui garde #128 puis #131.
