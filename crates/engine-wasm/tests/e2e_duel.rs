@@ -38,7 +38,7 @@
 //! distributions are not observable here; they are locked by the data tests of the set. Cases 1 to 31 run unchanged as the regression (case 40).
 
 use duel_cards::{CardsError, parse_cards, parse_decks, resolve_deck};
-use duel_engine::{GameSetup, PlayerSetup};
+use duel_engine::{GameSetup, PlayerSetup, RuleSet};
 use duel_engine_wasm::{Duel, MAX_INPUT_BYTES};
 use serde_json::{Value, json};
 
@@ -62,6 +62,7 @@ fn fixture() -> Value {
         one: side(0),
         two: side(1),
         data_versions: vec!["fixture@1.0.0".into()],
+        rules: RuleSet::default(),
     })
     .unwrap()
 }
@@ -3491,6 +3492,7 @@ fn starter_of(one: &str, two: &str) -> Value {
         one: side(one),
         two: side(two),
         data_versions: vec![STARTER_VERSION.into()],
+        rules: RuleSet::default(),
     })
     .unwrap()
 }

@@ -3,7 +3,7 @@
 
 use duel_cards::{CardsError, CreatureStats, Effect, Hero, HeroEffect, MAX_STAT};
 use duel_engine::{
-    Action, CardInstanceId, Event, GameSetup, GameState, PlayerId, PlayerSetup, RuleError,
+    Action, CardInstanceId, Event, GameSetup, GameState, PlayerId, PlayerSetup, RuleError, RuleSet,
     SetupError, Target, WinReason, apply, legal_actions, new_game,
 };
 use serde_json::{Value, json};
@@ -48,6 +48,7 @@ fn setup(one: Hero, two: Hero) -> GameSetup {
             card_names: Vec::new(),
         },
         data_versions: vec!["fixture@1.0.0".into()],
+        rules: RuleSet::default(),
     }
 }
 
@@ -161,7 +162,8 @@ fn the_higher_initiative_starts_with_its_start_budget() {
             Some(&Event::GameStarted {
                 first: PlayerId::Two,
                 budget: 6,
-                data_versions: vec!["fixture@1.0.0".into()]
+                data_versions: vec!["fixture@1.0.0".into()],
+                rules: RuleSet::default(),
             })
         );
         assert_eq!(state.winner(), None);
@@ -209,9 +211,12 @@ fn invalid_data_is_rejected_at_setup_without_panicking() {
             hero(1, 1, 8, vec![draw(1, 1)]),
         );
         f(&mut s);
-        new_game(s, 1).unwrap_err()
+        match new_game(s, 1).unwrap_err() {
+            SetupError::Invalid(e) => e,
+            other => panic!("expected a data error, got {other}"),
+        }
     };
-    let SetupError::Invalid(e) = bad(&|s| s.one.hero.start_budget = 9);
+    let e = bad(&|s| s.one.hero.start_budget = 9);
     assert_eq!(
         e,
         CardsError::StartBudgetOutOfRange {
@@ -219,23 +224,23 @@ fn invalid_data_is_rejected_at_setup_without_panicking() {
             max_time: 8
         }
     );
-    let SetupError::Invalid(e) = bad(&|s| s.two.hero.max_time = 0);
+    let e = bad(&|s| s.two.hero.max_time = 0);
     assert_eq!(e, CardsError::MaxTimeBelowOne);
-    let SetupError::Invalid(e) = bad(&|s| s.one.hero.effects = vec![draw(0, 1)]);
+    let e = bad(&|s| s.one.hero.effects = vec![draw(0, 1)]);
     assert_eq!(e, CardsError::EffectCostBelowOne { effect: 0 });
-    let SetupError::Invalid(e) = bad(&|s| s.two.hero.effects = vec![draw(1, 0)]);
+    let e = bad(&|s| s.two.hero.effects = vec![draw(1, 0)]);
     assert_eq!(e, CardsError::EffectCountBelowOne { effect: 0 });
-    let SetupError::Invalid(e) = bad(&|s| s.one.hero.health = 0);
+    let e = bad(&|s| s.one.hero.health = 0);
     assert_eq!(e, CardsError::NonPositiveStat { field: "health" });
-    let SetupError::Invalid(e) = bad(&|s| s.two.cards.pop().map(|_| ()).unwrap_or(()));
+    let e = bad(&|s| s.two.cards.pop().map(|_| ()).unwrap_or(()));
     assert!(matches!(e, CardsError::WrongDeckSize { found: 29, .. }));
-    let SetupError::Invalid(e) = bad(&|s| s.one.hero.starting_hand = 31);
+    let e = bad(&|s| s.one.hero.starting_hand = 31);
     assert!(matches!(e, CardsError::StartingHandExceedsDeck { .. }));
-    let SetupError::Invalid(e) = bad(&|s| s.one.cards[3].cost = 0);
+    let e = bad(&|s| s.one.cards[3].cost = 0);
     assert_eq!(e, CardsError::CostBelowOne { field: "cost" });
-    let SetupError::Invalid(e) = bad(&|s| s.two.cards[0].force = 0);
+    let e = bad(&|s| s.two.cards[0].force = 0);
     assert_eq!(e, CardsError::NonPositiveStat { field: "force" });
-    let SetupError::Invalid(e) = bad(&|s| s.one.cards[5].riposte = MAX_STAT + 1);
+    let e = bad(&|s| s.one.cards[5].riposte = MAX_STAT + 1);
     assert_eq!(
         e,
         CardsError::StatTooHigh {
@@ -244,7 +249,7 @@ fn invalid_data_is_rejected_at_setup_without_panicking() {
             max: MAX_STAT
         }
     );
-    let SetupError::Invalid(e) = bad(&|s| s.two.cards[0].health = MAX_STAT + 1);
+    let e = bad(&|s| s.two.cards[0].health = MAX_STAT + 1);
     assert!(matches!(
         e,
         CardsError::StatTooHigh {
@@ -1241,11 +1246,17 @@ fn play_to_the_end(seed: u64) -> (GameState, Vec<Event>) {
 }
 
 /// The setup of the S1 and S2a games (its `data_versions` is `["fixture@1.0.0"]`).
+///
+/// Its rules are the legacy ones, explicitly: the golden journals stay valid whatever the engine
+/// default becomes.
 fn s1_setup() -> GameSetup {
-    setup(
-        hero(2, 3, 8, vec![draw(1, 1), draw(4, 2)]),
-        hero(1, 2, 6, vec![draw(2, 1)]),
-    )
+    GameSetup {
+        rules: RuleSet::legacy(),
+        ..setup(
+            hero(2, 3, 8, vec![draw(1, 1), draw(4, 2)]),
+            hero(1, 2, 6, vec![draw(2, 1)]),
+        )
+    }
 }
 
 /// The same setup with no recorded data version: `GameStarted` then serializes exactly as it
@@ -1419,6 +1430,26 @@ fn s2a_scripted_games_keep_their_exact_outcome_and_journal() {
         creature_attacks > 0,
         "the golden games must include an attack on a creature"
     );
+    assert_eq!(observed, S2A_GOLDEN);
+}
+
+/// The same golden journals, replayed with the legacy rules written out on a setup that did not
+/// start from `s1_setup()`: "options disabled" is the reference, not the engine default.
+#[test]
+fn s2a_golden_replays_with_explicit_legacy_rules() {
+    let observed: Vec<_> = (0..20)
+        .map(|seed| {
+            let mut setup = setup(
+                hero(2, 3, 8, vec![draw(1, 1), draw(4, 2)]),
+                hero(1, 2, 6, vec![draw(2, 1)]),
+            );
+            setup.rules = RuleSet::legacy();
+            let (state, log) = play_scripted_s2a_from(without_versions(setup), seed);
+            let (winner, reason) = state.winner().unwrap();
+            let json = serde_json::to_string(&log).unwrap();
+            (winner, reason, log.len(), fnv1a(json.as_bytes()))
+        })
+        .collect();
     assert_eq!(observed, S2A_GOLDEN);
 }
 

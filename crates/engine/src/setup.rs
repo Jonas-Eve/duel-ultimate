@@ -1,6 +1,7 @@
 //! Game creation: validation, deterministic shuffle, opening hands, who starts.
 
 use crate::rules::{self, Event};
+use crate::ruleset::{RuleSet, RuleSetError};
 use crate::state::{CardInstance, CardInstanceId, GameState, PlayerId, PlayerState};
 use duel_cards::{
     CardsError, CreatureStats, Hero, validate_card_names, validate_creature, validate_deck_shape,
@@ -24,26 +25,33 @@ pub struct PlayerSetup {
 /// decks with `duel-cards` first (the `data` module does it for the callers that start from
 /// `cards.json` / `decks.json` strings, by deck identifier, still without any I/O). `data_versions` is opaque and untrusted: recorded as is in
 /// the state and copied into `Event::GameStarted` (replays, balance), never interpreted,
-/// validated or sorted. The key is mandatory in JSON (an empty list is valid).
+/// validated or sorted. The key is mandatory in JSON (an empty list is valid). `rules` is
+/// optional: absent reads as the engine default and is written only when it differs from it;
+/// `new_game` validates it (the options may come from an untrusted client). To replay a
+/// historical game, pass its rules explicitly.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GameSetup {
     pub one: PlayerSetup,
     pub two: PlayerSetup,
     pub data_versions: Vec<String>,
+    #[serde(default, skip_serializing_if = "RuleSet::is_default")]
+    pub rules: RuleSet,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum SetupError {
     #[error("invalid game data: {0}")]
     Invalid(#[from] CardsError),
+    #[error("invalid rules: {0}")]
+    InvalidRules(#[from] RuleSetError),
 }
 
 impl SetupError {
     /// Stable machine-readable code.
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Invalid(_) => "invalid_setup",
+            Self::Invalid(_) | Self::InvalidRules(_) => "invalid_setup",
         }
     }
 }
@@ -107,8 +115,9 @@ fn deal(state: &mut GameState, player: PlayerId) {
 }
 
 /// Starts a game. Re-validates `setup` (it may come from an untrusted client) and never
-/// panics. The events hold `GameStarted` (with a copy of `setup.data_versions`, which
-/// influences neither the generator nor any rule) and, if the first player has nothing to
+/// panics. The decks are validated first, then `setup.rules`. The events hold `GameStarted`
+/// (with a copy of `setup.data_versions` and, when not the default, `setup.rules`, which
+/// influence neither the generator nor, yet, any rule) and, if the first player has nothing to
 /// do, `GameWon`.
 ///
 /// The generator is consumed in this order: One's shuffle, Two's shuffle, then
@@ -118,10 +127,11 @@ fn deal(state: &mut GameState, player: PlayerId) {
 pub fn new_game(setup: GameSetup, seed: u64) -> Result<(GameState, Vec<Event>), SetupError> {
     validate_side(&setup.one)?;
     validate_side(&setup.two)?;
+    setup.rules.validate()?;
     let mut next_id = 0;
     let one = build_side(setup.one, &mut next_id);
     let two = build_side(setup.two, &mut next_id);
-    let mut state = GameState::from_parts(one, two, setup.data_versions, seed);
+    let mut state = GameState::from_parts(one, two, setup.data_versions, setup.rules, seed);
 
     shuffle(&mut state, PlayerId::One);
     shuffle(&mut state, PlayerId::Two);
@@ -141,6 +151,7 @@ pub fn new_game(setup: GameSetup, seed: u64) -> Result<(GameState, Vec<Event>), 
         first: state.active,
         budget: state.budget,
         data_versions: state.data_versions().to_vec(),
+        rules: state.rules(),
     }];
     rules::check_exhaustion(&mut state, &mut events);
     Ok((state, events))

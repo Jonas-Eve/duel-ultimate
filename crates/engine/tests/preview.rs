@@ -7,8 +7,8 @@
 
 use duel_cards::{CreatureStats, Effect, Hero, HeroEffect};
 use duel_engine::{
-    Action, ActionPreview, Event, GameResult, GameSetup, GameState, PlayerId, PlayerSetup, Target,
-    WinReason, apply, game_setup_from_data, legal_actions, new_game, preview_legal_actions,
+    Action, ActionPreview, Event, GameResult, GameSetup, GameState, PlayerId, PlayerSetup, RuleSet,
+    Target, WinReason, apply, game_setup_from_data, legal_actions, new_game, preview_legal_actions,
 };
 use serde_json::Value;
 
@@ -189,6 +189,7 @@ fn built(one: PlayerSetup, two: PlayerSetup) -> GameState {
             one,
             two,
             data_versions: vec![],
+            rules: RuleSet::default(),
         },
         7,
     )

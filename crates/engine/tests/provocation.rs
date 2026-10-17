@@ -6,8 +6,8 @@
 
 use duel_cards::{CreatureStats, Hero};
 use duel_engine::{
-    Action, CardInstanceId, Event, GameSetup, GameState, PlayerId, PlayerSetup, RuleError, Target,
-    apply, legal_actions, new_game,
+    Action, CardInstanceId, Event, GameSetup, GameState, PlayerId, PlayerSetup, RuleError, RuleSet,
+    Target, apply, legal_actions, new_game,
 };
 
 /// Force 1, summoning and attack cost 1, no riposte.
@@ -89,6 +89,7 @@ fn arena(one: &[CreatureStats], two: &[CreatureStats], k: u32, pile: u32) -> Are
                     card_names: Vec::new(),
                 },
                 data_versions: vec!["fixture@1.0.0".into()],
+                rules: RuleSet::default(),
             },
             seed,
         )

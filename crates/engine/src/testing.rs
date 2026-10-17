@@ -1,7 +1,7 @@
 //! Fixtures shared by the in-crate tests.
 
 use crate::state::{CardInstance, GameState, PlayerState};
-use crate::{GameSetup, PlayerSetup};
+use crate::{GameSetup, PlayerSetup, RuleSet};
 use duel_cards::{CreatureStats, Effect, Hero, HeroEffect};
 
 pub(crate) fn draw(cost: u32, count: u32) -> HeroEffect {
@@ -73,6 +73,7 @@ pub(crate) fn setup(one: Hero, two: Hero) -> GameSetup {
             card_names: Vec::new(),
         },
         data_versions: vec!["fixture@1.0.0".into()],
+        rules: RuleSet::default(),
     }
 }
 

@@ -293,7 +293,7 @@ impl Game {
 mod tests {
     use super::*;
     use duel_cards::{parse_cards, parse_decks, resolve_deck};
-    use duel_engine::{GameSetup, PlayerSetup};
+    use duel_engine::{GameSetup, PlayerSetup, RuleSet};
     use serde_json::Value;
 
     fn setup_value() -> Value {
@@ -308,6 +308,7 @@ mod tests {
             one: side(0),
             two: side(1),
             data_versions: vec!["fixture@1.0.0".into()],
+            rules: RuleSet::default(),
         })
         .unwrap()
     }

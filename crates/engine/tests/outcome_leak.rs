@@ -6,7 +6,7 @@
 use duel_cards::{CreatureStats, Effect, Hero, HeroEffect};
 use duel_engine::{
     Action, ActionOutcome, CardInstanceId, Event, GameSetup, GameState, Observation, PlayerId,
-    PlayerSetup, apply, legal_actions, new_game, player_view, preview_legal_actions,
+    PlayerSetup, RuleSet, apply, legal_actions, new_game, player_view, preview_legal_actions,
 };
 use std::collections::BTreeSet;
 
@@ -69,6 +69,7 @@ fn secret_setup() -> GameSetup {
         one: side(0),
         two: side(DECK_SIZE),
         data_versions: vec!["test@1".into()],
+        rules: RuleSet::default(),
     }
 }
 

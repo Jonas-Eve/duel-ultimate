@@ -25,6 +25,11 @@
 //! the acting seat after the action, where a drawn card is only counted ([`OutcomeView`]: the
 //! masking follows the `Drew` events, not a difference of hands).
 //!
+//! [`RuleSet`] holds the per-game options (two closed ones: `hero_riposte`, `board_limit`),
+//! carried by `GameSetup.rules`, validated by [`new_game`] (`invalid_setup`) and copied into
+//! `Event::GameStarted` only when they differ from the engine default. They have no effect yet
+//! (#127) and never touch the generator. To replay a historical game, pass its rules explicitly.
+//!
 //! Randomness is consumed only at setup, in this documented order: shuffle of One's deck,
 //! shuffle of Two's deck, then `random_below(2)` if (and only if) the initiatives are equal.
 //! [`apply`] never consumes the generator.
@@ -44,6 +49,7 @@ mod effects;
 mod observation;
 mod preview;
 mod rules;
+mod ruleset;
 mod setup;
 mod state;
 #[cfg(test)]
@@ -55,6 +61,7 @@ pub use data::{DataError, game_setup_from_data, player_setup};
 pub use observation::{ActionOutcome, Observation};
 pub use preview::{ActionPreview, preview_legal_actions};
 pub use rules::{Action, Event, RuleError, Target, apply, legal_actions};
+pub use ruleset::{MAX_BOARD_LIMIT, RuleSet, RuleSetError};
 pub use setup::{GameSetup, PlayerSetup, SetupError, new_game};
 pub use state::{CardInstanceId, GameState, PlayerId, WinReason};
 pub use view::{

@@ -6,8 +6,8 @@
 
 use duel_cards::{CreatureStats, Hero, MAX_STAT};
 use duel_engine::{
-    Action, CardInstanceId, Event, GameSetup, GameState, PlayerId, PlayerSetup, RuleError, Target,
-    WinReason, apply, new_game,
+    Action, CardInstanceId, Event, GameSetup, GameState, PlayerId, PlayerSetup, RuleError, RuleSet,
+    Target, WinReason, apply, new_game,
 };
 
 /// Summoning cost 1.
@@ -63,6 +63,7 @@ fn arena(one: &[CreatureStats], two: &[CreatureStats], k: u32, two_max: u32) -> 
                 card_names: Vec::new(),
             },
             data_versions: vec!["fixture@1.0.0".into()],
+            rules: RuleSet::default(),
         },
         7,
     )

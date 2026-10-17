@@ -2,8 +2,8 @@
 //! library API; the files are embedded the way `crates/engine-wasm/tests/e2e_duel.rs` does.
 
 use duel_engine::{
-    Action, Event, GameSetup, GameState, PlayerId, Target, WinReason, apply, legal_actions,
-    new_game,
+    Action, Event, GameSetup, GameState, PlayerId, RuleSet, Target, WinReason, apply,
+    legal_actions, new_game,
 };
 use duel_simulator::{DEFAULT_MAX_ACTIONS, GameRecord, play_game, random_policy, setup_from};
 
@@ -60,6 +60,7 @@ fn starter_setups() -> [GameSetup; 2] {
         one: setup.two.clone(),
         two: setup.one.clone(),
         data_versions: setup.data_versions.clone(),
+        rules: RuleSet::default(),
     };
     [setup, swapped]
 }

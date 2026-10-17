@@ -7,7 +7,7 @@
 
 use duel_cards::{parse_cards, parse_decks};
 use duel_engine::player_setup;
-use duel_engine::{GameSetup, PlayerSetup};
+use duel_engine::{GameSetup, PlayerSetup, RuleSet};
 use duel_engine_wasm::{Duel, MAX_INPUT_BYTES};
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -38,6 +38,7 @@ fn secret_game(one: &str, two: &str, seed: u32) -> Duel {
         one: side(one, 0),
         two: side(two, 30),
         data_versions: vec!["starter@1.0.0".into()],
+        rules: RuleSet::default(),
     };
     Duel::from_json(&serde_json::to_string(&setup).unwrap(), seed).unwrap()
 }
@@ -302,6 +303,7 @@ fn a_view_with_unnamed_cards_has_null_names() {
         one: side("rush", 0),
         two: side("bulwark", 30),
         data_versions: vec![],
+        rules: RuleSet::default(),
     };
     setup.one.card_names.clear();
     setup.two.card_names.clear();

@@ -1,5 +1,6 @@
 //! The game state: private to the crate, observed through minimal accessors.
 
+use crate::ruleset::RuleSet;
 use duel_cards::{CreatureStats, Hero};
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -68,6 +69,7 @@ pub struct GameState {
     pub(crate) budget: u32,
     pub(crate) winner: Option<(PlayerId, WinReason)>,
     pub(crate) data_versions: Vec<String>,
+    pub(crate) rules: RuleSet,
     rng: ChaCha8Rng,
 }
 
@@ -76,6 +78,7 @@ impl GameState {
         one: PlayerState,
         two: PlayerState,
         data_versions: Vec<String>,
+        rules: RuleSet,
         seed: u64,
     ) -> Self {
         Self {
@@ -85,6 +88,7 @@ impl GameState {
             budget: 1,
             winner: None,
             data_versions,
+            rules,
             rng: ChaCha8Rng::seed_from_u64(seed),
         }
     }
@@ -105,6 +109,11 @@ impl GameState {
     /// The data set versions this game was started with (opaque to the engine).
     pub fn data_versions(&self) -> &[String] {
         &self.data_versions
+    }
+
+    /// The rule options this game was started with. No rule reads them yet (#127).
+    pub fn rules(&self) -> RuleSet {
+        self.rules
     }
 
     pub fn hand_len(&self, player: PlayerId) -> usize {
