@@ -43,7 +43,7 @@ export const test = base.extend<{ guard: Guard }>({
       await use({ problems });
 
       if (testInfo.status !== testInfo.expectedStatus) {
-        // The CI archives no artifact: the log is the only diagnosis (see apps/web/README.md).
+        // The manual e2e workflow archives no artifact: the log is the only diagnosis (see apps/web/README.md).
         console.log(`--- ${testInfo.title}: failed, what the player sees ---`);
         try {
           console.log(await page.locator("main").ariaSnapshot({ timeout: 3000 }));

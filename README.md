@@ -53,14 +53,17 @@ Règles propres à ce repo :
   par le propriétaire** : `@playwright/test` est épinglé à **1.56.1** (avec `playwright-core` 1.56.1,
   pair de `@axe-core/playwright`), la dernière version exécutable avec le Chromium 141 préinstallé
   dans les environnements d'agents (`/opt/pw-browsers`, aucun téléchargement possible) : chaque version
-  de Playwright exige une révision précise de Chromium. En CI, `npx playwright install` à la version du
+  de Playwright exige une révision précise de Chromium. Dans le workflow manuel, `npx playwright install` à la version du
   lock installe ce même Chromium 141 : un e2e identique partout. **Remonter la version quand
   `/opt/pw-browsers` est rafraîchi** (ticket `type:tech` à ce moment-là).
 - **CI** (`.github/workflows/ci.yml`, sur `pull_request` et `push` vers `main`) : `fmt`, `clippy`,
   tests Rust, build WASM, contrôle de non-entropie, puis `npm ci`, `npm run build` et `npm test`
-  dans `apps/web`, puis les tests de bout en bout (`npx playwright install --with-deps chromium`,
-  `npm run e2e`). Permissions `contents: read`, actions épinglées par SHA, aucun secret ; sa
-  politique est gardée par `apps/web/tests/ci-policy.test.ts`.
+  dans `apps/web` ; **elle ne lance plus les tests de bout en bout** (#78, décision du propriétaire,
+  pour économiser le quota de CI). Ceux-ci tournent à la demande par `.github/workflows/e2e.yml`
+  (« E2E (manual) », `workflow_dispatch` seul, jamais `pull_request` ni `push`), à lancer depuis
+  l'onglet Actions : la CI automatique ne couvre donc plus le flux complet (Vitest, lui, reste
+  automatique). Permissions `contents: read`, actions épinglées par SHA, aucun secret, aucun artefact ;
+  les deux workflows sont gardés par `apps/web/tests/ci-policy.test.ts`.
 - Une nouvelle mécanique ajoute une brique au moteur sans modifier le comportement des decks
   qui ne l'utilisent pas (à vérifier par le simulateur).
 - Format des données : un set = un dossier versionné `data/<set>/<version>/` (`cards.json`, `decks.json`). Une carte a un discriminant `kind` ; un deck embarque son héros et compte exactement 30 cartes ; toute validation passe par `duel-cards` (`parse_cards`, `parse_decks`, `resolve_deck_named`, `resolve_deck` en étant un mince appel), stats bornées à `MAX_STAT` = 10000. Exemple : `data/fixture/1.0.0/`. Une créature a aussi deux champs optionnels : `provocation` (booléen, faux par défaut) et `riposte` (entier ≥ 0, 0 par défaut, borné par `MAX_STAT`), repris tels quels dans `CreatureStats` ; un ancien JSON à quatre clés reste valide ; le moteur lit `provocation` (filtre de cibles) et `riposte` (dégâts rendus à l'attaquant). La fixture `data/fixture/1.0.0/` n'en utilise aucune. Le jeu de départ `data/starter/1.0.0/` (`starter@1.0.0`) fournit deux decks de 30 cartes, Ruée (`rush`) et Rempart (`bulwark`), aux héros et aux distributions de coût, force, PV et coût d'attaque nettement différents ; c'est le premier jeu qui utilise `provocation` (Rempart seul) et `riposte` (Ruée seul). Ses valeurs sont provisoires et non équilibrées ; les propriétés demandées sont vérifiées par `crates/cards/tests/starter_set.rs`. La fixture reste l'exemple de format sans ces mécaniques.
@@ -95,8 +98,9 @@ La bibliothèque `duel_simulator` sait construire et afficher un rapport d'équi
   Chromium sur `vite preview`, environ 1 à 2 minutes dont ~40 s pour le cas « épuisement »). Chromium
   requis : en local `npx playwright install chromium` ; dans l'environnement des agents le Chromium 141
   est préinstallé (`PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`, ne jamais lancer `playwright install`
-  là) et la version de Playwright est épinglée à 1.56.1 pour cette raison. La CI les lance après
-  `npm test`.
+  là) et la version de Playwright est épinglée à 1.56.1 pour cette raison. Ils ne tournent **jamais**
+  dans la CI automatique : à lancer à la main (onglet Actions, workflow « E2E (manual) », ou
+  `npm run e2e` en local), de préférence avant toute fusion qui touche le flux de jeu.
 - **Tester à la main :** `cd apps/web && npm run dev`. Un build ne s'ouvre pas en `file://` (modules et
   `.wasm`) : `npm run build && npm run preview -- --host` le sert sur le réseau local (le build porte la
   CSP, pas le serveur de dev). Sur un téléphone hors réseau local : voir #54.

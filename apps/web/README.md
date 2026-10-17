@@ -313,9 +313,9 @@ tactile par défaut (`apps/web/playwright.config.ts`), interactions par `tap()`.
   hors de l'origine (S1 et S3 de #64). Chaque écran mobile passe `expectMobileSound` : pas de défilement
   horizontal de la page, toute cible tactile >= 44 x 44 px (un bouton radio est jugé par son libellé,
   le rond de 22 px n'est que le dessin), axe (`wcag2a`, `wcag2aa`, `wcag22aa`) sans violation.
-- **Diagnostic sans artefact** : la CI n'archive rien. Sur échec, la fixture imprime
+- **Diagnostic sans artefact** : le workflow manuel n'archive rien. Sur échec, la fixture imprime
   `ariaSnapshot()` de `<main>` et la liste des messages de console et violations : tout est dans le
-  journal de la CI.
+  journal du run.
 - **Non atteignable par l'interface, donc absent ici** : le filet de sécurité « action refusée »
   (couvert en #63 et #64 par injection) et `entropy_unavailable` (Chromium a `crypto.getRandomValues`
   même hors contexte sécurisé ; couvert en #64 par un `crypto` factice). `eval` ne peut pas être sondé
@@ -326,5 +326,10 @@ tactile par défaut (`apps/web/playwright.config.ts`), interactions par `tap()`.
   `playwright install`. `@playwright/test` est donc épinglé à **1.56.1** (dérogation à « dernière version
   stable » du `CLAUDE.md` racine, validée par le propriétaire), `playwright-core` aussi (pair de
   `@axe-core/playwright` 4.14.0, qui sinon en installerait une seconde copie).
-- **CI** : après `npm test`, `npx playwright install --with-deps chromium` (CLI local, version du lock)
-  puis `npm run e2e`, dans le job existant.
+- **CI** : jamais dans la CI automatique (#78, décision du propriétaire, pour économiser le quota). Le
+  workflow `.github/workflows/e2e.yml` (« E2E (manual) », `workflow_dispatch` seul) installe le WASM puis
+  `npx playwright install --with-deps chromium` (CLI local, version du lock) et lance `npm run e2e` ; à
+  démarrer depuis l'onglet Actions, de préférence avant toute fusion qui touche le flux de jeu.
+- **Limite assumée** : le flux complet n'est plus couvert automatiquement, une régression peut passer
+  jusqu'au prochain lancement manuel ; les tests Vitest (composants, contrôleur, moteur sur vrai WASM)
+  restent automatiques.

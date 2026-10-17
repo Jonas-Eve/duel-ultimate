@@ -11,44 +11,63 @@ const ci = read(resolve(repoRoot, ".github/workflows/ci.yml"));
 const pkg = JSON.parse(read(resolve(webRoot, "package.json")));
 const code = ci.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
 
+const e2e = read(resolve(repoRoot, ".github/workflows/e2e.yml"));
+const stripComments = (t: string) => t.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+const e2eCode = stripComments(e2e);
+const stepsOf = (c: string) => c.split(/\n(?=\s*- name:)/).slice(1);
+const usesOf = (c: string) => [...c.matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)].map((m) => m[1]);
+// The `on:` block alone: a trigger name elsewhere (a variable, a step name) must not count.
+const onBlock = (c: string) => c.match(/^on:\s*\n((?:[ \t]+.*\n|[ \t]*\n)*)/m)?.[1] ?? "";
+
+// Rules shared by every workflow of the repo; ci.yml must not be weakened by e2e.yml existing.
+describe.each([
+  ["ci.yml", code, 5],
+  ["e2e.yml", e2eCode, 1],
+] as const)(".github/workflows/%s, common security rules", (_name, wf, minCargo) => {
+  test("least privilege, no secrets, no artifact", () => {
+    expect(wf).toMatch(/^permissions:\s*\n\s+contents: read\s*\n(?!\s+\S+:)/m);
+    expect(wf.match(/permissions:/g)).toHaveLength(1);
+    expect(wf).not.toMatch(/secrets\./);
+    expect(wf).not.toContain("upload-artifact");
+    expect(wf).toContain("persist-credentials: false");
+    expect(wf).toMatch(/timeout-minutes: \d+/);
+    expect(wf).toMatch(/runs-on: ubuntu-24\.04/);
+  });
+
+  test("every action is first-party and pinned to a full SHA", () => {
+    const uses = usesOf(wf);
+    expect(uses.length).toBeGreaterThan(0);
+    for (const u of uses) expect(u).toMatch(/^actions\/(checkout|setup-node)@[0-9a-f]{40}$/);
+  });
+
+  test("never interpolates a GitHub context inside a run script", () => {
+    const runs = stepsOf(wf).filter((s) => /\brun:/.test(s));
+    for (const r of runs) expect(r).not.toContain("${{");
+  });
+
+  test("setup-node reads an existing node-version file", () => {
+    const m = wf.match(/node-version-file:\s*(\S+)/);
+    expect(m).not.toBeNull();
+    expect(existsSync(resolve(repoRoot, m![1]))).toBe(true);
+  });
+
+  test("every cargo build/clippy/test/install is --locked", () => {
+    const cmds = wf.split("\n").filter((l) => /\bcargo (build|clippy|test|install|tree)\b/.test(l));
+    expect(cmds.length).toBeGreaterThanOrEqual(minCargo);
+    for (const c of cmds) expect(c).toContain("--locked");
+  });
+
+  test("installs the CLI at the version read from the lock by the build script", () => {
+    expect(wf).toContain("build-wasm.mjs --print-version");
+  });
+});
+
 describe(".github/workflows/ci.yml", () => {
   test("runs on pull_request and push to main only", () => {
     expect(code).toMatch(/^on:\s*\n\s+pull_request:\s*\n\s+push:\s*\n\s+branches: \[main\]/m);
     for (const bad of ["pull_request_target", "workflow_run", "issue_comment", "workflow_dispatch"]) {
       expect(code).not.toContain(bad);
     }
-  });
-
-  test("least privilege, no secrets", () => {
-    expect(code).toMatch(/^permissions:\s*\n\s+contents: read\s*\n(?!\s+\S+:)/m);
-    expect(code.match(/permissions:/g)).toHaveLength(1);
-    expect(code).not.toMatch(/secrets\./);
-    expect(code).toContain("persist-credentials: false");
-    expect(code).toMatch(/timeout-minutes: \d+/);
-    expect(code).toMatch(/runs-on: ubuntu-24\.04/);
-  });
-
-  test("every action is first-party and pinned to a full SHA", () => {
-    const uses = [...code.matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)].map((m) => m[1]);
-    expect(uses.length).toBeGreaterThan(0);
-    for (const u of uses) expect(u).toMatch(/^actions\/(checkout|setup-node)@[0-9a-f]{40}$/);
-  });
-
-  test("never interpolates a GitHub context inside a run script", () => {
-    const runs = code.split(/\n(?=\s*- name:)/).slice(1).filter((s) => /\brun:/.test(s));
-    for (const r of runs) expect(r).not.toContain("${{");
-  });
-
-  test("setup-node reads an existing node-version file", () => {
-    const m = code.match(/node-version-file:\s*(\S+)/);
-    expect(m).not.toBeNull();
-    expect(existsSync(resolve(repoRoot, m![1]))).toBe(true);
-  });
-
-  test("every cargo build/clippy/test/install is --locked", () => {
-    const cmds = code.split("\n").filter((l) => /\bcargo (build|clippy|test|install|tree)\b/.test(l));
-    expect(cmds.length).toBeGreaterThanOrEqual(5);
-    for (const c of cmds) expect(c).toContain("--locked");
   });
 
   test("steps run in the specified order", () => {
@@ -65,8 +84,6 @@ describe(".github/workflows/ci.yml", () => {
       "npm ci",
       "npm run build",
       "npm test",
-      "npx playwright install --with-deps chromium",
-      "npm run e2e",
     ];
     let at = -1;
     for (const s of order) {
@@ -81,8 +98,59 @@ describe(".github/workflows/ci.yml", () => {
     expect(code).toMatch(/grep -qE '\^getrandom '/);
   });
 
+  test("never runs the e2e tests (#78: on demand only, see e2e.yml)", () => {
+    expect(code).not.toMatch(/playwright/i);
+    expect(code).not.toContain("npm run e2e");
+  });
+});
+
+describe(".github/workflows/e2e.yml (manual, #78)", () => {
+  test("is triggered by workflow_dispatch alone, without inputs: never by itself", () => {
+    const on = onBlock(e2eCode);
+    expect(on.trim(), "the on: block was not found").not.toBe("");
+    expect(on.split("\n").filter((l) => /^\s*\S/.test(l)).map((l) => l.trim())).toEqual(["workflow_dispatch:"]);
+    for (const bad of [
+      "pull_request", "pull_request_target", "push", "schedule", "workflow_run",
+      "workflow_call", "repository_dispatch", "issue_comment", "inputs",
+    ]) {
+      expect(on, `"${bad}" must not trigger e2e.yml`).not.toContain(bad);
+    }
+  });
+
+  test("the on: guard looks at the on: block only", () => {
+    expect(onBlock("name: x\non:\n  workflow_dispatch:\n\njobs:\n  push:\n")).not.toContain("push");
+  });
+
+  test("uses exactly the actions (same SHAs) of ci.yml", () => {
+    const ours = usesOf(e2eCode);
+    const theirs = usesOf(code);
+    expect(ours.length).toBeGreaterThan(0);
+    for (const u of ours) {
+      expect(u).toMatch(/^actions\/(checkout|setup-node)@[0-9a-f]{40}$/);
+      expect(theirs, `${u} is not the version pinned in ci.yml`).toContain(u);
+    }
+  });
+
+  test("steps run in the specified order", () => {
+    const order = [
+      "actions/checkout",
+      "actions/setup-node",
+      "rustup toolchain install",
+      "cargo install wasm-bindgen-cli",
+      "npm ci",
+      "npx playwright install --with-deps chromium",
+      "npm run e2e",
+    ];
+    let at = -1;
+    for (const s of order) {
+      const i = e2eCode.indexOf(s, at + 1);
+      expect(i, `"${s}" missing or out of order`).toBeGreaterThan(at);
+      at = i;
+    }
+  });
+
   test("the e2e steps exist, run in apps/web and interpolate nothing", () => {
-    const steps = code.split(/\n(?=\s*- name:)/).slice(1);
+    const steps = stepsOf(e2eCode);
     for (const run of ["npx playwright install --with-deps chromium", "npm run e2e"]) {
       const step = steps.filter((s) => new RegExp(`^\\s*run: ${run}\\s*$`, "m").test(s));
       expect(step, `exactly one step runs "${run}"`).toHaveLength(1);
@@ -92,13 +160,10 @@ describe(".github/workflows/ci.yml", () => {
   });
 
   test("Playwright is installed by the local CLI: no version, no remote package, no extra action", () => {
-    expect(code).not.toMatch(/playwright@/);
-    expect(code).not.toMatch(/npx (?:-y |--yes )?@playwright/);
-    expect(code).not.toMatch(/microsoft\/playwright|upload-artifact/);
-  });
-
-  test("installs the CLI at the version read from the lock by the build script", () => {
-    expect(code).toContain("build-wasm.mjs --print-version");
+    expect(e2eCode).not.toMatch(/playwright@/);
+    expect(e2eCode).not.toMatch(/npx (?:-y |--yes )/);
+    expect(e2eCode).not.toMatch(/npx (?:-y |--yes )?@playwright/);
+    expect(e2eCode).not.toMatch(/microsoft\/playwright|upload-artifact/);
   });
 });
 
