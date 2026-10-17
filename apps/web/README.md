@@ -60,8 +60,9 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
 | `src/engine/` | contrat JSON typé (`types.ts`, écrit depuis les sources Rust), `GameSession` (`session.ts`, le seul accès au moteur), adaptateur `createWasmSession` (`wasm-session.ts`), chargeur mémoïsé `loadEngine` (`load.ts`), erreurs (`errors.ts`) |
 | `src/game/` | logique du client sans React ni WASM : la graine (`seed.ts`), les enregistrements de journal (`records.ts`), la politique de l'ordinateur (`computer.ts`), le contrôleur de la partie locale (`controller.ts`), le démarrage sans exception (`start.ts`) et le modèle d'écran (`screen-model.ts`) |
 | `src/ui/` | composants et textes français : écrans (`Home`, `GameScreen`, `EndScreen`, `FatalScreen`), éléments (`HeroBar`, `TimeBand`, `Board`, `CardTile`, `Hand`, `ActionBar`, `ThinkingIndicator`, `ErrorBanner`, `LogBar`, `LogHistory`), dialogues (`Dialog`, `ConfirmDialog`, `AttackSheet`, `LogDrawer`, `DiscardDialog`), textes (`fr.ts`, `errors.fr.ts`), `consequence.ts`, l'état du flux d'attaque `attack-state.ts` et le formateur du journal `log-format.ts` |
-| `src/App.tsx` | assemble les écrans ; le seul à lire `data/starter` et `engine/load` |
+| `src/App.tsx` | assemble les écrans ; le seul à lire `data/starter`, `data/build` et `engine/load` |
 | `src/data/starter.ts` | données `starter` importées en `?raw` |
+| `src/data/build.ts` | `buildIdFrom`, `BUILD_ID` : identifiant de build (`VITE_BUILD_SHA`), lu par `App` seul |
 | `vite/csp-plugin.ts` | plugin Vite de la CSP de build |
 | `vite/base.ts` | `resolveBase` : le `base` de Vite depuis `VITE_BASE` (#80) |
 
