@@ -408,6 +408,8 @@ describe("the three ends of the game", () => {
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: title }));
   });
 
+  // 220 actions rendered through jsdom: ~3.5 s alone in the full suite, 7+ s under CPU contention;
+  // the default 5 s timeout flaked in CI (#77).
   test("exhaustion (pinned case: rush against bulwark, seed 2, both sides stalling): the reason is not swapped", async () => {
     const c = makeController("rush", "bulwark", 2, { policy: stallPolicy });
     c.start();
@@ -420,7 +422,7 @@ describe("the three ends of the game", () => {
     expect(screen.queryByText(/abandonné|tombé/)).toBeNull();
     expect(screen.getByRole("heading", { name: result.winner === "One" ? "Tu as gagné !" : "L'ordinateur a gagné." })).toBeTruthy();
     expect(screen.getByText("Graine : 2")).toBeTruthy();
-  });
+  }, 30_000);
 
   test("concede: the human lost and says so", async () => {
     const c = makeController("rush", "bulwark", 3);

@@ -236,6 +236,8 @@ describe("the three ends of a two-camps game", () => {
     expect(screen.getAllByRole("heading", { name: loser }).length).toBeGreaterThan(0);
   });
 
+  // 220 actions rendered through jsdom: ~3.5 s alone in the full suite, 7+ s under CPU contention;
+  // the default 5 s timeout flaked in CI (#77).
   test("exhaustion: both camps in wear-down play, the pinned case of #63 (220 actions)", async () => {
     const c = makeCampsController("rush", "bulwark", 2);
     const { container } = mountGame(c);
@@ -248,7 +250,7 @@ describe("the three ends of a two-camps game", () => {
     expect(screen.getByText(`${loser} n'avait plus aucune action possible (épuisement).`)).toBeTruthy();
     expect(container.textContent).not.toMatch(/Tu as gagné|ordinateur|Graine de/i);
     expect(screen.getByText("Graine : 2")).toBeTruthy();
-  });
+  }, 30_000);
 
   test("concede: the dialog asks for the camp at the bottom, the other camp wins", async () => {
     const c = makeCampsController("rush", "bulwark", 3);
