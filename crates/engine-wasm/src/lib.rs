@@ -15,9 +15,13 @@
 //! time cost, whether it hands the token over (`hands_over`, to read together with
 //! `ends_game`) and the budget after it, obtained by a dry run on a clone
 //! (`duel_engine::preview_legal_actions`); `legal_actions` and `apply` are unchanged.
+//! `computer_action(seat, policy, draw)` is the computer's choice (`duel_ai::choose`): a pure function
+//! of the state, the active seat, a policy of the closed list (`"random"`) and a caller-supplied
+//! `u32`, so no generator lives in the binding and nothing is read from the system.
 //! [`Duel`] holds the logic and is testable natively; [`Game`] only converts its errors
 //! to `JsError` (which cannot be built off the wasm target).
 
+use duel_ai::{AiError, choose, random_policy, rng_from_draw};
 use duel_engine::{
     Action, Event, GameSetup, GameState, PlayerId, apply, game_setup_from_data, legal_actions,
     new_game, player_view, preview_legal_actions,
@@ -91,17 +95,7 @@ impl Duel {
     /// with the seat of the connection, never expose this method.
     pub fn view_json(&self, seat: &str) -> Result<String, String> {
         bounded(seat)?;
-        let seat = match seat {
-            "One" => PlayerId::One,
-            "Two" => PlayerId::Two,
-            _ => {
-                return Err(error_json(
-                    "invalid_seat",
-                    "the seat must be exactly \"One\" or \"Two\"",
-                ));
-            }
-        };
-        to_json(&player_view(&self.state, seat))
+        to_json(&player_view(&self.state, parse_seat(seat)?))
     }
 
     /// The legal actions of the active player, as a JSON array.
@@ -118,12 +112,83 @@ impl Duel {
         to_json(&preview_legal_actions(&self.state))
     }
 
+    /// The action the computer plays for `seat`, as JSON, in the form `apply` accepts (never
+    /// `"concede"`). `seat` is `"One"` or `"Two"` exactly and must be the active seat; `policy`
+    /// belongs to the closed list [`COMPUTER_POLICIES`]; both are bounded to [`MAX_INPUT_BYTES`]
+    /// before anything is compared. Checks, in this order: sizes (seat, then policy), seat,
+    /// policy, `game_over`, `not_active_seat`, then the choice (`computer_stuck` when nothing but
+    /// `Concede` is playable).
+    ///
+    /// The choice is a pure function of (state, seat, policy, `draw`): `draw` is supplied by the
+    /// caller, the policy's generator is built fresh from it at every call
+    /// ([`duel_ai::rng_from_draw`]), and neither the state nor the engine's generator moves
+    /// (`&self`: `apply` stays the only mutation). No entropy is read.
+    ///
+    /// Like `view`, this does not authenticate the seat: a local trusted adapter for a client
+    /// that plays against the computer. A server will never expose it.
+    pub fn computer_action_json(
+        &self,
+        seat: &str,
+        policy: &str,
+        draw: u32,
+    ) -> Result<String, String> {
+        bounded(seat)?;
+        bounded(policy)?;
+        let seat = parse_seat(seat)?;
+        if !COMPUTER_POLICIES.contains(&policy) {
+            return Err(error_json(
+                "invalid_policy",
+                "the computer policy must be one of: random",
+            ));
+        }
+        if self.state.winner().is_some() {
+            return Err(error_json("game_over", "the game is over"));
+        }
+        if seat != self.state.active() {
+            return Err(error_json(
+                "not_active_seat",
+                "the seat is not the active player",
+            ));
+        }
+        // Only "random" is in the list, so it is the policy to run.
+        let action =
+            choose(&self.state, &random_policy, &mut rng_from_draw(draw)).map_err(ai_error_json)?;
+        to_json(&action)
+    }
+
     /// Applies a JSON action; returns the produced events as a JSON array.
     pub fn apply_json(&mut self, action_json: &str) -> Result<String, String> {
         let action: Action = parse(action_json)?;
         let events =
             apply(&mut self.state, action).map_err(|e| error_json(e.code(), &e.to_string()))?;
         to_json(&events)
+    }
+}
+
+/// The computer policies a client may ask for: a closed list, matched exactly.
+pub const COMPUTER_POLICIES: [&str; 1] = ["random"];
+
+/// `"One"` or `"Two"` exactly, anything else (another case included) is `invalid_seat`.
+fn parse_seat(seat: &str) -> Result<PlayerId, String> {
+    match seat {
+        "One" => Ok(PlayerId::One),
+        "Two" => Ok(PlayerId::Two),
+        _ => Err(error_json(
+            "invalid_seat",
+            "the seat must be exactly \"One\" or \"Two\"",
+        )),
+    }
+}
+
+/// What a failed AI choice looks like to the client. `computer_stuck` cannot be reached through
+/// `apply` (the engine ends the game by exhaustion first); the code stays as a safety net.
+fn ai_error_json(error: AiError) -> String {
+    match error {
+        AiError::NoPlayableAction => error_json(
+            "computer_stuck",
+            "the computer has no legal action other than conceding",
+        ),
+        AiError::IndexOutOfRange { .. } => error_json("internal_error", &error.to_string()),
     }
 }
 
@@ -204,6 +269,18 @@ impl Game {
     pub fn legal_actions_with_time(&self) -> Result<String, JsError> {
         self.0
             .legal_actions_with_time_json()
+            .map_err(|e| JsError::new(&e))
+    }
+
+    /// The action the computer plays for `seat` ("One" or "Two", the active seat), under the
+    /// closed policy list ("random"), as the JSON `apply` accepts, never "concede". `draw` is the
+    /// `u32` the caller supplies for this one action; the same inputs give the same action, and
+    /// neither the state nor the engine's generator moves. WARNING: like `view`, this does not
+    /// authenticate the seat: a local adapter for a client that plays against the computer, a
+    /// server must never expose `Game.computer_action`.
+    pub fn computer_action(&self, seat: &str, policy: &str, draw: u32) -> Result<String, JsError> {
+        self.0
+            .computer_action_json(seat, policy, draw)
             .map_err(|e| JsError::new(&e))
     }
 
@@ -516,9 +593,13 @@ mod tests {
                 draw = draw.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
                 let action = game.computer_action_json(seat, "random", draw).unwrap();
                 assert_ne!(action, r#""concede""#, "seed {seed}");
-                let legal: Value = serde_json::from_str(&game.legal_actions_json().unwrap()).unwrap();
+                let legal: Value =
+                    serde_json::from_str(&game.legal_actions_json().unwrap()).unwrap();
                 let parsed: Value = serde_json::from_str(&action).unwrap();
-                assert!(legal.as_array().unwrap().contains(&parsed), "seed {seed}: {action}");
+                assert!(
+                    legal.as_array().unwrap().contains(&parsed),
+                    "seed {seed}: {action}"
+                );
                 game.apply_json(&action).unwrap();
                 steps += 1;
                 assert!(steps < 2000, "seed {seed}: the game does not end");
@@ -618,7 +699,11 @@ mod tests {
         let idle = other(active);
         // The seat is judged before the policy.
         assert_eq!(
-            code(&game.computer_action_json("nobody", "greedy", 0).unwrap_err()),
+            code(
+                &game
+                    .computer_action_json("nobody", "greedy", 0)
+                    .unwrap_err()
+            ),
             "invalid_seat"
         );
         // The policy is judged before whose turn it is.
@@ -669,7 +754,10 @@ mod tests {
             let n = counts[action];
             // Uniform within a wide margin (5000 / len each).
             let expected = 5000 / u32::try_from(playable.len()).unwrap();
-            assert!(n > expected / 2 && n < expected * 2, "{action}: {n} / {expected}");
+            assert!(
+                n > expected / 2 && n < expected * 2,
+                "{action}: {n} / {expected}"
+            );
         }
     }
 
@@ -682,7 +770,10 @@ mod tests {
             "computer_stuck"
         );
         assert_eq!(
-            code(&ai_error_json(duel_ai::AiError::IndexOutOfRange { index: 3, len: 2 })),
+            code(&ai_error_json(duel_ai::AiError::IndexOutOfRange {
+                index: 3,
+                len: 2
+            })),
             "internal_error"
         );
     }
