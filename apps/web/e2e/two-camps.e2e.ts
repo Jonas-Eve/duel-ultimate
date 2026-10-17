@@ -10,13 +10,14 @@ import {
   SEED,
   activeCamp,
   attackWith,
-  attackers,
   bottomBoard,
   creatureTargets,
   endHeading,
   expect,
   expectMobileSound,
   gameRegion,
+  handTiles,
+  hasAttacker,
   heroTarget,
   isOver,
   openHome,
@@ -25,6 +26,11 @@ import {
   playUntil,
   readBlocks,
   readJournal,
+  selectAttacker,
+  openDetail,
+  closeDetail,
+  playButton,
+  isInactive,
   settle,
   startGame,
   tapCard,
@@ -42,9 +48,6 @@ const twoCamps = (page: Page, seed: string | number = SEED) =>
   startGame(page, { mode: "two-camps", deck: "Ruée", deckTwo: "Rempart", seed: String(seed) });
 
 test.describe("4. Provocation et riposte", () => {
-  /** The playing camp has a creature that can attack. */
-  const hasAttacker = async (p: Page) => (await attackers(p).count()) > 0;
-
   test("provocation : seul le provocateur est une cible, le héros redevient ciblable à sa mort", async ({ page }) => {
     await openHome(page);
     await twoCamps(page);
@@ -64,7 +67,7 @@ test.describe("4. Provocation et riposte", () => {
     test.info().annotations.push({ type: "search", description: `${found} actions to reach the provocation situation` });
 
     // The attacker is selected: the provocateur is the only possible target, the hero is not available.
-    await attackers(page).first().tap();
+    expect(await selectAttacker(page)).toBeGreaterThanOrEqual(0);
     const targets = creatureTargets(page);
     await expect(targets.first()).toContainText("Provocation");
     for (const t of await targets.all()) await expect(t).toContainText("Cible possible");
@@ -103,7 +106,7 @@ test.describe("4. Provocation et riposte", () => {
       page,
       async (p) => {
         if ((await activeCamp(p)) === CAMP_1) {
-          if ((await hasAttacker(p)) && (await warden(p).count()) > 0) return (await attackWith(p, 0, "creature")) !== null;
+          if ((await hasAttacker(p)) && (await warden(p).count()) > 0) return (await attackWith(p, "creature")) !== null;
           return (await tapCard(p)) || (await tapEffect(p));
         }
         return (await tapEffect(page)) || (await tapCard(page, /^(?!Garde du rempart)/));
@@ -114,7 +117,7 @@ test.describe("4. Provocation et riposte", () => {
     );
     const journal = (await readJournal(page)).flatMap((b) => b.lines);
     expect(journal).toContain("Garde du rempart meurt.");
-    await attackers(page).first().tap();
+    expect(await selectAttacker(page)).toBeGreaterThanOrEqual(0);
     const open = heroTarget(page);
     await expect(open).toHaveText("Cible possible");
     await expect(open).not.toHaveAttribute("aria-disabled", "true");
@@ -144,7 +147,7 @@ test.describe("4. Provocation et riposte", () => {
     test.info().annotations.push({ type: "search", description: `${found} actions to reach the riposte situation` });
     await expect(wolfOnBoard(page).first()).toHaveAccessibleName(/riposte 1/);
 
-    await attackers(page).first().tap();
+    expect(await selectAttacker(page)).toBeGreaterThanOrEqual(0);
     const wolf = wolfOnBoard(page).first();
     await expect(wolf).toContainText("Cible possible"); // no provocation on Ruée's side
     await wolf.tap();
@@ -181,8 +184,15 @@ test.describe("5. Deux camps", () => {
     await expect(regionOf(page, CAMP_1, "main").locator(".card-name").first()).toBeVisible();
     await expect(regionOf(page, CAMP_2, "main").locator(".card-name").first()).toBeVisible();
     await expect(game.getByText(`Main de ${CAMP_2} (non jouable)`)).toBeAttached();
-    await expect(regionOf(page, CAMP_1, "main").locator("button:not([disabled])").first()).toBeVisible();
-    await expect(regionOf(page, CAMP_2, "main").getByRole("button")).toHaveCount(0);
+    // Every tile of both hands opens a detail (a button with a popup); who may play is read from "Jouer" there.
+    const otherHand = regionOf(page, CAMP_2, "main");
+    await expect(otherHand.locator('button[aria-haspopup="dialog"]')).toHaveCount(await otherHand.locator(".card").count());
+    const ownSheet = await openDetail(page, handTiles(page).first());
+    expect(await isInactive(playButton(ownSheet)), "the camp that holds the main can play from its hand").toBe(false);
+    await closeDetail(page);
+    const otherSheet = await openDetail(page, otherHand.locator(".card").first());
+    await expect(playButton(otherSheet), "the other camp's hand cannot be played").toHaveCount(0);
+    await closeDetail(page);
     expect(await page.locator(".hand").count()).toBe(2);
     await expectMobileSound(page, "deux camps : deux mains, deux plateaux");
 
@@ -192,7 +202,7 @@ test.describe("5. Deux camps", () => {
     expect(played).toBeTruthy();
     const y = async (camp: string) => (await regionOf(page, camp, "plateau").boundingBox())!.y;
     expect(await y(CAMP_2), "camp 1 plays at the bottom").toBeLessThan(await y(CAMP_1));
-    await page.getByRole("button", { name: /^Renforts, coût \d+, passe la main$/ }).tap();
+    await page.getByRole("button", { name: /^Renforts, coût \d+, passe la main$/ }).tap(); // a hero effect: still one tap
 
     // The hand is Camp 2's: its board comes down, Camp 1's goes up with its creature. No device-passing screen.
     await expect(timeBand(page)).toContainText(`Au tour de ${CAMP_2}`);
@@ -201,8 +211,13 @@ test.describe("5. Deux camps", () => {
     await expect(page.getByRole("dialog")).toHaveCount(0);
     expect(await y(CAMP_1), "camp 2 now plays at the bottom").toBeLessThan(await y(CAMP_2));
     await expect(regionOf(page, CAMP_1, "plateau")).toContainText(played);
-    await expect(regionOf(page, CAMP_2, "main").locator("button:not([disabled])").first()).toBeVisible();
-    await expect(regionOf(page, CAMP_1, "main").getByRole("button")).toHaveCount(0);
+    // The hands swapped: Camp 2's is playable now, Camp 1's (now the one above) is read-only.
+    const nowOwn = await openDetail(page, regionOf(page, CAMP_2, "main").locator(".card").first());
+    expect(await isInactive(playButton(nowOwn)), "camp 2 can play from its hand").toBe(false);
+    await closeDetail(page);
+    const nowOther = await openDetail(page, regionOf(page, CAMP_1, "main").locator(".card").first());
+    await expect(playButton(nowOther), "camp 1's hand is read-only now").toHaveCount(0);
+    await closeDetail(page);
 
     // And back again: Camp 2 hands the main over.
     await page.getByRole("button", { name: /^Réquisition, coût \d+, passe la main$/ }).tap();
@@ -260,8 +275,8 @@ test.describe("6. Les trois fins", () => {
       page,
       async (p) => {
         if ((await activeCamp(p)) === CAMP_1) {
-          if ((await attackers(p).count()) > 0) {
-            const sheet = await attackWith(p, 0, "hero");
+          if (await hasAttacker(p)) {
+            const sheet = await attackWith(p, "hero");
             if (sheet?.includes("Met fin à la partie")) lethalSheet = sheet;
             return true;
           }

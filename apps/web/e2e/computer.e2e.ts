@@ -5,6 +5,11 @@
 import {
   SEED,
   cardNames,
+  closeDetail,
+  handTiles,
+  isInactive,
+  openDetail,
+  playButton,
   endHeading,
   expect,
   gameRegion,
@@ -138,8 +143,11 @@ test.describe("2. Humain Rempart : l'ordinateur ouvre", () => {
       new MutationObserver(() => {
         if (document.querySelector(".thinking") === null) return;
         seen.shown = true;
-        // While the computer plays, no hand card, hero effect nor "Abandonner" may be enabled.
-        seen.activeControls += document.querySelectorAll(".hand button:not([disabled]), .actions button:not([disabled])").length;
+        // While the computer plays, no "Jouer", no attack line, no hero effect nor "Abandonner" may be enabled.
+        // (A hand tile is always enabled: it only opens the card's detail, where "Jouer" is inactive.)
+        seen.activeControls += document.querySelectorAll(
+          '.btn-play:not([aria-disabled="true"]), .card-detail-effect-button:not([aria-disabled="true"]), .actions button:not([disabled])',
+        ).length;
       }).observe(document, { childList: true, subtree: true, attributes: true });
     });
   const watched = (page: import("@playwright/test").Page) =>
@@ -159,7 +167,9 @@ test.describe("2. Humain Rempart : l'ordinateur ouvre", () => {
 
     // The human's hand is back, named and playable; the token is theirs.
     expect((await cardNames(ownHand(page))).length).toBeGreaterThan(0);
-    await expect(ownHand(page).locator("button:not([disabled])").first()).toBeVisible();
+    const sheet = await openDetail(page, handTiles(page).first());
+    expect(await isInactive(playButton(sheet)), "the first card can be played again").toBe(false);
+    await closeDetail(page);
     await expect(page.getByRole("button", { name: "Abandonner" })).toBeEnabled();
     await expect(timeBand(page)).toContainText("À toi");
 
@@ -200,10 +210,10 @@ test.describe("3. Temps : l'aperçu annoncé est le temps réellement payé", ()
     const MAX_ACTIONS = 12; // one keeps and one passes within the first two or three actions
     for (let n = 0; n < MAX_ACTIONS && (kept === 0 || passed === 0); n++) {
       await settle(page);
-      // The first control the player could press: a card of the hand, else a hero effect.
-      const card = ownHand(page).locator("button:not([disabled])").first();
-      const isCard = (await card.count()) > 0;
-      const control = isCard ? card : page.locator(".btn-effect:not([disabled])").first();
+      // The first control the player could press: a card of the hand (played from its detail), else a hero effect.
+      const tile = handTiles(page).first();
+      const isCard = (await tile.count()) > 0;
+      const control = isCard ? tile : page.locator(".btn-effect:not([disabled])").first();
       // A card announces its cost in its accessible name and its time consequence in the legend under it
       // ("Reste N" or "Passe la main", #92); a hero effect still prints both inside its button.
       const text = await control.innerText();
@@ -218,10 +228,19 @@ test.describe("3. Temps : l'aperçu annoncé est le temps réellement payé", ()
       if (isCard) {
         // The pill shows the same cost as the accessible name, which also carries the legend's meaning.
         await expect(control.locator(".card-cost")).toHaveText(String(cost));
-        expect(label.toLowerCase()).toContain(keepsMatch !== null ? `il te restera ${keepsMatch[1]} de temps` : "passe la main");
+        // The tile's name repeats the visible legend verbatim ("Reste N" / "passe la main", #105).
+        expect(label.toLowerCase()).toContain(keepsMatch !== null ? `reste ${keepsMatch[1]}` : "passe la main");
+        // The detail says the same before anything is played: "Jouer (N temps)" and the consequence in words.
+        const sheet = await openDetail(page, tile);
+        await expect(playButton(sheet)).toHaveText(`Jouer (${cost} temps)`);
+        const consequence = sheet.locator(".play-consequence");
+        await expect(consequence).toContainText(`Coût : ${cost}`);
+        await expect(consequence).toContainText(keepsMatch !== null ? `Il te restera ${keepsMatch[1]} de temps` : "Passe la main");
+        await playButton(sheet).tap();
+        await expect(sheet).toHaveCount(0);
+      } else {
+        await control.tap();
       }
-
-      await control.tap();
       await settle(page);
 
       const blocks = await readJournal(page);
