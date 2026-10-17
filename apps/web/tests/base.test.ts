@@ -34,6 +34,6 @@ describe("resolveBase", () => {
 
   test("the error carries the received value and the expected form", () => {
     expect(() => resolveBase("./")).toThrow(/\.\//);
-    expect(() => resolveBase("./")).toThrow(/\/<segment>/);
+    expect(() => resolveBase("./")).toThrow(/\/duel-ultimate\//);
   });
 });

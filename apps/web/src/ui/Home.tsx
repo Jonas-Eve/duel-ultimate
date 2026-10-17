@@ -12,6 +12,8 @@ interface HomeProps {
   /** The closed list of decks and the data version come from `App` (this layer never reads the data). */
   decks: DeckRef[];
   dataVersion: string;
+  /** Short commit SHA of the deployed build, or `dev` (read by `App`, like the data version). */
+  buildId: string;
   status: "loading" | "ready" | "failed";
   loadError: EngineError | null;
   startError: StartFailure | null;
@@ -34,7 +36,7 @@ function DeckGroup({ name, legend, decks, value, onChange }: { name: string; leg
   );
 }
 
-export function Home({ decks, dataVersion, status, loadError, startError, onStart, onReload }: HomeProps) {
+export function Home({ decks, dataVersion, buildId, status, loadError, startError, onStart, onReload }: HomeProps) {
   const [mode, setMode] = useState<Mode>("computer");
   const [deckId, setDeckId] = useState(decks[0]?.id ?? "");
   // Camp 2's deck follows "the other deck" until the player picks one (the mirror is allowed).
@@ -134,6 +136,7 @@ export function Home({ decks, dataVersion, status, loadError, startError, onStar
         </button>
       </form>
       <p className="help">{fr.dataVersion(dataVersion)}</p>
+      <p className="help">{fr.buildVersion(buildId)}</p>
     </section>
   );
 }

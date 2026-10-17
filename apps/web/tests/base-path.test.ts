@@ -72,9 +72,10 @@ describe("build under VITE_BASE=/duel-ultimate/", () => {
     expect(sub.js).not.toContain('"/assets/');
   });
 
-  test("the build identifier is in the bundle, cut at 7 characters", () => {
+  test("the build identifier reaches the bundle", () => {
+    // Vite inlines `VITE_BUILD_SHA` as given; the cut to 7 characters happens at run time in
+    // `buildIdFrom` (pinned by build-id.test.ts and home.test.tsx), so the full value is there.
     expect(sub.js).toContain("abc1234");
-    expect(sub.js).not.toContain("abc1234d");
   });
 });
 

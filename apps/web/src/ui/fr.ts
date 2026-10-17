@@ -45,6 +45,7 @@ export const fr = {
   seedHelp: "Laisse vide pour une graine aléatoire (nombre entier de 0 à 4 294 967 295)",
   start: "Lancer la partie",
   dataVersion: (v: string) => `Données : ${v}`,
+  buildVersion: (id: string) => `Version : ${id}`,
   opponentDeck: (name: string) => `L'adversaire joue : ${name}`,
   entropyUnavailable:
     "Ton appareil ne peut pas tirer de graine au hasard. Saisis une graine (nombre entier de 0 à 4 294 967 295) pour lancer la partie.",

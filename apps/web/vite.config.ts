@@ -1,12 +1,15 @@
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { resolveBase } from "./vite/base.ts";
 import { cspPlugin } from "./vite/csp-plugin.ts";
 
 const webRoot = fileURLToPath(new URL(".", import.meta.url));
 const dataRoot = fileURLToPath(new URL("../../data", import.meta.url));
 
 export default defineConfig({
+  // `VITE_BASE`: the sub-path of a static deployment (`/` by default, so dev, preview and e2e stay at the root).
+  base: resolveBase(process.env.VITE_BASE),
   plugins: [react(), cspPlugin()],
   server: {
     // `src/data/starter.ts` imports `data/starter/<version>/*.json?raw` from the repository
