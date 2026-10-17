@@ -22,7 +22,7 @@ struct Set {
 
 /// The closed list of sets `--set` can choose from; for a name, the last entry is its latest
 /// version.
-const SETS: [Set; 2] = [
+const SETS: [Set; 3] = [
     Set {
         name: "fixture",
         version: "1.0.0",
@@ -34,6 +34,12 @@ const SETS: [Set; 2] = [
         version: "1.0.0",
         cards: include_str!("../../../data/starter/1.0.0/cards.json"),
         decks: include_str!("../../../data/starter/1.0.0/decks.json"),
+    },
+    Set {
+        name: "starter",
+        version: "1.1.0",
+        cards: include_str!("../../../data/starter/1.1.0/cards.json"),
+        decks: include_str!("../../../data/starter/1.1.0/decks.json"),
     },
 ];
 
