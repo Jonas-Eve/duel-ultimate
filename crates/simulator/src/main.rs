@@ -1,7 +1,9 @@
 //! Plays seeded AI-vs-AI games between the decks of an embedded data set and prints the
-//! balance report. Usage: `duel-simulator [games] [--set <name>[@<version>]] [--seed <u64>]`,
-//! in any order: `games` per matchup (1000 by default), the `starter` set (its latest version
-//! by default) and seed 0 by default. The batch itself is `duel_simulator::run_batch` (policy:
+//! balance report. Usage: `duel-simulator [games] [--set <name>[@<version>]] [--seed <u64>]
+//! [--hero-riposte <on|off>] [--board-limit <none|N>]`, in any order: `games` per matchup (1000
+//! by default), the `starter` set (its latest version by default), seed 0 by default, and the
+//! engine's default rules for each rule option not given (the report names them in its header).
+//! The two rule options have no effect on the games before #127 gives them their behaviour. The batch itself is `duel_simulator::run_batch` (policy:
 //! uniformly random among the legal actions other than `Concede`); this file only reads the
 //! command line, picks the data and prints `Report::render()`.
 //!
@@ -9,6 +11,7 @@
 //! never a path, so nothing is read from the disk or the network at run time. A huge number of
 //! games is merely slow.
 
+use duel_engine::RuleSet;
 use duel_simulator::{BatchConfig, DEFAULT_MAX_ACTIONS, contenders_from, random_policy, run_batch};
 
 /// A data set embedded at compile time.
@@ -46,7 +49,7 @@ const SETS: [Set; 3] = [
 const DEFAULT_GAMES: u64 = 1000;
 const DEFAULT_SEED: u64 = 0;
 const DEFAULT_SET: &str = "starter";
-const USAGE: &str = "[games] [--set <name>[@<version>]] [--seed <u64>]";
+const USAGE: &str = "[games] [--set <name>[@<version>]] [--seed <u64>] [--hero-riposte <on|off>] [--board-limit <none|N>]";
 
 /// What the command line asks for.
 #[derive(Debug, PartialEq, Eq)]
@@ -55,6 +58,7 @@ struct Config {
     games: u64,
     seed: u64,
     set: &'static Set,
+    rules: RuleSet,
 }
 
 /// The distinct set names, in registry order, for messages.
@@ -96,12 +100,45 @@ fn resolve_set<'a>(sets: &'a [Set], spec: &str) -> Result<&'a Set, String> {
     })
 }
 
-/// Reads `[games] [--set <name>[@<version>]] [--seed <u64>]`, in any order. Pure: the caller
+/// The value of `--hero-riposte`: exactly `on` or `off`.
+fn parse_hero_riposte(value: &str) -> Result<bool, String> {
+    match value {
+        "on" => Ok(true),
+        "off" => Ok(false),
+        _ => Err(format!(
+            "--hero-riposte: invalid value \"{value}\" (expected on or off)"
+        )),
+    }
+}
+
+/// The value of `--board-limit`: `none`, or an integer whose bounds are those of
+/// [`RuleSet::validate`] (the only place they are written).
+fn parse_board_limit(value: &str) -> Result<Option<u32>, String> {
+    if value == "none" {
+        return Ok(None);
+    }
+    let limit: u32 = value.parse().map_err(|_| {
+        format!("--board-limit: invalid value \"{value}\" (expected none or a positive integer)")
+    })?;
+    let rules = RuleSet {
+        board_limit: Some(limit),
+        ..RuleSet::default()
+    };
+    rules
+        .validate()
+        .map_err(|error| format!("--board-limit: {error}"))?;
+    Ok(Some(limit))
+}
+
+/// Reads `[games] [--set <name>[@<version>]] [--seed <u64>] [--hero-riposte <on|off>]
+/// [--board-limit <none|N>]`, in any order. Pure: the caller
 /// prints the error and exits.
 fn parse_args(args: &[String]) -> Result<Config, String> {
     let mut games = None;
     let mut seed = None;
     let mut set = None;
+    let mut hero_riposte = None;
+    let mut board_limit = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         if arg == "--set" {
@@ -121,6 +158,20 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
             if seed.replace(parsed).is_some() {
                 return Err("--seed given twice".to_owned());
             }
+        } else if arg == "--hero-riposte" {
+            let value = rest
+                .next()
+                .ok_or_else(|| "--hero-riposte needs a value (on or off)".to_owned())?;
+            if hero_riposte.replace(parse_hero_riposte(value)?).is_some() {
+                return Err("--hero-riposte given twice".to_owned());
+            }
+        } else if arg == "--board-limit" {
+            let value = rest.next().ok_or_else(|| {
+                "--board-limit needs a value (none or a positive integer)".to_owned()
+            })?;
+            if board_limit.replace(parse_board_limit(value)?).is_some() {
+                return Err("--board-limit given twice".to_owned());
+            }
         } else if arg.starts_with('-') {
             return Err(format!("unknown flag \"{arg}\" (usage: {USAGE})"));
         } else {
@@ -138,10 +189,16 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
         }
     }
     let default_set = resolve_set(&SETS, DEFAULT_SET).expect("the default set is registered");
+    // A rule not given keeps the engine default (whatever it is), not "off".
+    let default_rules = RuleSet::default();
     Ok(Config {
         games: games.unwrap_or(DEFAULT_GAMES),
         seed: seed.unwrap_or(DEFAULT_SEED),
         set: set.unwrap_or(default_set),
+        rules: RuleSet {
+            hero_riposte: hero_riposte.unwrap_or(default_rules.hero_riposte),
+            board_limit: board_limit.unwrap_or(default_rules.board_limit),
+        },
     })
 }
 
@@ -161,6 +218,7 @@ fn main() {
         seed: config.seed,
         max_actions: DEFAULT_MAX_ACTIONS,
         data_versions: vec![format!("{}@{}", config.set.name, config.set.version)],
+        rules: config.rules,
     };
     print!(
         "{}",
@@ -171,6 +229,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use duel_engine::MAX_BOARD_LIMIT;
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|arg| (*arg).to_owned()).collect()
@@ -183,6 +242,10 @@ mod tests {
             config.seed,
             format!("{}@{}", config.set.name, config.set.version),
         )
+    }
+
+    fn rules_of(list: &[&str]) -> RuleSet {
+        parse_args(&args(list)).expect("valid arguments").rules
     }
 
     fn parsed_is(list: &[&str], games: u64, seed: u64, set: &str) {
@@ -228,6 +291,143 @@ mod tests {
         ] {
             assert_eq!(parsed(list), want, "{list:?}");
         }
+    }
+
+    #[test]
+    fn rules_not_given_are_the_engine_default() {
+        assert_eq!(rules_of(&[]), RuleSet::default());
+        assert_eq!(rules_of(&["10", "--seed", "3"]), RuleSet::default());
+    }
+
+    #[test]
+    fn each_rule_flag_sets_its_option_and_leaves_the_other_at_the_engine_default() {
+        let default = RuleSet::default();
+        for (value, on) in [("on", true), ("off", false)] {
+            assert_eq!(
+                rules_of(&["--hero-riposte", value]),
+                RuleSet {
+                    hero_riposte: on,
+                    ..default
+                }
+            );
+        }
+        assert_eq!(
+            rules_of(&["--board-limit", "none"]),
+            RuleSet {
+                board_limit: None,
+                ..default
+            }
+        );
+        for limit in [1, 5, 30] {
+            assert_eq!(
+                rules_of(&["--board-limit", &limit.to_string()]),
+                RuleSet {
+                    board_limit: Some(limit),
+                    ..default
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn the_rule_flags_come_in_any_order_with_the_others() {
+        let want = RuleSet {
+            hero_riposte: true,
+            board_limit: Some(5),
+        };
+        for list in [
+            &[
+                "--hero-riposte",
+                "on",
+                "--board-limit",
+                "5",
+                "50",
+                "--seed",
+                "7",
+            ][..],
+            &[
+                "--board-limit",
+                "5",
+                "--seed",
+                "7",
+                "--hero-riposte",
+                "on",
+                "50",
+            ],
+            &[
+                "50",
+                "--board-limit",
+                "5",
+                "--set",
+                "fixture",
+                "--hero-riposte",
+                "on",
+            ],
+        ] {
+            assert_eq!(rules_of(list), want, "{list:?}");
+            assert_eq!(parse_args(&args(list)).expect("valid").games, 50);
+        }
+    }
+
+    #[test]
+    fn a_bad_hero_riposte_is_named() {
+        for list in [
+            &["--hero-riposte"][..],
+            &["10", "--hero-riposte"],
+            &["--hero-riposte", "ON"],
+            &["--hero-riposte", "yes"],
+            &["--hero-riposte", "1"],
+            &["--hero-riposte", "true"],
+        ] {
+            assert!(rejected(list).contains("--hero-riposte"), "{list:?}");
+        }
+        assert!(rejected(&["--hero-riposte", "yes"]).contains("yes"));
+    }
+
+    #[test]
+    fn a_bad_board_limit_is_named() {
+        for value in ["0", "31", "-1", "abc", "1.5", "99999999999", "NONE", ""] {
+            let message = rejected(&["--board-limit", value]);
+            assert!(message.contains("--board-limit"), "{value}: {message}");
+            assert!(message.contains(value), "{value}: {message}");
+        }
+        assert!(rejected(&["--board-limit"]).contains("--board-limit"));
+    }
+
+    #[test]
+    fn the_bounds_of_the_board_limit_come_from_the_engine() {
+        // The message of `RuleSet::validate` is carried over, not rewritten here.
+        let error = RuleSet {
+            board_limit: Some(0),
+            ..RuleSet::default()
+        }
+        .validate()
+        .expect_err("0 is out of range");
+        let message = rejected(&["--board-limit", "0"]);
+        assert!(message.contains(&error.to_string()), "{message}");
+        assert_eq!(
+            rules_of(&["--board-limit", &MAX_BOARD_LIMIT.to_string()]).board_limit,
+            Some(MAX_BOARD_LIMIT)
+        );
+        assert!(
+            parse_args(&args(&[
+                "--board-limit",
+                &(MAX_BOARD_LIMIT + 1).to_string()
+            ]))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a_rule_flag_given_twice_is_rejected() {
+        assert!(
+            rejected(&["--hero-riposte", "on", "--hero-riposte", "off"])
+                .contains("--hero-riposte given twice")
+        );
+        assert!(
+            rejected(&["--board-limit", "5", "--board-limit", "none"])
+                .contains("--board-limit given twice")
+        );
     }
 
     fn rejected(list: &[&str]) -> String {
