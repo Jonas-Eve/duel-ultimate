@@ -533,6 +533,27 @@ mod tests {
     }
 
     #[test]
+    fn from_json_reads_the_rules_key_of_a_setup() {
+        let default = RuleSet::default();
+        let rules = RuleSet {
+            hero_riposte: !default.hero_riposte,
+            board_limit: Some(5),
+        };
+        let mut v = setup_value();
+        v["rules"] = serde_json::to_value(rules).unwrap();
+        let events = Duel::from_json(&v.to_string(), 1)
+            .unwrap()
+            .start_events_json()
+            .unwrap();
+        let suffix = format!(",\"rules\":{}}}}}]", serde_json::to_string(&rules).unwrap());
+        assert!(events.ends_with(&suffix), "{events}");
+        // An out-of-range option is revalidated by `new_game`.
+        v["rules"] = serde_json::json!({ "board_limit": 31 });
+        let err = Duel::from_json(&v.to_string(), 1).err().unwrap();
+        assert_eq!(code(&err), "invalid_setup");
+    }
+
+    #[test]
     fn the_data_versions_key_stays_mandatory_in_a_setup() {
         let mut v = setup_value();
         v.as_object_mut().unwrap().remove("data_versions");

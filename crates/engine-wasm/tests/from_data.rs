@@ -101,9 +101,10 @@ fn the_decks_are_chosen_by_identifier_not_by_position_in_the_file() {
     let reordered = reordered.to_string();
     for seed in [1, 2, 3] {
         for (one, two) in [("aggro", "control"), ("control", "aggro")] {
-            let a =
-                Duel::from_data(FIXTURE_CARDS, FIXTURE_DECKS, one, two, VERSIONS, seed, None).unwrap();
-            let b = Duel::from_data(FIXTURE_CARDS, &reordered, one, two, VERSIONS, seed, None).unwrap();
+            let a = Duel::from_data(FIXTURE_CARDS, FIXTURE_DECKS, one, two, VERSIONS, seed, None)
+                .unwrap();
+            let b =
+                Duel::from_data(FIXTURE_CARDS, &reordered, one, two, VERSIONS, seed, None).unwrap();
             assert_eq!(
                 a.start_events_json().unwrap(),
                 b.start_events_json().unwrap()
@@ -260,4 +261,202 @@ fn the_largest_seed_is_accepted() {
         )
         .is_ok()
     );
+}
+
+// ---- #147: the optional sixth input, `rules_json` ------------------------------------------
+
+/// `from_data` on the fixture with the given rules text (`None` = absent) and versions.
+fn with_rules(rules: Option<&str>, versions: &str) -> Result<Duel, String> {
+    Duel::from_data(
+        FIXTURE_CARDS,
+        FIXTURE_DECKS,
+        "aggro",
+        "control",
+        versions,
+        1,
+        rules,
+    )
+}
+
+/// A rule set that differs from the engine default in both options, written relatively to it
+/// (the default changes with #127, these tests must not).
+fn non_default() -> RuleSet {
+    let default = RuleSet::default();
+    RuleSet {
+        hero_riposte: !default.hero_riposte,
+        board_limit: if default.board_limit == Some(5) {
+            Some(6)
+        } else {
+            Some(5)
+        },
+    }
+}
+
+fn rules_text(rules: &RuleSet) -> String {
+    serde_json::to_string(rules).unwrap()
+}
+
+fn start_events(game: &Duel) -> String {
+    game.start_events_json().unwrap()
+}
+
+#[test]
+fn without_rules_is_the_default_game() {
+    let absent = start_events(&with_rules(None, VERSIONS).unwrap());
+    let default = rules_text(&RuleSet::default());
+    let explicit = start_events(&with_rules(Some(&default), VERSIONS).unwrap());
+    let empty_object = start_events(&with_rules(Some("{}"), VERSIONS).unwrap());
+    assert_eq!(absent, explicit);
+    assert_eq!(absent, empty_object);
+    assert!(!absent.contains("\"rules\""), "{absent}");
+}
+
+#[test]
+fn non_default_rules_are_recorded_last() {
+    let rules = non_default();
+    let text = rules_text(&rules);
+    let suffix = format!(",\"rules\":{text}}}}}]");
+    for versions in [VERSIONS, "[]"] {
+        let events = start_events(&with_rules(Some(&text), versions).unwrap());
+        assert!(events.ends_with(&suffix), "{events}");
+        if versions == VERSIONS {
+            let versions_at = events.find("\"data_versions\"").unwrap();
+            let rules_at = events.find("\"rules\"").unwrap();
+            assert!(versions_at < rules_at, "{events}");
+        }
+    }
+}
+
+#[test]
+fn bad_rules_are_refused_with_the_existing_codes() {
+    for (rules, expected) in [
+        (r#"{"nope":1}"#, "invalid_json"),
+        (r#"{"hero_riposte":"yes"}"#, "invalid_json"),
+        (r#"{"board_limit":"5"}"#, "invalid_json"),
+        (r#"{"board_limit":-1}"#, "invalid_json"),
+        ("", "invalid_json"),
+        ("null", "invalid_json"),
+        (r#"{"hero_riposte":true,"#, "invalid_json"),
+        (r#"{"board_limit":0}"#, "invalid_setup"),
+        (r#"{"board_limit":31}"#, "invalid_setup"),
+    ] {
+        let err = with_rules(Some(rules), VERSIONS).err().unwrap();
+        assert_eq!(code(&err), expected, "{rules:?}");
+    }
+    // The bounds themselves are valid.
+    for rules in [
+        r#"{"board_limit":1}"#,
+        r#"{"board_limit":30}"#,
+        r#"{"board_limit":null}"#,
+    ] {
+        assert!(with_rules(Some(rules), VERSIONS).is_ok(), "{rules}");
+    }
+}
+
+#[test]
+fn the_rules_are_bounded_before_any_parsing() {
+    let huge = " ".repeat(MAX_INPUT_BYTES + 1);
+    let err = with_rules(Some(&huge), VERSIONS).err().unwrap();
+    assert_eq!(code(&err), "input_too_large");
+    // Even when every other string is unreadable: the size comes first.
+    let err = Duel::from_data("{", "[", "nope", "nope", "[", 1, Some(&huge))
+        .err()
+        .unwrap();
+    assert_eq!(code(&err), "input_too_large");
+    // Exactly at the limit, it is the analysis that answers.
+    let spaces = " ".repeat(MAX_INPUT_BYTES);
+    let err = with_rules(Some(&spaces), VERSIONS).err().unwrap();
+    assert_eq!(code(&err), "invalid_json");
+}
+
+#[test]
+fn the_rules_are_read_after_the_versions_and_before_the_data() {
+    let from_data_with = |deck: &str, versions: &str, rules: &str| {
+        Duel::from_data(
+            FIXTURE_CARDS,
+            FIXTURE_DECKS,
+            deck,
+            "control",
+            versions,
+            1,
+            Some(rules),
+        )
+        .err()
+        .map(|e| code(&e))
+    };
+    // Unreadable rules win over an unknown deck.
+    assert_eq!(
+        from_data_with("nope", VERSIONS, r#"{"nope":1}"#).as_deref(),
+        Some("invalid_json")
+    );
+    // So do out-of-range rules (`new_game` revalidates, after the decks are resolved: a valid
+    // deck here, the unknown one would answer first).
+    assert_eq!(
+        from_data_with("aggro", VERSIONS, r#"{"board_limit":0}"#).as_deref(),
+        Some("invalid_setup")
+    );
+    // Valid rules and an unknown deck: the deck answers.
+    assert_eq!(
+        from_data_with("nope", VERSIONS, "{}").as_deref(),
+        Some("unknown_deck")
+    );
+    // Versions are analysed before the rules.
+    assert_eq!(
+        from_data_with("aggro", "[", r#"{"nope":1}"#).as_deref(),
+        Some("invalid_json")
+    );
+}
+
+#[test]
+fn from_json_with_a_rules_key_equals_from_data_with_the_same_rules() {
+    let rules = non_default();
+    let mut setup: Value = serde_json::from_str(&by_hand(
+        FIXTURE_CARDS,
+        FIXTURE_DECKS,
+        "aggro",
+        "control",
+        &["fixture@1.0.0"],
+    ))
+    .unwrap();
+    setup["rules"] = serde_json::to_value(rules).unwrap();
+    let json = Duel::from_json(&setup.to_string(), 1).unwrap();
+    let data = with_rules(Some(&rules_text(&rules)), VERSIONS).unwrap();
+    assert_eq!(start_events(&json), start_events(&data));
+    assert!(start_events(&json).contains("\"rules\""));
+}
+
+/// The events of a game without the `rules` key of `game_started`.
+fn without_rules_key(events: &str) -> Value {
+    let mut value: Value = serde_json::from_str(events).unwrap();
+    if let Some(started) = value
+        .as_array_mut()
+        .and_then(|a| a.iter_mut().find_map(|e| e.get_mut("game_started")))
+    {
+        started.as_object_mut().unwrap().remove("rules");
+    }
+    value
+}
+
+#[test]
+fn the_rules_are_inert_before_127() {
+    let mut plain = with_rules(None, VERSIONS).unwrap();
+    let mut ruled = with_rules(Some(&rules_text(&non_default())), VERSIONS).unwrap();
+    assert_eq!(
+        without_rules_key(&start_events(&plain)),
+        without_rules_key(&start_events(&ruled))
+    );
+    for step in 0..200 {
+        let actions = plain.legal_actions_json().unwrap();
+        assert_eq!(actions, ruled.legal_actions_json().unwrap(), "step {step}");
+        let list: Vec<Value> = serde_json::from_str(&actions).unwrap();
+        if list.is_empty() {
+            break;
+        }
+        let action = list[(step * 7) % list.len()].to_string();
+        assert_eq!(
+            plain.apply_json(&action).unwrap(),
+            ruled.apply_json(&action).unwrap(),
+            "step {step}"
+        );
+    }
 }
