@@ -287,7 +287,11 @@ fn tally_game(tally: &mut MatchupReport, record: &GameRecord) {
         WinReason::Exhaustion => tally.exhaustion += 1,
         WinReason::Concede => tally.concede += 1,
     }
+    if winner == PlayerId::One {
+        tally.seat_one_wins += 1;
+    }
     tally.total_actions += u64::from(record.actions);
+    *tally.durations.entry(record.actions).or_default() += 1;
 }
 
 #[cfg(test)]

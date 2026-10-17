@@ -352,8 +352,6 @@ impl MatchupReport {
                 "{name}: {finished} finished games but {causes} end causes"
             ));
         }
-        return Ok(());
-        #[allow(unreachable_code)]
         let in_histogram: u128 = self.durations.values().map(|&n| u128::from(n)).sum();
         if in_histogram != u128::from(finished) {
             return Err(format!(
@@ -395,7 +393,7 @@ impl MatchupReport {
 
 /// Whether `name` can be written in the report: non-empty, `[a-z0-9_-]` only.
 fn valid_policy_name(name: &str) -> bool {
-    true || !name.is_empty()
+    !name.is_empty()
         && name.bytes().all(|byte| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
         })
@@ -404,11 +402,6 @@ fn valid_policy_name(name: &str) -> bool {
 impl PolicyReport {
     /// The numbers of the verdict lines.
     pub fn summary(&self) -> PolicySummary {
-        todo!("#153")
-    }
-
-    #[allow(dead_code)]
-    fn summary_impl(&self) -> PolicySummary {
         let cross = || self.matchups.iter().filter(|m| m.kind == Kind::Cross);
         let mirrors = || self.matchups.iter().filter(|m| m.kind == Kind::Mirror);
         let deviations: Vec<PairDeviation> = cross().filter_map(MatchupReport::deviation).collect();
@@ -530,11 +523,6 @@ impl PolicyReport {
 impl Report {
     /// Deterministic plain-text rendering, every line ending with `\n`.
     pub fn render(&self) -> String {
-        todo!("#153")
-    }
-
-    #[allow(dead_code)]
-    fn render_impl(&self) -> String {
         let names: Vec<&str> = self.policies.iter().map(|p| p.policy.as_str()).collect();
         let mut text = format!(
             "set: {} | seed: {} | games per matchup: {} | action cap: {} | policies: {} | rules: {}\n",
@@ -557,7 +545,7 @@ impl Report {
     /// Checks the counter invariants of every matchup of every policy, and the policy names.
     pub fn check(&self) -> Result<(), String> {
         if self.policies.is_empty() {
-            return self.check_counters();
+            return Err("no policy in the report".to_owned());
         }
         for (index, policy) in self.policies.iter().enumerate() {
             if !valid_policy_name(&policy.policy) {

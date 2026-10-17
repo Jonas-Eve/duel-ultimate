@@ -244,6 +244,9 @@ fn main() {
 /// contradict each other is never printed (exit code 1, nothing on stdout). Alerts and a pair
 /// out of the band are lines of the report, never a failure. Pure.
 fn finish(report: &Report) -> Result<String, String> {
+    report
+        .check()
+        .map_err(|message| format!("inconsistent report: {message}"))?;
     Ok(report.render())
 }
 
