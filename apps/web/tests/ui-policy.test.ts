@@ -53,6 +53,16 @@ describe("index.css", () => {
     expect(Number(size![1])).toBeGreaterThanOrEqual(10);
   });
 
+  test("the card detail sheet: a 520px card, a 230px art slot, a scrolling effects zone, a 48px close button, a screen-reader-only class", () => {
+    const code = stripComments(css);
+    const rule = (selector: string) => new RegExp(`${selector.replace(/\./g, "\\.")}\\s*\\{([^}]*)\\}`).exec(code)?.[1] ?? "";
+    expect(rule(".card-detail")).toMatch(/height:\s*520px/);
+    expect(rule(".card-detail-art")).toMatch(/height:\s*230px/);
+    expect(rule(".card-detail-effects")).toMatch(/overflow:\s*auto/);
+    expect(rule(".card-detail-close")).toMatch(/min-height:\s*48px/);
+    expect(rule(".sr-only")).toMatch(/position:\s*absolute/);
+  });
+
   test("the page column is centred and at most 48rem wide; card rows scroll inside", () => {
     expect(css).toMatch(/max-width:\s*48rem/);
     expect(css).toMatch(/overflow-x:\s*auto/);

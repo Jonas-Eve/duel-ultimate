@@ -63,6 +63,8 @@ describe("against the computer", () => {
       expect(m.top.board).toEqual(v.opponent.board);
       expect(m.top.discard).toEqual(v.opponent.discard);
       expect(m.top.hero).toEqual(v.opponent.hero);
+      expect(m.bottom.deckName).toBe(s.players.One.name);
+      expect(m.top.deckName).toBe(s.players.Two.name);
     }
   });
 
