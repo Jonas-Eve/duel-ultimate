@@ -30,7 +30,7 @@ fn from_data(
     two: &str,
     versions: &str,
 ) -> Result<Duel, String> {
-    Duel::from_data(cards, decks, one, two, versions, 1)
+    Duel::from_data(cards, decks, one, two, versions, 1, None)
 }
 
 /// The setup built by hand from `duel-cards` (no help from the code under test), as JSON.
@@ -75,7 +75,7 @@ fn from_data_equals_from_json_on_the_setup_built_by_hand() {
         let versions = serde_json::to_string(&[version]).unwrap();
         for (one, two) in [(a, b), (b, a), (a, a), (b, b)] {
             for seed in [0, 1, 7, 12345, u32::MAX] {
-                let data = Duel::from_data(cards, decks, one, two, &versions, seed).unwrap();
+                let data = Duel::from_data(cards, decks, one, two, &versions, seed, None).unwrap();
                 let json =
                     Duel::from_json(&by_hand(cards, decks, one, two, &[version]), seed).unwrap();
                 let context = format!("{one} vs {two}, seed {seed}");
@@ -102,8 +102,8 @@ fn the_decks_are_chosen_by_identifier_not_by_position_in_the_file() {
     for seed in [1, 2, 3] {
         for (one, two) in [("aggro", "control"), ("control", "aggro")] {
             let a =
-                Duel::from_data(FIXTURE_CARDS, FIXTURE_DECKS, one, two, VERSIONS, seed).unwrap();
-            let b = Duel::from_data(FIXTURE_CARDS, &reordered, one, two, VERSIONS, seed).unwrap();
+                Duel::from_data(FIXTURE_CARDS, FIXTURE_DECKS, one, two, VERSIONS, seed, None).unwrap();
+            let b = Duel::from_data(FIXTURE_CARDS, &reordered, one, two, VERSIONS, seed, None).unwrap();
             assert_eq!(
                 a.start_events_json().unwrap(),
                 b.start_events_json().unwrap()
@@ -255,7 +255,8 @@ fn the_largest_seed_is_accepted() {
             "aggro",
             "control",
             VERSIONS,
-            u32::MAX
+            u32::MAX,
+            None
         )
         .is_ok()
     );

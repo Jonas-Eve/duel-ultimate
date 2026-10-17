@@ -57,6 +57,7 @@ impl Duel {
         deck_two: &str,
         data_versions_json: &str,
         seed: u32,
+        _rules_json: Option<&str>,
     ) -> Result<Self, String> {
         for input in [
             cards_json,
@@ -237,6 +238,7 @@ impl Game {
         deck_two: &str,
         data_versions_json: &str,
         seed: u32,
+        rules_json: Option<String>,
     ) -> Result<Game, JsError> {
         Duel::from_data(
             cards_json,
@@ -245,6 +247,7 @@ impl Game {
             deck_two,
             data_versions_json,
             seed,
+            rules_json.as_deref(),
         )
         .map(Game)
         .map_err(|e| JsError::new(&e))
@@ -561,6 +564,7 @@ mod tests {
             "bulwark",
             r#"["starter@1.1.0"]"#,
             seed,
+            None,
         )
         .unwrap()
     }
