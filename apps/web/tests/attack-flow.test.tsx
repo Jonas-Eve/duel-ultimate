@@ -95,12 +95,6 @@ const sheet = () => screen.queryByRole("dialog", { name: "Confirmer l'attaque" }
 const disabled = (el: Element) => el.getAttribute("aria-disabled") === "true";
 const region = () => screen.getByRole("region", { name: "Partie" });
 
-/** The accessible name of a creature tile, without any attack-state suffix. */
-const base = (c: CardView): string =>
-  `${c.name}, coût ${c.cost}, force ${c.force}, coût d'attaque ${c.attack_cost}, PV ${c.health}` +
-  (c.provocation ? ", provocation" : "") +
-  (c.riposte > 0 ? `, riposte ${c.riposte}` : "");
-
 /** First of my creatures that has an attack in the engine's list. */
 function attackerOf(s: Snapshot): { index: number; card: CardView; attacks: ActionPreview[] } {
   const index = mine(s).findIndex((x) => s.legal.some((p) => isAttackBy(x.id)(p.action)));
@@ -505,7 +499,7 @@ describe("riposte", () => {
     const wolfIndex = theirs(s).findIndex((x) => x.name === "Loup hérissé");
     await user.click(myTiles()[index]);
     const wolf = theirTiles()[wolfIndex];
-    expect(within(wolf).getByText("Riposte 1")).toBeTruthy();
+    expect(wolf.getAttribute("aria-label")).toContain("riposte 1");
     expect(within(wolf).getByText("Cible possible")).toBeTruthy();
     await user.click(wolf);
     await user.click(within(sheet()!).getByRole("button", { name: "Confirmer" }));
