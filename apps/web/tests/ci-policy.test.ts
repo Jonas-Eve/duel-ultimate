@@ -183,6 +183,8 @@ const jobsOf = (c: string): Record<string, string> => {
   }
   return out;
 };
+// stepsOf leaves an empty chunk where a blank line separates two steps: drop it.
+const stepsNonEmpty = (c: string) => stepsOf(c).filter((t) => t.trim() !== "");
 // The lines of a `permissions:` block (job level, indented by four spaces, or top level).
 const permsOf = (text: string, indent: number): string[] | null => {
   const pad = " ".repeat(indent);
@@ -244,7 +246,7 @@ describe(".github/workflows/deploy-pages.yml (manuel, #54)", () => {
   });
 
   test("deploy runs no repository code: one step, actions/deploy-pages, no checkout, no run", () => {
-    const steps = stepsOf(deploy);
+    const steps = stepsNonEmpty(deploy);
     expect(steps).toHaveLength(1);
     expect(steps[0]).toMatch(/^\s*id: deployment\s*$/m);
     expect(usesOf(deploy)).toHaveLength(1);
@@ -279,7 +281,7 @@ describe(".github/workflows/deploy-pages.yml (manuel, #54)", () => {
   test("no secret, credentials not persisted, no ${{ }} inside a run script", () => {
     expect(deployCode).not.toMatch(/secrets\./);
     expect(deployCode).toContain("persist-credentials: false");
-    const runs = stepsOf(deployCode).filter((s) => /^\s*run:/m.test(s));
+    const runs = stepsNonEmpty(deployCode).filter((s) => /^\s*run:/m.test(s));
     expect(runs.length).toBeGreaterThan(0);
     for (const r of runs) expect(r).not.toContain("${{");
   });
@@ -293,7 +295,7 @@ describe(".github/workflows/deploy-pages.yml (manuel, #54)", () => {
   });
 
   test("builds apps/web under the sub-path with a short SHA that only comes from GITHUB_SHA", () => {
-    const step = stepsOf(build).filter((s) => /^\s*run: .*npm run build\s*$/m.test(s));
+    const step = stepsNonEmpty(build).filter((s) => /^\s*run: .*npm run build\s*$/m.test(s));
     expect(step, 'exactly one step runs "npm run build"').toHaveLength(1);
     expect(step[0]).toMatch(/^\s*working-directory: apps\/web\s*$/m);
     expect(step[0]).toMatch(/^\s*VITE_BASE: \/duel-ultimate\/\s*$/m);
@@ -324,7 +326,7 @@ describe(".github/workflows/deploy-pages.yml (manuel, #54)", () => {
 
   test("configure-pages does not enable Pages itself and fails fast with an explanation", () => {
     expect(deployCode).not.toContain("enablement");
-    const [first, second] = stepsOf(build);
+    const [first, second] = stepsNonEmpty(build);
     expect(first).toMatch(/^\s*id: pages\s*$/m);
     expect(first).toMatch(/uses: actions\/configure-pages@/);
     expect(second).toMatch(/^\s*if: failure\(\) && steps\.pages\.outcome == 'failure'\s*$/m);
