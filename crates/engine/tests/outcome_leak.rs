@@ -50,7 +50,7 @@ fn card(n: u32) -> CreatureStats {
         force: 1 + n % 3,
         attack_cost: 1 + n % 2,
         health: 1 + n % 4,
-        provocation: n % 7 == 0,
+        provocation: n.is_multiple_of(7),
         riposte: n % 3,
     }
 }
@@ -144,6 +144,17 @@ fn for_every_state(seed: u64, mut check: impl FnMut(&GameState)) {
     }
 }
 
+/// The numbers that directly follow `marker` in `text` (`CardInstanceId(7)`, `SECRET-7"`).
+fn mentioned_ids<'a>(text: &'a str, marker: &'a str) -> impl Iterator<Item = u32> + 'a {
+    text.split(marker).skip(1).filter_map(|rest| {
+        rest.chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse()
+            .ok()
+    })
+}
+
 fn outcomes(state: &GameState) -> Vec<ActionOutcome> {
     let obs = Observation::of(state).unwrap();
     (0..obs.actions().len())
@@ -220,15 +231,12 @@ fn no_outcome_mentions_a_card_of_the_actors_pile_or_of_the_opposing_hand_or_pile
             let obs = Observation::of(state).unwrap();
             for i in 0..obs.actions().len() {
                 let text = format!("{:?}", obs.outcome(i).unwrap());
-                for id in &hidden {
-                    assert!(
-                        !text.contains(&format!("CardInstanceId({id})")),
-                        "seed {seed}: id {id} in {text}"
-                    );
-                    assert!(
-                        !text.contains(&format!("SECRET-{id}\"")),
-                        "seed {seed}: name of {id} in {text}"
-                    );
+                // One pass over the text: every id and every secret name it mentions.
+                let mentioned: BTreeSet<u32> = mentioned_ids(&text, "CardInstanceId(")
+                    .chain(mentioned_ids(&text, "SECRET-"))
+                    .collect();
+                if let Some(id) = mentioned.intersection(&hidden).next() {
+                    panic!("seed {seed}: card {id} in {text}");
                 }
             }
         });
@@ -245,10 +253,11 @@ fn the_outcome_preview_is_the_preview_is_the_entry_of_preview_legal_actions() {
             let all = preview_legal_actions(state);
             let n = obs.actions().len();
             assert_eq!(all.len(), n + 1, "Concede comes last");
-            for i in 0..n {
+            assert_eq!(all.last().map(|p| p.action), Some(Action::Concede));
+            for (i, (action, expected)) in obs.actions().iter().zip(&all).enumerate() {
                 let preview = obs.preview(i).unwrap();
-                assert_eq!(preview.action, obs.actions()[i]);
-                assert_eq!(preview, all[i], "seed {seed}, action {i}");
+                assert_eq!(preview.action, *action);
+                assert_eq!(&preview, expected, "seed {seed}, action {i}");
                 assert_eq!(obs.outcome(i).unwrap().preview, preview);
             }
         });

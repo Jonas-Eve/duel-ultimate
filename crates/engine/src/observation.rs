@@ -7,10 +7,10 @@
 //! cannot reach the opposing hand, either pile's order or the generator. It does not
 //! authenticate anything: the caller decides whose turn it observes (always the active seat).
 
-use crate::preview::ActionPreview;
-use crate::rules::{Action, legal_actions};
-use crate::state::{GameState, PlayerId};
-use crate::view::{OutcomeView, PlayerView, player_view};
+use crate::preview::{ActionPreview, dry_run, preview_of};
+use crate::rules::{Action, Event, legal_actions};
+use crate::state::{CardInstanceId, GameState, PlayerId};
+use crate::view::{OutcomeView, PlayerView, outcome_view, player_view};
 
 /// The active seat's window on a running game. Built by [`Observation::of`], lazily: only the
 /// legal action list is computed at construction (once); the view is computed when asked for.
@@ -51,18 +51,54 @@ impl<'a> Observation<'a> {
         player_view(self.state, self.seat())
     }
 
-    /// TODO(#141) stub.
-    pub fn preview(&self, _i: usize) -> Option<ActionPreview> {
-        None
+    /// The preview of the legal action at index `i` of [`actions`](Self::actions) (what it costs
+    /// and causes, hidden draws excluded); `None` out of range. One clone per call.
+    pub fn preview(&self, i: usize) -> Option<ActionPreview> {
+        let action = *self.actions.get(i)?;
+        let run = dry_run(self.state, action);
+        Some(preview_of(
+            action,
+            run.as_ref().map(|(_, events)| events.as_slice()),
+        ))
     }
 
-    /// TODO(#141) stub.
-    pub fn outcome(&self, _i: usize) -> Option<ActionOutcome> {
-        None
+    /// The outcome of the legal action at index `i` of [`actions`](Self::actions): its preview and
+    /// the view of the acting seat after it, in which a drawn card is only counted
+    /// ([`OutcomeView`]); `None` out of range. One clone per call, nothing is evaluated before.
+    /// Should `apply` refuse the action on the clone (an internal inconsistency), the outcome has
+    /// no consequence: an empty preview and the unchanged view.
+    pub fn outcome(&self, i: usize) -> Option<ActionOutcome> {
+        let action = *self.actions.get(i)?;
+        let seat = self.seat();
+        let outcome = match dry_run(self.state, action) {
+            Some((after, events)) => ActionOutcome {
+                preview: preview_of(action, Some(&events)),
+                view_after: outcome_view(&after, seat, &drawn_ids(&events, seat)),
+            },
+            None => ActionOutcome {
+                preview: preview_of(action, None),
+                view_after: outcome_view(self.state, seat, &[]),
+            },
+        };
+        Some(outcome)
     }
 }
 
-/// What one legal action would do, as the acting seat may know it.
+/// The cards `seat` drew from its pile during an action: provenance, read from the `Drew`
+/// events (the only way a card reaches a hand from the pile).
+fn drawn_ids(events: &[Event], seat: PlayerId) -> Vec<CardInstanceId> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Drew { player, card } if *player == seat => Some(*card),
+            _ => None,
+        })
+        .collect()
+}
+
+/// What one legal action would do, as the acting seat may know it: its [`ActionPreview`] and
+/// its own view right after it, a draw only counted (never shown). `Serialize` is deliberately
+/// absent: nothing exposes it to a client, only the Rust AI reads it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActionOutcome {
     pub preview: ActionPreview,
