@@ -169,5 +169,9 @@ p { margin: 6px 0; }
 .play-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .play-consequence { margin: 0; padding: 0; list-style: none; font-size: 0.9375rem; }
 .play-reason { margin: 0; font-size: 0.9375rem; color: var(--muted); }
+.card-detail-attack { display: flex; flex-direction: column; gap: 4px; }
+.card-detail-effect-button { width: 100%; min-height: 44px; text-align: left; font-size: 14px; }
+.card-detail-effect-button[aria-disabled="true"] { background: var(--surface); color: var(--muted); border: 2px dashed var(--border); cursor: not-allowed; }
+.attack-hint { margin: 0; font-size: 0.9375rem; font-weight: 700; }
 .btn-play { width: 100%; min-height: 48px; font-weight: 700; }
 .btn-play[aria-disabled="true"] { background: var(--surface); color: var(--muted); border: 2px dashed var(--border); cursor: not-allowed; }

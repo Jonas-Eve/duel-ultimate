@@ -75,7 +75,7 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
   // The read-only card detail: which card (by id) of which zone. Looked up in the current model on every
   // render, and dropped during render when the card is no longer there (never by an effect).
   // The zone is part of the key: after a hand-over in two camps the swapped hand never reopens a card as another zone's.
-  const [detail, setDetail] = useState<{ id: number; zone: "opp-board" | "other-hand" | "hand" } | null>(null);
+  const [detail, setDetail] = useState<{ id: number; zone: "opp-board" | "other-hand" | "hand" | "own-board" } | null>(null);
   const region = useRef<HTMLElement>(null);
   // After an attack is confirmed the focus goes back to the game region: the dialog closes and
   // the tile that opened it may be gone. Runs after the dialog's own focus restoration.
@@ -130,8 +130,9 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
     controller.submit(preview);
   };
 
-  const detailSide = detail === null ? undefined : detail.zone === "hand" ? model.bottom : model.top;
-  const detailCards = detail === null ? [] : detail.zone === "opp-board" ? model.top.board : (detailSide?.hand ?? []);
+  const detailSide = detail === null ? undefined : detail.zone === "hand" || detail.zone === "own-board" ? model.bottom : model.top;
+  const detailCards =
+    detail === null ? [] : detail.zone === "opp-board" ? model.top.board : detail.zone === "own-board" ? model.bottom.board : (detailSide?.hand ?? []);
   const detailCard = detail === null ? undefined : detailCards.find((c) => c.id === detail.id);
   if (detail !== null && detailCard === undefined) setDetail(null);
   // "Jouer": the engine's preview of the CURRENT snapshot, searched on every render; none = inactive, with the reason.
@@ -201,6 +202,9 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
       />
       {snapshot.phase === "computer-turn" && <ThinkingIndicator />}
       <TimeBand model={model} twoCamps={twoCamps} />
+      <p aria-live="polite" className="attack-hint">
+        {attack.selected !== null ? fr.chooseTarget : ""}
+      </p>
       {attack.selected !== null && (
         <button type="button" className="btn" onClick={clearAttack}>
           {fr.cancelSelection}
@@ -210,16 +214,12 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
         cards={model.bottom.board}
         label={names.bottomBoard}
         emblem={model.bottom.emblem}
-        tileProps={(card) => {
-          const can = hasAttack(card.id);
-          const isSelected = attack.selected === card.id;
-          return {
-            onPress: () => setSelected(isSelected ? null : card.id),
-            inactive: !can,
-            pressed: can ? isSelected : undefined,
-            mark: isSelected ? "selected" : undefined,
-          };
-        }}
+        // A touch only opens the detail (also while a target is being chosen: it changes the attacker from there).
+        tileProps={(card) => ({
+          onPress: () => setDetail({ id: card.id, zone: "own-board" }),
+          opensDialog: true,
+          mark: attack.selected === card.id ? "selected" : undefined,
+        })}
       />
       <HeroBar side={model.bottom} label={names.bottomHero} />
       <p aria-live="polite" className="announce">
@@ -253,6 +253,20 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
           emblem={detailSide.emblem}
           deckName={detailSide.deckName}
           onClose={() => setDetail(null)}
+          attack={
+            detail.zone === "own-board"
+              ? {
+                  available: hasAttack(detailCard.id),
+                  reason: humanTurn ? fr.attackUnavailable : fr.attackUnavailableComputer,
+                  // The detail closes (the focus goes back to the tile), the creature is the attacker: targets next. Idempotent.
+                  onAttack: () => {
+                    setDetail(null);
+                    setSelected(detailCard.id);
+                    setPending(null);
+                  },
+                }
+              : undefined
+          }
           actions={
             detail.zone === "hand" ? (
               <PlayActions

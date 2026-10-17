@@ -8,7 +8,7 @@ import { decorateSession, newSession, type SessionProbe } from "./support/engine
 import { GameController } from "../src/game/controller";
 import { config } from "./support/config";
 import { playUntil, realDeps, settle } from "./support/policies";
-import { selectAttacker } from "./support/play";
+import { attackLine, selectAttacker } from "./support/play";
 import { inAct, makeController, mountGame, useRealEngine } from "./support/ui";
 
 useRealEngine();

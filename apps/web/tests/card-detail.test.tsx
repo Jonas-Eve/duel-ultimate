@@ -248,11 +248,13 @@ describe("on the real engine", () => {
     expect(document.activeElement).toBe(within(hand).getAllByRole("button")[0]);
   });
 
-  test("my own board tiles open no detail yet (task #106 owns them)", async () => {
+  test("my own board tiles are popup buttons that open the detail (#106)", async () => {
     const c = await withOpponentCreature();
-    mountGame(c);
+    const { user } = mountGame(c);
     const own = within(screen.getByRole("group", { name: "Ton plateau" })).getAllByRole("button");
     expect(own.length).toBeGreaterThan(0);
-    for (const t of own) expect(t.getAttribute("aria-haspopup")).toBeNull();
+    for (const t of own) expect(t.getAttribute("aria-haspopup")).toBe("dialog");
+    await user.click(own[0]);
+    expect(screen.getByRole("dialog", { name: c.getSnapshot().views.One!.you.board[0].name! })).toBeTruthy();
   });
 });
