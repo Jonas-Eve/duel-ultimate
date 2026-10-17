@@ -73,7 +73,7 @@ describe("the permanent information", () => {
       [true, v.you.board],
       [false, v.opponent.board],
     ] as const) {
-      // Mine are the attack flow's buttons (#66), the opponent's open the read-only detail (#104).
+      // Every tile of a board opens the card detail (#104, #106): mine from there start an attack.
       const names = within(board(mine))
         .getAllByRole("button")
         .map((g) => g.getAttribute("aria-label"));
