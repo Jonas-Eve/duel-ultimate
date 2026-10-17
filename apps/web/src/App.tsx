@@ -1,9 +1,10 @@
 // Assembles the screens: the engine is loaded first (loading screen), then the home screen, then
-// the game. `App` is the only place that reads the starter data and knows the engine factory;
+// the game. `App` is the only place that reads the starter data and the build identifier, and knows the engine factory;
 // `ui/` and `game/` get what they need by props and closures. The controller is created in an
 // event handler (never in an effect: StrictMode replays effects, and a cleanup would free the
 // second mount's instance), through `startGame`, which never throws.
 import { useEffect, useRef, useState } from "react";
+import { BUILD_ID } from "./data/build";
 import { CARDS_JSON, DATA_VERSION, DECKS, DECKS_JSON } from "./data/starter";
 import { parseEngineError, type EngineError } from "./engine/errors";
 import { loadEngine } from "./engine/load";
@@ -123,6 +124,7 @@ export function App({ deps = {} }: { deps?: AppDeps }) {
         <Home
           decks={DECKS}
           dataVersion={DATA_VERSION}
+          buildId={BUILD_ID}
           status={factory !== null ? "ready" : loadError !== null ? "failed" : "loading"}
           loadError={loadError}
           startError={startError}

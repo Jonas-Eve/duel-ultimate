@@ -9,6 +9,21 @@ aucune interaction qui dépende du survol. Il appelle le moteur de règles compi
 - `npm run preview` — sert le build ; `npm run build && npm run preview -- --host` pour l'essayer sur un
   téléphone du réseau local (un build ne s'ouvre pas en `file://` : modules et `.wasm` ; hors réseau
   local, voir #54)
+- **Sous-chemin (#80)** : `VITE_BASE` fixe le `base` de Vite au build (`vite/base.ts`, `resolveBase`).
+  Absente ou vide : `/` (rien ne change : `dev`, `preview` et les e2e restent à la racine). Sinon la
+  forme est stricte, `/` ou `/<segment>(/<segment>)*/` (`/duel-ultimate/`), segments `[A-Za-z0-9._-]+`
+  hors `.` et `..` ; tout le reste (base relative `./`, URL absolue, `//`, espace, `?`, `#`, sans `/`
+  initial ou final) **fait échouer** la config avec une erreur qui nomme `VITE_BASE`. Une base relative est
+  refusée : le `.wasm` est résolu par `new URL(..., import.meta.url)`, que Vite émet sous la base
+  absolue. La variable est lue par le processus Node de la config : pour essayer le build sous le
+  sous-chemin, la donner aussi à `preview` :
+  `VITE_BASE=/duel-ultimate/ npm run build && VITE_BASE=/duel-ultimate/ npm run preview`.
+- **Identifiant de build (#80)** : `VITE_BUILD_SHA` (un SHA de commit, 7 à 40 caractères hexadécimaux
+  minuscules) est affiché en 7 caractères sur l'accueil, sous « Données : starter@1.0.0 » :
+  « Version : abc1234 ». Absent ou invalide (dev, tests, build local) : `dev`. `src/data/build.ts`
+  (`buildIdFrom`, `BUILD_ID`) n'est lu que par `App`, qui le passe à l'accueil par la prop `buildId`.
+  Seules les variables `VITE_` entrent dans le bundle ; aucun secret. `index.html` porte
+  `<link rel="icon" href="data:," />` (pas de requête `/favicon.ico`, la CSP autorise `data:` en images).
 - `npm test` — tests (Vitest + Testing Library + `user-event`), dont un test de fumée contre le vrai `.wasm`
 - `npm run e2e` — tests de bout en bout (Playwright) contre le build de production : voir « Tests de bout en bout »
 
@@ -45,9 +60,11 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
 | `src/engine/` | contrat JSON typé (`types.ts`, écrit depuis les sources Rust), `GameSession` (`session.ts`, le seul accès au moteur), adaptateur `createWasmSession` (`wasm-session.ts`), chargeur mémoïsé `loadEngine` (`load.ts`), erreurs (`errors.ts`) |
 | `src/game/` | logique du client sans React ni WASM : la graine (`seed.ts`), les enregistrements de journal (`records.ts`), la politique de l'ordinateur (`computer.ts`), le contrôleur de la partie locale (`controller.ts`), le démarrage sans exception (`start.ts`) et le modèle d'écran (`screen-model.ts`) |
 | `src/ui/` | composants et textes français : écrans (`Home`, `GameScreen`, `EndScreen`, `FatalScreen`), éléments (`HeroBar`, `TimeBand`, `Board`, `CardTile`, `Hand`, `ActionBar`, `ThinkingIndicator`, `ErrorBanner`, `LogBar`, `LogHistory`), dialogues (`Dialog`, `ConfirmDialog`, `AttackSheet`, `LogDrawer`, `DiscardDialog`), textes (`fr.ts`, `errors.fr.ts`), `consequence.ts`, l'état du flux d'attaque `attack-state.ts` et le formateur du journal `log-format.ts` |
-| `src/App.tsx` | assemble les écrans ; le seul à lire `data/starter` et `engine/load` |
+| `src/App.tsx` | assemble les écrans ; le seul à lire `data/starter`, `data/build` et `engine/load` |
 | `src/data/starter.ts` | données `starter` importées en `?raw` |
+| `src/data/build.ts` | `buildIdFrom`, `BUILD_ID` : identifiant de build (`VITE_BUILD_SHA`), lu par `App` seul |
 | `vite/csp-plugin.ts` | plugin Vite de la CSP de build |
+| `vite/base.ts` | `resolveBase` : le `base` de Vite depuis `VITE_BASE` (#80) |
 
 - **Seuls `engine/wasm-session.ts` (types) et `engine/load.ts` importent `src/wasm/`.** Le client ne
   fabrique jamais une action : il la retrouve dans `legalActionsWithTime()` et la renvoie telle quelle
@@ -56,7 +73,7 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
 - **Données** : `cards.json` et `decks.json` sont lus depuis `data/starter/1.0.0/` (jamais copiés).
   L'import hors de `apps/web` exige `server.fs.allow` dans `vite.config.ts` (sans lui, Vitest répond
   « Denied ID ») ; `allow` remplace la liste par défaut de Vite, donc elle contient `apps/web` et
-  `data/`, jamais la racine du dépôt. `DATA_VERSION` (`starter@1.0.0`) est la seule constante de
+  `data/`, jamais la racine du dépôt (`data/build.ts`, lui, ne lit que `import.meta.env`). `DATA_VERSION` (`starter@1.0.0`) est la seule constante de
   version ; `tests/data-version.test.ts` la compare au chemin importé.
 - **Erreurs** : toute erreur est une `EngineError { code, message, fatal }` (`parseEngineError`) ; le
   `message` anglais n'est jamais affiché, la table `ui/errors.fr.ts` fait foi. **Une nouvelle erreur
