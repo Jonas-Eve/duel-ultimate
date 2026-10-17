@@ -9,7 +9,7 @@
 import { EngineError, parseEngineError } from "../engine/errors";
 import type { GameSession } from "../engine/session";
 import type { Action, ActionPreview, EngineEvent, PlayerView, Seat } from "../engine/types";
-import { MAX_COMPUTER_ACTIONS_PER_CHAIN, COMPUTER_SLICE_MS, pickComputerAction, randomPolicy, type ComputerPolicy } from "./computer";
+import { MAX_COMPUTER_ACTIONS_PER_CHAIN, COMPUTER_SLICE_MS } from "./computer";
 import { captureRecord, type StepRecord } from "./records";
 import { deriveAiSeed, mulberry32 } from "./seed";
 
@@ -35,9 +35,12 @@ export interface SessionRequest {
   deckTwo: string;
   seed: number;
 }
+/** How the computer's action is chosen: `(session, actor, draw) => action`. */
+export type ChooseAction = (session: GameSession, actor: Seat, draw: number) => Action;
 export interface ControllerDeps {
   createSession(request: SessionRequest): GameSession;
-  policy: ComputerPolicy;
+  /** Reserved to tests (absent in production): replaces the engine's choice of the computer's action. */
+  chooseAction?: ChooseAction;
   scheduler: { yield(): Promise<void> };
   now(): number;
 }
@@ -63,11 +66,14 @@ export type SubmitResult =
 type Views = { One?: PlayerView; Two?: PlayerView };
 type Deps = Partial<ControllerDeps> & Pick<ControllerDeps, "createSession">;
 
+/** The engine chooses (`computer_action`, never "concede"); the controller neither filters nor evaluates. */
+const defaultChooseAction: ChooseAction = (session, actor, draw) => session.computerAction(actor, draw);
+
 const defaultScheduler = { yield: (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0)) };
 
 export class GameController {
   private readonly listeners = new Set<() => void>();
-  private readonly policy: ComputerPolicy;
+  private readonly chooseAction: ChooseAction;
   private readonly scheduler: ControllerDeps["scheduler"];
   private readonly now: () => number;
   private readonly rng: () => number;
@@ -109,12 +115,13 @@ export class GameController {
     deps: Deps,
     private readonly session: GameSession,
   ) {
-    this.policy = deps.policy ?? randomPolicy;
+    this.chooseAction = deps.chooseAction ?? defaultChooseAction;
     this.scheduler = deps.scheduler ?? defaultScheduler;
     this.now = deps.now ?? (() => performance.now());
     this.aiSeed = config.mode === "computer" ? deriveAiSeed(config.seed) : null;
-    // One generator for the whole game: it advances by one draw per computer action, so the same
-    // seed and the same human actions replay the same game, computer included.
+    // One generator for the whole game: it advances by one draw per computer action (a u32 handed
+    // to the engine, which seeds its own generator from it), so the same seed and the same human
+    // actions replay the same game, computer included.
     this.rng = mulberry32(this.aiSeed ?? 0);
     this.players = { One: config.deckOne, Two: config.deckTwo };
 
@@ -210,6 +217,11 @@ export class GameController {
 
   // ---- internals -------------------------------------------------------------------------
 
+  /** One u32 from the game's computer generator: exactly one per computer action. */
+  private drawFromRng(): number {
+    return Math.floor(this.rng() * 2 ** 32);
+  }
+
   /** A subscriber may have disposed the controller during `publish()`: then nothing starts (no session call after `dispose`). */
   private driveIfComputerTurn(): void {
     if (this.disposed || this.currentPhase() !== "computer-turn") return;
@@ -285,7 +297,7 @@ export class GameController {
   /**
    * The computer's chain. The first snapshot (computer-turn, 0 steps) is already published, so
    * the indicator shows at once; one yield lets the browser paint it. Then one action at a time
-   * (`legalActions` -> policy -> `apply`), a snapshot and a yield whenever a slice of
+   * (`computerAction` -> `apply`), a snapshot and a yield whenever a slice of
    * COMPUTER_SLICE_MS elapsed, and a check of the generation token after every await.
    */
   private async drive(token: number): Promise<void> {
@@ -298,7 +310,7 @@ export class GameController {
           throw new EngineError("computer_chain_limit", `the computer played ${MAX_COMPUTER_ACTIONS_PER_CHAIN} actions in a row`);
         }
         const actor = this.viewOne().active;
-        const action: Action = pickComputerAction(this.session.legalActions(), this.policy, this.rng);
+        const action: Action = this.chooseAction(this.session, actor, this.drawFromRng());
         const events = this.session.apply(action);
         this.commit(events, actor, "computer");
         this.computerSteps += 1;

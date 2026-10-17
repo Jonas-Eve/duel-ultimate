@@ -17,6 +17,9 @@ export const ENGINE_CODES = [
   "unknown_deck",
   "input_too_large",
   "invalid_seat",
+  "not_active_seat",
+  "invalid_policy",
+  "computer_stuck",
   "serialization_failed",
 ] as const;
 
@@ -24,7 +27,6 @@ export const ENGINE_CODES = [
 export const CLIENT_CODES = [
   "invalid_seed",
   "wasm_load_failed",
-  "computer_stuck",
   "computer_chain_limit",
   "internal_error",
 ] as const;

@@ -1,6 +1,6 @@
 import type { Action, ActionPreview } from "../../src/engine/types";
 import { isActivate, isAttack, isPlay } from "../../src/engine/types";
-import type { ChooseAction, ControllerDeps, GameController, Snapshot } from "../../src/game/controller";
+import { GameController, type ChooseAction, type ControllerDeps, type Snapshot } from "../../src/game/controller";
 import { mulberry32 } from "../../src/game/seed";
 import { instrumentedFactory, newSession } from "./engine";
 import type { GameFactory } from "../../src/engine/session";
@@ -120,4 +120,47 @@ export async function playUntil(
     if (!res.ok) throw new Error(`playUntil: submit refused: ${res.reason}`);
     steps += 1;
   }
+}
+
+/**
+ * A seed for which the computer, opening alone, plays AT LEAST `minSteps` actions in its first
+ * chain (the computer's choices are the engine's, so no test may pin a seed by hand: it is
+ * searched here, deterministically, on the real engine). Fails explicitly when none is found.
+ */
+export async function seedWithComputerOpening(one: string, two: string, minSteps: number, tryUpTo = 200): Promise<number> {
+  for (let seed = 0; seed < tryUpTo; seed++) {
+    const c = GameController.create(
+      { mode: "computer", deckOne: { id: one, name: one }, deckTwo: { id: two, name: two }, seed },
+      realDeps(),
+    );
+    try {
+      c.start();
+      const s = await settle(c);
+      if (s.phase === "human-turn" && s.computerSteps >= minSteps) return seed;
+    } finally {
+      c.dispose();
+    }
+  }
+  throw new Error(`no seed in 0..${tryUpTo} gives ${one}/${two} a computer opening of ${minSteps} actions`);
+}
+
+/**
+ * A seed for which, once the computer's opening chain is over, the human has an action that
+ * keeps the main (no handover, no end of game).
+ */
+export async function seedWithQuietHumanAction(one: string, two: string, tryUpTo = 200): Promise<number> {
+  for (let seed = 0; seed < tryUpTo; seed++) {
+    const c = GameController.create(
+      { mode: "computer", deckOne: { id: one, name: one }, deckTwo: { id: two, name: two }, seed },
+      realDeps(),
+    );
+    try {
+      c.start();
+      const s = await settle(c);
+      if (s.phase === "human-turn" && s.computerSteps > 0 && s.legal.some((p) => !p.hands_over && p.ends_game === null && p.action !== "concede")) return seed;
+    } finally {
+      c.dispose();
+    }
+  }
+  throw new Error(`no seed in 0..${tryUpTo} gives ${one}/${two} a quiet human action after the computer's opening`);
 }

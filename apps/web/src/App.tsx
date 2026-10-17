@@ -11,8 +11,7 @@ import { parseEngineError, type EngineError } from "./engine/errors";
 import { loadEngine } from "./engine/load";
 import type { GameFactory } from "./engine/session";
 import { createWasmSession } from "./engine/wasm-session";
-import type { ComputerPolicy } from "./game/computer";
-import type { ControllerDeps, GameController, Mode, SessionRequest } from "./game/controller";
+import type { ChooseAction, ControllerDeps, GameController, Mode, SessionRequest } from "./game/controller";
 import { startGame } from "./game/start";
 import { ArtProvider } from "./ui/ArtContext";
 import { fr } from "./ui/fr";
@@ -24,7 +23,8 @@ export interface AppDeps {
   engine?: () => Promise<GameFactory>;
   /** `null` simulates a device without `crypto.getRandomValues`. */
   crypto?: Pick<Crypto, "getRandomValues"> | null;
-  policy?: ComputerPolicy;
+  /** Reserved to tests: replaces the engine's choice of the computer's action. */
+  chooseAction?: ChooseAction;
   scheduler?: ControllerDeps["scheduler"];
   now?: () => number;
 }
@@ -95,7 +95,7 @@ export function App({ deps = {} }: { deps?: AppDeps }) {
       });
     const result = startGame(
       { mode, deckOne: one, deckTwo: two, seedText },
-      { createSession, policy: deps.policy, scheduler: deps.scheduler, now: deps.now },
+      { createSession, chooseAction: deps.chooseAction, scheduler: deps.scheduler, now: deps.now },
       deps.crypto,
     );
     if (!result.ok) {

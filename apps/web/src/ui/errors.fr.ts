@@ -14,6 +14,8 @@ export const ERROR_TEXT: Record<ErrorCode, string> = {
   unknown_deck: "Ce deck n'existe pas. Choisissez un deck de la liste.",
   input_too_large: "La demande est trop volumineuse pour être traitée.",
   invalid_seat: "Ce joueur n'existe pas dans la partie.",
+  not_active_seat: "Ce n'est pas le tour de ce camp de jouer dans la partie.",
+  invalid_policy: "Ce niveau d'ordinateur n'existe pas pour cette partie.",
   serialization_failed: "La partie ne peut plus être affichée. Lancez une nouvelle partie.",
   invalid_seed: "La graine doit être un nombre entier entre 0 et 4 294 967 295.",
   wasm_load_failed: "Le moteur de jeu n'a pas pu être chargé. Vérifiez votre connexion puis rechargez la page.",

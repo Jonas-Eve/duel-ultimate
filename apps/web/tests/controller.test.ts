@@ -6,7 +6,7 @@ import { deriveAiSeed, mulberry32 } from "../src/game/seed";
 import { PAIRS, decorateSession, initTestEngine, newSession } from "./support/engine";
 import { faultyFactory } from "./support/faulty";
 import { fakeSession } from "./support/fake-session";
-import { immediateScheduler, instrumentedFactory, playHuman, randomPreview, realDeps, settle, stallPolicy, stallPreview } from "./support/policies";
+import { immediateScheduler, instrumentedFactory, playHuman, randomPreview, realDeps, seedWithComputerOpening, settle, stallPolicy, stallPreview } from "./support/policies";
 
 beforeAll(async () => {
   await initTestEngine();
@@ -316,12 +316,13 @@ describe("dispose", () => {
   });
 
   test("dispose in the middle of the computer's chain: no apply, no computerAction, no publication afterwards", async () => {
-    const { session, probe } = decorateSession(newSession("bulwark", "rush", 3));
+    const seed = await seedWithComputerOpening("bulwark", "rush", 3);
+    const { session, probe } = decorateSession(newSession("bulwark", "rush", seed));
     let clock = 0;
     const gates: (() => void)[] = [];
     const scheduler = { yield: () => new Promise<void>((r) => gates.push(r)) };
     const c = GameController.create(
-      config("computer", "bulwark", "rush", 3),
+      config("computer", "bulwark", "rush", seed),
       realDeps({ createSession: () => session, scheduler, now: () => (clock += 20) }),
     );
     const fn = vi.fn();
@@ -403,8 +404,9 @@ describe("a fatal engine failure (carry-over of the #62 review)", () => {
   });
 
   test("a RuntimeError during the computer's chain is fatal too, free() throwing included", async () => {
+    const seed = await seedWithComputerOpening("bulwark", "rush", 2);
     const { factory, calls } = faultyFactory("apply", { failFrom: 2, freeThrows: true });
-    const c = GameController.create(config("computer", "bulwark", "rush", 3), realDeps({}, factory));
+    const c = GameController.create(config("computer", "bulwark", "rush", seed), realDeps({}, factory));
     c.start();
     const s = await settle(c);
     expect(s.phase).toBe("fatal");
@@ -413,6 +415,19 @@ describe("a fatal engine failure (carry-over of the #62 review)", () => {
     expect(c.concede()).toMatchObject({ ok: false });
     expect(calls.length).toBe(reached);
     expect(() => c.dispose()).not.toThrow();
+  });
+
+  test("a RuntimeError in the engine's choice of the computer's action is fatal too", async () => {
+    const { factory, calls } = faultyFactory("computer_action");
+    const c = GameController.create(config("computer", "bulwark", "rush", 3), realDeps({}, factory));
+    c.start();
+    const s = await settle(c);
+    expect(s.phase).toBe("fatal");
+    expect(s.error?.code).toBe("internal_error");
+    const reached = calls.length;
+    expect(c.concede()).toMatchObject({ ok: false });
+    expect(calls.length).toBe(reached);
+    c.dispose();
   });
 
   test("a RuntimeError while reading the legal list after an action is fatal", () => {
