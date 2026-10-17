@@ -142,7 +142,7 @@ test.describe("4. Provocation et riposte", () => {
       "Rempart can attack a Loup hérissé of Ruée",
     );
     test.info().annotations.push({ type: "search", description: `${found} actions to reach the riposte situation` });
-    await expect(wolfOnBoard(page).first()).toContainText("Riposte 1");
+    await expect(wolfOnBoard(page).first()).toHaveAccessibleName(/riposte 1/);
 
     await attackers(page).first().tap();
     const wolf = wolfOnBoard(page).first();
@@ -160,7 +160,7 @@ test.describe("4. Provocation et riposte", () => {
     await page.getByRole("group", { name: `${CAMP_1} : héros` }).getByRole("button", { name: /^Défausse \(\d+\)$/ }).tap();
     const discard = page.getByRole("dialog", { name: `Défausse : ${CAMP_1} : héros` });
     await expect(discard).toContainText("Loup hérissé");
-    await expect(discard).toContainText("Riposte 1");
+    await expect(discard.getByRole("group", { name: /Loup hérissé.*riposte 1/ })).toBeVisible();
     await expect(discard).toContainText("Détruite");
     await expectMobileSound(page, "défausse non vide");
     await discard.getByRole("button", { name: "Fermer" }).tap();

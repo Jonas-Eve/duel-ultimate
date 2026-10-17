@@ -204,12 +204,22 @@ test.describe("3. Temps : l'aperçu annoncé est le temps réellement payé", ()
       const card = ownHand(page).locator("button:not([disabled])").first();
       const isCard = (await card.count()) > 0;
       const control = isCard ? card : page.locator(".btn-effect:not([disabled])").first();
+      // A card announces its cost in its accessible name and its time consequence in the legend under it
+      // ("Reste N" or "Passe la main", #92); a hero effect still prints both inside its button.
       const text = await control.innerText();
       const name = isCard ? (await control.locator(".card-name").textContent())! : (await control.locator(".effect-name").textContent())!;
-      const cost = Number(/Coût (\d+)/.exec(text)![1]);
-      const keepsMatch = /Il te restera (\d+) de temps/.exec(text);
-      const passMatch = /Passe la main : l'adversaire aura (\d+) de temps/.exec(text);
+      const label = isCard ? ((await control.getAttribute("aria-label")) ?? "") : text;
+      const cost = Number(/[Cc]oût (\d+)/.exec(label)![1]);
+      const legend = isCard ? ((await control.locator(".card-legend").textContent()) ?? "") : text;
+      const keepsMatch = isCard ? /^Reste (\d+)$/.exec(legend) : /Il te restera (\d+) de temps/.exec(text);
+      // The time the opponent gets is printed by an effect only; a card's legend says "Passe la main" alone.
+      const passMatch = isCard ? (legend === "Passe la main" ? [legend, ""] : null) : /Passe la main : l'adversaire aura (\d+) de temps/.exec(text);
       expect(keepsMatch !== null || passMatch !== null, `a time consequence is announced on "${name}": ${text}`).toBe(true);
+      if (isCard) {
+        // The pill shows the same cost as the accessible name, which also carries the legend's meaning.
+        await expect(control.locator(".card-cost")).toHaveText(String(cost));
+        expect(label.toLowerCase()).toContain(keepsMatch !== null ? `il te restera ${keepsMatch[1]} de temps` : "passe la main");
+      }
 
       await control.tap();
       await settle(page);
@@ -227,7 +237,8 @@ test.describe("3. Temps : l'aperçu annoncé est le temps réellement payé", ()
         await expect(timeBand(page)).toContainText(`Temps : ${left}`);
       } else {
         passed += 1;
-        expect(mine.lines.at(-1)).toBe(`La main passe à L'ordinateur (temps ${passMatch![1]}).`);
+        if (isCard) expect(mine.lines.at(-1)).toMatch(/^La main passe à L'ordinateur \(temps \d+\)\.$/);
+        else expect(mine.lines.at(-1)).toBe(`La main passe à L'ordinateur (temps ${passMatch![1]}).`);
         expect(blocks.at(-1)!.title).toBe("Tour de l'ordinateur"); // the computer did take the main
       }
       if (await isOver(page)) break;

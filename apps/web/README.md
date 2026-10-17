@@ -359,7 +359,8 @@ tactile par défaut (`apps/web/playwright.config.ts`), interactions par `tap()`.
   cible ou une règle : ils comparent une annonce lue avant une action à ce qu'on lit après.
 - **Fichiers** : `computer.e2e.ts` (cas 1 à 3 : duel entier contre l'ordinateur, humain Rempart, temps
   annoncé et payé), `two-camps.e2e.ts` (cas 4 à 6 : provocation, riposte, deux camps, les trois fins),
-  `layout.e2e.ts` (cas 7 et 8 : 360 px, CSP du build, 1280 px).
+  `layout.e2e.ts` (cas 7 et 8 : 360 px, CSP du build, 1280 px), `cards.e2e.ts` (#95, cartes compactes :
+  boîte fixe de la face, contenu, symboles de deck, interactions, défausse « Détruite », contrôles mobiles).
 - **Graine fixe** : 42 (`SEED`, saisie dans le champ d'accueil), notée dans les tests. Une situation
   voulue (provocation, riposte) est **cherchée** par une boucle bornée (`playUntil`, au plus 40 à 60
   actions) plutôt que supposée ; si les données `starter` changent et que la graine ne la produit plus,
