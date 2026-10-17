@@ -1,0 +1,83 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-10-17T08:30:00Z"
+  },
+  "title": "Maquette des cartes",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 390,
+      "h": 920,
+      "title": "Plateau : cartes compactes (360 px)"
+    },
+    "DetailRuee.dc.html": {
+      "x": 470,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Toucher une carte de la main : détail et bouton Jouer"
+    },
+    "DetailRempart.dc.html": {
+      "x": 940,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Toucher une carte adverse : détail, sans action"
+    },
+    "DetailFutur.dc.html": {
+      "x": 1410,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Exemple futur (pas dans le moteur) : toucher un effet pour l'utiliser"
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "DetailRuee.dc.html",
+    "DetailRempart.dc.html",
+    "DetailFutur.dc.html"
+  ],
+  "notes": {
+    "legende": {
+      "x": 0,
+      "y": 1000,
+      "w": 420,
+      "maxH": 520,
+      "text": "Lecture d'une carte compacte\n\n• Pastille ronde en haut à gauche : coût d'invocation, en temps (icône sablier).\n• Toute carte a trois valeurs : attaque (étoile), riposte (flèche retour, toujours affichée, même à 0) et vie (cœur). Carte sur le terrain : uniquement ces valeurs et les effets passifs permanents (Provocation pour le moment) ; les effets actifs et leur coût en temps ne sont qu'au détail. Carte en main : mêmes valeurs, plus le coût d'invocation (pastille ronde). Vue détaillée : les valeurs en bas, les effets au-dessus. Le coût d'invocation n'est écrit qu'une fois.\n\n• Taille fixe : une carte a toujours les mêmes dimensions, quels que soient son contenu et la taille de son image (image rognée dans un cadre fixe, nom tronqué, zone d'effets défilante au détail).\n• Effets actifs : ils coûtent du temps ; une ligne « Nom (coût en temps) : description des dégâts » chacun, l'attaque étant le premier ; les dégâts affichés sont toujours la valeur du moment, fournie par le moteur (valeur d'attaque, moins N, ou fixes). Effets passifs : permanents, sans coût (Provocation aujourd'hui, plus tard « Ne peut pas attaquer »).\n\nAucune information ne dépend de la couleur : chaque valeur a une icône de forme différente et un chiffre.",
+      "size": "s"
+    },
+    "deck": {
+      "x": 470,
+      "y": 1000,
+      "w": 420,
+      "maxH": 520,
+      "text": "Identité des decks, sans la couleur seule\n\n• Toutes les cartes ont la même forme (mêmes coins arrondis).\n• Même cadre et mêmes couleurs pour toutes les cartes (parchemin, bordure brune, filet doré), comme un jeu de cartes réel. Seul le symbole du deck les distingue : une pastille sur l'illustration de la carte compacte, et dans l'angle en haut à droite du détail. Éclair pour Ruée, créneaux pour Rempart.\n\nLe nom du deck est écrit dans la vue détaillée. Variantes de cadre = classes CSS neutres, cadre neutre par défaut.",
+      "size": "s"
+    },
+    "sansattaque": {
+      "x": 1410,
+      "y": 1000,
+      "w": 420,
+      "maxH": 640,
+      "text": "Une unité qui ne peut pas attaquer (futur)\n\nModèle du propriétaire : toute créature a une valeur d'attaque et une valeur de riposte (qui peuvent valoir 0). Attaquer est un effet actif parmi d'autres : « Attaque » coûte du temps et inflige sa valeur d'attaque ; « Attaque rapide » coûte moins et inflige la valeur d'attaque moins 1 ; un sort peut infliger des dégâts fixes. Une créature qui ne peut pas attaquer le dit par un effet passif (« Ne peut pas attaquer »).\n\nCe n'est pas possible aujourd'hui : le moteur exige une force d'au moins 1 et ne connaît pas cet effet. Le permettre est un changement de règles et de données (tranche « effets de créature » de l'Epic #5), avec un point de vigilance sur la garantie de fin de partie : une attaque à 0 dégât qui ne change rien à l'état doit être traitée.",
+      "size": "s"
+    },
+    "geste": {
+      "x": 940,
+      "y": 1000,
+      "w": 420,
+      "maxH": 520,
+      "text": "Toucher une carte = voir son détail\n\n• Un toucher sur une carte (main, plateau, adverse) ouvre son détail ; plus d'appui long, plus de bouton « Détails » à part.\n• Les actions se font depuis le détail : « Jouer (N temps) » pour une carte en main (avec « passe la main » annoncé), un toucher sur un effet actif pour une créature du plateau (puis choix de la cible et confirmation, comme aujourd'hui).\n• Pendant le choix d'une cible, un toucher sur une carte adverse la choisit (il n'ouvre pas son détail).\n• Fermer : bouton de 48 px, ou Échap.\n\nL'illustration n'existe pas encore (S2) : zone hachurée = emplacement. Elle n'apparaît que dans la vue détaillée.",
+      "size": "s"
+    }
+  },
+  "designSystems": []
+}
