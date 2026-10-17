@@ -312,10 +312,15 @@ même, alimenté par `toScreenModel` :
   les autres créatures adverses n'ont aucun aperçu : leur tuile est `aria-disabled` avec la mention
   visible « Cible non disponible » (un appui ne fait rien, `apply` n'est pas appelé). L'interface ne dit
   pas pourquoi ; elle marque seulement les provocateurs (donnée de la carte).
-- **Sélection** : un appui sur une de ses créatures qui a une attaque dans `legal` la sélectionne
-  (`aria-pressed`, bordure épaisse et texte « Sélectionnée ») ; un nouvel appui, « Annuler la
-  sélection » ou Échap la retire. Une créature sans attaque légale (tour de l'ordinateur) est
-  `aria-disabled`. Les cibles possibles sont des `<button>` avec bordure et texte « Cible possible » ;
+- **Sélection (#106)** : toucher une de ses créatures ouvre son détail (toujours possible, même au tour
+  de l'ordinateur) ; on n'attaque pas depuis la tuile. La ligne d'effet « Attaque (N) : inflige D
+  dégâts » du détail est un bouton de 44 px au moins, nommé par `effectLineLabel` (« Attaque (N) :
+  inflige D dégâts, pour N temps »). L'appui ferme le détail, sélectionne l'attaquant (bordure épaisse et
+  texte « Sélectionnée », pas d'`aria-pressed` ; idempotent) et affiche le texte poli « Choisis une
+  cible ». « Annuler la sélection » ou Échap (hors détail) la retire ; Échap dans le détail ne ferme
+  que le détail. Sans aperçu d'attaque pour cette créature (tour de l'ordinateur) la ligne est
+  `aria-disabled`, focalisable, avec la raison en texte. Pendant le choix de la cible, un toucher sur
+  une autre de ses créatures ouvre son détail (changer d'attaquant). Les cibles possibles sont des `<button>` avec bordure et texte « Cible possible » ;
   le héros adverse porte un bouton cible dans son bandeau.
 - **Carte compacte (#92)** : `CardTile` est une carte de jeu de taille fixe. L'élément externe (`.card
   .card-compact` : `<button>` ou `div role="group"`) contient `.card-face` (exactement `--card-w` = 62 px sur
