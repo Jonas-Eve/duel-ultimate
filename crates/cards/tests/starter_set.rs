@@ -229,3 +229,15 @@ fn a_cost_of_zero_is_refused() {
     value[0]["cost"] = 0.into();
     assert!(parse_cards(&value.to_string()).is_err());
 }
+
+#[test]
+fn starter_1_1_0_is_1_0_0_byte_for_byte() {
+    assert_eq!(
+        CARDS,
+        include_str!("../../../data/starter/1.1.0/cards.json")
+    );
+    assert_eq!(
+        DECKS,
+        include_str!("../../../data/starter/1.1.0/decks.json")
+    );
+}

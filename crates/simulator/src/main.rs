@@ -182,29 +182,30 @@ mod tests {
 
     #[test]
     fn no_argument_means_1000_games_seed_0_of_the_starter_set() {
-        parsed_is(&[], 1000, 0, "starter@1.0.0");
+        parsed_is(&[], 1000, 0, "starter@1.1.0");
     }
 
     #[test]
     fn a_number_sets_the_games_per_matchup() {
-        parsed_is(&["500"], 500, 0, "starter@1.0.0");
+        parsed_is(&["500"], 500, 0, "starter@1.1.0");
     }
 
     #[test]
     fn set_picks_the_embedded_set_by_name_or_by_name_and_version() {
         parsed_is(&["--set", "fixture"], 1000, 0, "fixture@1.0.0");
-        parsed_is(&["--set", "starter"], 1000, 0, "starter@1.0.0");
+        parsed_is(&["--set", "starter"], 1000, 0, "starter@1.1.0");
         parsed_is(&["--set", "starter@1.0.0"], 1000, 0, "starter@1.0.0");
+        parsed_is(&["--set", "starter@1.1.0"], 1000, 0, "starter@1.1.0");
     }
 
     #[test]
     fn seed_reads_a_u64() {
-        parsed_is(&["--seed", "42"], 1000, 42, "starter@1.0.0");
+        parsed_is(&["--seed", "42"], 1000, 42, "starter@1.1.0");
         parsed_is(
             &["--seed", "18446744073709551615"],
             1000,
             u64::MAX,
-            "starter@1.0.0",
+            "starter@1.1.0",
         );
     }
 

@@ -180,7 +180,7 @@ describe("French text only", () => {
     const events: EngineEvent[] = EVENT_KINDS.map((k) => {
       switch (k) {
         case "game_started":
-          return { game_started: { first: "One", budget: 3, data_versions: ["starter@1.0.0"] } };
+          return { game_started: { first: "One", budget: 3, data_versions: ["starter@1.1.0"] } };
         case "effect_activated":
           return { effect_activated: { player: "One", effect: 0, cost: 2 } };
         case "drew":

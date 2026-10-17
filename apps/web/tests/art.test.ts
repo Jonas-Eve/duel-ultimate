@@ -102,10 +102,18 @@ describe("buildArtIndex", () => {
 });
 
 describe("the starter set", () => {
-  test("1.0.0 has no art yet: the index is empty and the placeholder stays", () => {
+  test("every card name has either no art or a well-formed ArtInfo", () => {
     const names: string[] = (JSON.parse(CARDS_JSON) as { name: string }[]).map((c) => c.name);
     expect(names.length).toBeGreaterThan(0);
-    for (const n of names) expect(ART(n)).toBeUndefined();
+    for (const n of names) {
+      const info = ART(n);
+      if (info === undefined) continue;
+      expect(typeof info.url).toBe("string");
+      expect(info.url.length).toBeGreaterThan(0);
+      expect(typeof info.author).toBe("string");
+      expect(typeof info.source).toBe("string");
+      expect(ART_LICENSES).toContain(info.license);
+    }
   });
 });
 
@@ -117,8 +125,8 @@ describe("the glob pinning", () => {
   test("literal paths of the same version as DATA_VERSION", () => {
     const globs = [...code.matchAll(/import\.meta\.glob\(\s*"([^"]+)"/g)].map((m) => m[1]);
     expect(globs).toEqual([
-      "../../../../data/starter/1.0.0/art.json",
-      "../../../../data/starter/1.0.0/art/*.{webp,svg}",
+      "../../../../data/starter/1.1.0/art.json",
+      "../../../../data/starter/1.1.0/art/*.{webp,svg}",
     ]);
     const versions = globs.map((g) => /data\/starter\/(\d+\.\d+\.\d+)\//.exec(g)?.[1]);
     expect(new Set(versions).size).toBe(1);

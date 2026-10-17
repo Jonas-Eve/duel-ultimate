@@ -36,7 +36,7 @@ const MAX_HUMAN_ACTIONS = 300;
 test.describe("1. Contre l'ordinateur, Ruée", () => {
   test("accueil : version des données, graine invalide refusée, graine vide acceptée", async ({ page }) => {
     await openHome(page);
-    await expect(page.getByText("Données : starter@1.0.0", { exact: true })).toBeVisible();
+    await expect(page.getByText("Données : starter@1.1.0", { exact: true })).toBeVisible();
 
     for (const bad of ["abc", "-1", "1.5", "4294967296", "12 34"]) {
       await page.getByLabel("Graine (optionnelle)").fill(bad);
@@ -51,7 +51,7 @@ test.describe("1. Contre l'ordinateur, Ruée", () => {
     await expect(gameRegion(page)).toBeVisible();
     expect(await seedShown(page)).toBeGreaterThanOrEqual(0); // a drawn seed is displayed
     await gameRegion(page).getByText("Infos de partie").tap();
-    await expect(gameRegion(page).getByText("Données : starter@1.0.0")).toBeVisible();
+    await expect(gameRegion(page).getByText("Données : starter@1.1.0")).toBeVisible();
   });
 
   test("toutes les informations permanentes, aucune main adverse en clair", async ({ page }) => {
