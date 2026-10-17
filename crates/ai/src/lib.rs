@@ -20,7 +20,10 @@ mod policy;
 mod seeds;
 
 pub use choose::{AiError, choose};
+pub use policies::greedy::greedy_policy;
+pub use policies::noisy::noisy;
 pub use policies::random::random_policy;
+pub use policies::{POLICIES, PolicyFn, policy_named};
 pub use policy::Policy;
 pub use seeds::{
     TAG_COMPUTER, TAG_POLICY_ONE, TAG_POLICY_TWO, derive_seed, policy_rng, rng_from_draw,
