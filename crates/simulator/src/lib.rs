@@ -1,6 +1,8 @@
 //! The simulator: plays seeded AI-vs-AI batches between decks ([`run_batch`]) and reports how
-//! they went ([`Report`]). The policy only sees the legal actions other than `Concede` and its
-//! own generator ([`Policy`]); every seed derives from the batch seed ([`derive_seed`]).
+//! they went ([`Report`]). The policy only sees the [`Observation`](duel_engine::Observation) of
+//! the active seat (its legal actions other than `Concede`, its own view) and its own generator
+//! ([`Policy`], from `duel-ai`); every seed derives from the batch seed ([`derive_seed`], also
+//! from `duel-ai`).
 //!
 //! This library never reads the disk or the network: the data comes in as strings
 //! ([`contenders_from`], [`setup_from`]). Only the `duel-simulator` binary embeds data files.
@@ -10,9 +12,10 @@ pub mod report;
 pub mod stats;
 
 pub use batch::{
-    BatchConfig, Contender, DEFAULT_MAX_ACTIONS, GameRecord, Policy, contenders_from, derive_seed,
-    game_seed, play_game, policy_rng, random_policy, run_batch, run_batch_observed,
+    BatchConfig, Contender, DEFAULT_MAX_ACTIONS, GameRecord, contenders_from, game_seed, play_game,
+    run_batch, run_batch_observed,
 };
+pub use duel_ai::{Policy, TAG_POLICY_ONE, TAG_POLICY_TWO, derive_seed, policy_rng, random_policy};
 pub use report::{Kind, MatchupReport, Report};
 pub use stats::{fmt_mean, fmt_share, percent, wilson_95};
 
@@ -58,7 +61,7 @@ mod tests {
 
     /// One game with the random policy and the default cap.
     fn play_with(setup: GameSetup, seed: u64) -> GameRecord {
-        play_game(setup, seed, random_policy, DEFAULT_MAX_ACTIONS, |_, _| {})
+        play_game(setup, seed, &&random_policy, DEFAULT_MAX_ACTIONS, |_, _| {})
     }
 
     /// How the game ended; an interrupted game (the cap) has no end.

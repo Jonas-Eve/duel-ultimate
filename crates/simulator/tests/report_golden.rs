@@ -27,7 +27,7 @@ fn rendered(set: &str, version: &str, games: u64, seed: u64) -> String {
         max_actions: DEFAULT_MAX_ACTIONS,
         data_versions: vec![format!("{set}@{version}")],
     };
-    run_batch(&contenders, &config, random_policy).render()
+    run_batch(&contenders, &config, &random_policy).render()
 }
 
 #[test]

@@ -4,32 +4,16 @@
 //! `HashMap`): the same batch always gives the same [`Report`].
 
 use crate::report::{Kind, MatchupReport, Report};
+use duel_ai::{Policy, derive_seed, policy_rng};
 use duel_cards::{parse_cards, parse_decks};
 use duel_engine::{
-    Action, Event, GameSetup, PlayerId, PlayerSetup, WinReason, apply, legal_actions, new_game,
+    Action, Event, GameSetup, Observation, PlayerId, PlayerSetup, WinReason, apply, new_game,
     player_setup,
 };
-use rand::{RngExt, SeedableRng};
-use rand_chacha::ChaCha8Rng;
-
-/// How a player picks an action: it sees only the legal actions (never `Concede`) and its own
-/// generator, and returns an index into that list. The signature is the guarantee: a policy
-/// cannot read the game state, the other seat or the engine's generator.
-pub type Policy = fn(&[Action], &mut ChaCha8Rng) -> usize;
-
-/// The policy of the simulator for now: uniformly random among the actions offered.
-pub fn random_policy(actions: &[Action], rng: &mut ChaCha8Rng) -> usize {
-    rng.random_range(0..actions.len())
-}
 
 /// Defensive cap on the actions of one game: every game ends by itself, but a rule bug must
 /// not hang the batch.
 pub const DEFAULT_MAX_ACTIONS: u32 = 10_000;
-
-/// Tag of the generator handed to the policy of seat One.
-pub const TAG_POLICY_ONE: u64 = 0x504F_4C49_4359_0001;
-/// Tag of the generator handed to the policy of seat Two.
-pub const TAG_POLICY_TWO: u64 = 0x504F_4C49_4359_0002;
 
 /// A deck ready to play: its id (from the data) and its hero and cards.
 #[derive(Debug, Clone)]
@@ -86,29 +70,9 @@ pub struct GameRecord {
     pub interrupted: bool,
 }
 
-/// SplitMix64's finalizer applied to `parent ^ tag * golden-gamma`: a child seed that depends
-/// on both and looks unrelated to either.
-pub fn derive_seed(parent: u64, tag: u64) -> u64 {
-    let mut z = parent ^ tag.wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
-
 /// The seed handed, as is, to the engine for game `index` of `matchup`.
 pub fn game_seed(batch_seed: u64, matchup: usize, index: u64) -> u64 {
     derive_seed(derive_seed(batch_seed, matchup as u64), index)
-}
-
-/// The generator of the policy of `seat` in a game seeded `game_seed`: distinct from the
-/// engine's and from the other seat's, so a seat's choices never depend on how many draws the
-/// other one made.
-pub fn policy_rng(game_seed: u64, seat: PlayerId) -> ChaCha8Rng {
-    let tag = match seat {
-        PlayerId::One => TAG_POLICY_ONE,
-        PlayerId::Two => TAG_POLICY_TWO,
-    };
-    ChaCha8Rng::seed_from_u64(derive_seed(game_seed, tag))
 }
 
 /// Plays one game of `setup` seeded `seed`, showing `on_step` each step: the actions the
@@ -122,7 +86,7 @@ pub fn policy_rng(game_seed: u64, seat: PlayerId) -> ChaCha8Rng {
 pub fn play_game(
     setup: GameSetup,
     seed: u64,
-    policy: Policy,
+    policy: &dyn Policy,
     max_actions: u32,
     mut on_step: impl FnMut(&[Action], &[Event]),
 ) -> GameRecord {
@@ -147,27 +111,31 @@ pub fn play_game(
         if record.actions >= max_actions {
             break;
         }
-        let playable: Vec<Action> = legal_actions(&state)
-            .into_iter()
-            .filter(|action| *action != Action::Concede)
-            .collect();
-        if playable.is_empty() {
+        let Some(obs) = Observation::of(&state) else {
+            break;
+        };
+        if obs.actions().is_empty() {
             break;
         }
-        let rng = match state.active() {
+        let rng = match obs.seat() {
             PlayerId::One => &mut rng_one,
             PlayerId::Two => &mut rng_two,
         };
-        let chosen = policy(&playable, rng);
+        let chosen = policy.choose(&obs, rng);
         assert!(
-            chosen < playable.len(),
+            chosen < obs.actions().len(),
             "policy returned index {chosen} for {} actions",
-            playable.len()
+            obs.actions().len()
         );
-        let Ok(events) = apply(&mut state, playable[chosen]) else {
+        // The observation borrows the state: keep the list it offered, then let go of it.
+        let offered = obs.actions().to_vec();
+        let Some(&action) = offered.get(chosen) else {
             break;
         };
-        on_step(&playable, &events);
+        let Ok(events) = apply(&mut state, action) else {
+            break;
+        };
+        on_step(&offered, &events);
         record.actions += 1;
         record.deaths += events
             .iter()
@@ -192,7 +160,7 @@ fn matchups(decks: usize) -> Vec<(usize, usize)> {
 }
 
 /// Plays `config.games` games of every matchup of `contenders` and reports them.
-pub fn run_batch(contenders: &[Contender], config: &BatchConfig, policy: Policy) -> Report {
+pub fn run_batch(contenders: &[Contender], config: &BatchConfig, policy: &dyn Policy) -> Report {
     run_batch_observed(contenders, config, policy, |_| {})
 }
 
@@ -200,7 +168,7 @@ pub fn run_batch(contenders: &[Contender], config: &BatchConfig, policy: Policy)
 pub fn run_batch_observed(
     contenders: &[Contender],
     config: &BatchConfig,
-    policy: Policy,
+    policy: &dyn Policy,
     mut on_game: impl FnMut(&GameRecord),
 ) -> Report {
     let mut report = Report {
