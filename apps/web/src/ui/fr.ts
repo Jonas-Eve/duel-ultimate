@@ -62,8 +62,6 @@ export const fr = {
   handCount: (n: number) => `Main : ${n}`,
   deckCount: (n: number) => `Pioche : ${n}`,
   health: (n: number) => `PV ${n}`,
-  force: (n: number) => `Force ${n}`,
-  attackCost: (n: number) => `Attaque ${n}`,
   cost: (n: number) => `Coût ${n}`,
   provocation: "Provocation",
   // Compact card (#92): words of the accessible name, and the hand legends under the card.
@@ -73,7 +71,6 @@ export const fr = {
   lifeWord: "vie",
   keepsLegend: (n: number) => `Reste ${n}`,
   passesLegend: "Passe la main",
-  riposte: (n: number) => `Riposte ${n}`,
   noCreature: "Aucune créature",
 
   selected: "Sélectionnée",

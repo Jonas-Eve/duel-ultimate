@@ -175,15 +175,17 @@ describe("the discards (public, both camps)", () => {
       expect(items.map((li) => li.querySelector(".card-name")?.textContent)).toEqual(discard.map((x) => x.name));
       for (const [i, li] of items.entries()) {
         const card = discard[i];
+        const tile = within(li).getByRole("group");
+        // The name carries attack and riposte (even 0), "détruite" instead of a life, provocation last.
+        expect(tile.getAttribute("aria-label")).toBe(
+          `${card.name}, attaque ${card.force}, riposte ${card.riposte}, détruite${card.provocation ? ", provocation" : ""}`,
+        );
         const text = li.textContent ?? "";
         expect(text).toContain("Détruite");
         expect(text).not.toMatch(/PV/);
-        expect(text).toContain(`Coût ${card.cost}`);
-        expect(text).toContain(`Force ${card.force}`);
-        expect(text).toContain(`Attaque ${card.attack_cost}`);
+        expect(text).not.toMatch(/Coût|Force|Attaque/);
         expect(text.includes("Provocation")).toBe(card.provocation);
-        expect(text.includes(`Riposte ${card.riposte}`)).toBe(card.riposte > 0);
-        expect(li.getAttribute("aria-label") ?? text).not.toMatch(/PV 0/);
+        expect(li.querySelectorAll(".card-face").length).toBe(1);
       }
       expect(dialog.textContent).not.toMatch(/PV 0/);
       await user.keyboard("{Escape}");
