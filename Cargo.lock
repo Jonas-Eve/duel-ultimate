@@ -167,6 +167,7 @@ dependencies = [
 name = "duel-engine-wasm"
 version = "0.1.0"
 dependencies = [
+ "duel-ai",
  "duel-cards",
  "duel-engine",
  "serde",

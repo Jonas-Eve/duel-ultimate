@@ -9,6 +9,7 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+duel-ai.workspace = true
 duel-engine.workspace = true
 serde.workspace = true
 serde_json.workspace = true
