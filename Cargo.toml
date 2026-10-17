@@ -15,6 +15,8 @@ serde_json = "1.0.154"
 rand = { version = "0.10.3", default-features = false }
 rand_chacha = "0.10.0"
 thiserror = "2.0.21"
+# Parseur XML pour les tests de validation des SVG (dev-dependency de duel-cards seulement).
+roxmltree = "0.21.1"
 tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "net"] }
 axum = { version = "0.8.9", features = ["ws"] }
 wasm-bindgen = "0.2.129"
