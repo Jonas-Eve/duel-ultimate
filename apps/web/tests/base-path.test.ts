@@ -46,6 +46,9 @@ function localRefs(html: string): string[] {
   return [...html.matchAll(/\b(?:src|href)="([^"]*)"/g)].map((m) => m[1]).filter((u) => !u.startsWith("data:") && !/^[a-z][a-z0-9+.-]*:/i.test(u));
 }
 
+/** A string literal that starts with the sub-path, i.e. a URL; never a path in the middle of a source file name. */
+const QUOTED_SUBPATH = /[`"']\/duel-ultimate\//;
+
 let sub: Output;
 let root: Output;
 
@@ -70,6 +73,8 @@ describe("build under VITE_BASE=/duel-ultimate/", () => {
     expect(wasm).toHaveLength(1);
     expect(sub.js).toContain(`/duel-ultimate/assets/${wasm[0]}`);
     expect(sub.js).not.toContain('"/assets/');
+    // Guards the regex used for the root build: it must see a real sub-path URL here.
+    expect(sub.js).toMatch(QUOTED_SUBPATH);
   });
 
   test("the build identifier reaches the bundle", () => {
@@ -87,7 +92,11 @@ describe("build without variables", () => {
     const wasm = root.assets.filter((a) => a.endsWith(".wasm"));
     expect(wasm).toHaveLength(1);
     expect(root.js).toContain(`/assets/${wasm[0]}`);
-    expect(root.js).not.toContain("/duel-ultimate/");
+    // Only URL-shaped uses count: a quoted string starting with the sub-path. A bare substring
+    // search would also match the clone directory in the `fileName:` of dev-only JSX calls
+    // (`/home/runner/work/duel-ultimate/duel-ultimate/...`), so it would depend on where the
+    // repository is checked out.
+    expect(root.js).not.toMatch(QUOTED_SUBPATH);
   });
 
   test("the bundle carries no build SHA", () => {
