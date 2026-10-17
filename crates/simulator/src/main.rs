@@ -1,6 +1,6 @@
 //! Plays seeded AI-vs-AI games between the decks of an embedded data set and prints the
 //! balance report. Usage: `duel-simulator [games] [--set <name>[@<version>]] [--seed <u64>]
-//! [--hero-riposte <on|off>] [--board-limit <none|N>]`, in any order: `games` per matchup (1000
+//! [--hero-riposte <on|off>] [--board-limit <none|N>] [--timing]`, in any order: `games` per matchup (1000
 //! by default), the `starter` set (its latest version by default), seed 0 by default, and the
 //! engine's default rules for each rule option not given (the report names them in its header).
 //! The two rule options have no effect on the games before #127 gives them their behaviour. The
@@ -11,6 +11,11 @@
 //! Exit codes: 0 (a report, whatever its alerts), 2 (bad command line), 1 (the report contradicts
 //! its own invariants: a message on stderr, nothing on stdout).
 //!
+//! `--timing` (no value) adds one line on stderr after the report: games, actions, wall time and
+//! rates of the batch alone (the protocol is `docs/balance/throughput.md`). This file is the only
+//! one of the crate that reads a clock (`tests/no_clock.rs` guards it): the duration never enters
+//! the `Report`, so stdout is byte-identical with or without the option.
+//!
 //! The sets are compiled into the binary (`include_str!`): `--set` picks from this closed list,
 //! never a path, so nothing is read from the disk or the network at run time. A huge number of
 //! games is merely slow.
@@ -18,8 +23,9 @@
 use duel_engine::RuleSet;
 use duel_simulator::{
     BatchConfig, DEFAULT_MAX_ACTIONS, NamedPolicy, Report, contenders_from, random_policy,
-    run_batch,
+    run_batch_observed,
 };
+use std::time::Instant;
 
 /// A data set embedded at compile time.
 #[derive(Debug, PartialEq, Eq)]
@@ -56,7 +62,7 @@ const SETS: [Set; 3] = [
 const DEFAULT_GAMES: u64 = 1000;
 const DEFAULT_SEED: u64 = 0;
 const DEFAULT_SET: &str = "starter";
-const USAGE: &str = "[games] [--set <name>[@<version>]] [--seed <u64>] [--hero-riposte <on|off>] [--board-limit <none|N>]";
+const USAGE: &str = "[games] [--set <name>[@<version>]] [--seed <u64>] [--hero-riposte <on|off>] [--board-limit <none|N>] [--timing]";
 
 /// What the command line asks for.
 #[derive(Debug, PartialEq, Eq)]
@@ -66,6 +72,8 @@ struct Config {
     seed: u64,
     set: &'static Set,
     rules: RuleSet,
+    /// `--timing`: print one measurement line on stderr after the report.
+    timing: bool,
 }
 
 /// The distinct set names, in registry order, for messages.
@@ -146,6 +154,7 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
     let mut set = None;
     let mut hero_riposte = None;
     let mut board_limit = None;
+    let mut timing = false;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         if arg == "--set" {
@@ -179,6 +188,10 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
             if board_limit.replace(parse_board_limit(value)?).is_some() {
                 return Err("--board-limit given twice".to_owned());
             }
+        } else if arg == "--timing" {
+            if std::mem::replace(&mut timing, true) {
+                return Err("--timing given twice".to_owned());
+            }
         } else if arg.starts_with('-') {
             return Err(format!("unknown flag \"{arg}\" (usage: {USAGE})"));
         } else {
@@ -206,6 +219,7 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
             hero_riposte: hero_riposte.unwrap_or(default_rules.hero_riposte),
             board_limit: board_limit.unwrap_or(default_rules.board_limit),
         },
+        timing,
     })
 }
 
@@ -231,7 +245,22 @@ fn main() {
         name: "random",
         policy: &random_policy,
     }];
-    match finish(&run_batch(&contenders, &batch, &policies)) {
+    let report = if config.timing {
+        // The clock is read around the batch only: the arguments and the contenders are
+        // already done, and the report is checked, rendered and printed after the last reading.
+        let (mut games, mut actions) = (0u64, 0u64);
+        let start = Instant::now();
+        let report = run_batch_observed(&contenders, &batch, &policies, |record| {
+            games += 1;
+            actions += u64::from(record.actions);
+        });
+        let elapsed = start.elapsed();
+        eprintln!("{}", timing_line(games, actions, elapsed.as_secs_f64()));
+        report
+    } else {
+        run_batch_observed(&contenders, &batch, &policies, |_| {})
+    };
+    match finish(&report) {
         Ok(text) => print!("{text}"),
         Err(message) => {
             eprintln!("duel-simulator: {message}");
@@ -250,10 +279,26 @@ fn finish(report: &Report) -> Result<String, String> {
     Ok(report.render())
 }
 
+/// The `--timing` line. Plain division, no libm; a zero duration gives `n/a` rates, never
+/// `inf` or `NaN`.
+fn timing_line(games: u64, actions: u64, secs: f64) -> String {
+    let rates = if secs > 0.0 {
+        format!(
+            "{:.1} games/s, {:.1} actions/s",
+            games as f64 / secs,
+            actions as f64 / secs
+        )
+    } else {
+        "n/a games/s, n/a actions/s".to_owned()
+    };
+    format!("timing: {games} games, {actions} actions, {secs:.3} s, {rates}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use duel_engine::MAX_BOARD_LIMIT;
+    use duel_simulator::run_batch;
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|arg| (*arg).to_owned()).collect()
@@ -456,6 +501,81 @@ mod tests {
 
     fn rejected(list: &[&str]) -> String {
         parse_args(&args(list)).expect_err("invalid arguments")
+    }
+
+    #[test]
+    fn the_timing_line_has_the_documented_format() {
+        assert_eq!(
+            timing_line(30000, 1288412, 2.134),
+            "timing: 30000 games, 1288412 actions, 2.134 s, 14058.1 games/s, 603754.5 actions/s"
+        );
+    }
+
+    #[test]
+    fn a_zero_duration_gives_no_rate_instead_of_inf() {
+        let line = timing_line(10, 100, 0.0);
+        assert_eq!(
+            line,
+            "timing: 10 games, 100 actions, 0.000 s, n/a games/s, n/a actions/s"
+        );
+    }
+
+    fn timing_of(list: &[&str]) -> bool {
+        parse_args(&args(list)).expect("valid arguments").timing
+    }
+
+    #[test]
+    fn timing_is_off_by_default() {
+        assert!(!timing_of(&[]));
+        assert!(!timing_of(&["10", "--seed", "3"]));
+    }
+
+    #[test]
+    fn timing_is_a_flag_without_a_value() {
+        // The number after it is the games, not a value of the flag.
+        assert!(timing_of(&["--timing"]));
+        let config = parse_args(&args(&["--timing", "50"])).expect("valid arguments");
+        assert!(config.timing);
+        assert_eq!(config.games, 50);
+    }
+
+    #[test]
+    fn timing_comes_in_any_order_with_the_other_options() {
+        for list in [
+            &["--timing", "50", "--seed", "7", "--set", "fixture"][..],
+            &["50", "--seed", "7", "--timing", "--set", "fixture"],
+            &["--set", "fixture", "--seed", "7", "50", "--timing"],
+            &[
+                "--hero-riposte",
+                "off",
+                "--board-limit",
+                "none",
+                "--timing",
+                "50",
+                "--seed",
+                "7",
+                "--set",
+                "fixture",
+            ],
+        ] {
+            let config = parse_args(&args(list)).expect("valid arguments");
+            assert!(config.timing, "{list:?}");
+            assert_eq!((config.games, config.seed), (50, 7), "{list:?}");
+            assert_eq!(config.set.name, "fixture", "{list:?}");
+        }
+    }
+
+    #[test]
+    fn timing_given_twice_is_rejected() {
+        let message = rejected(&["--timing", "--timing"]);
+        assert!(message.contains("--timing"), "{message}");
+        assert!(message.contains("--timing given twice"), "{message}");
+    }
+
+    #[test]
+    fn the_usage_lists_timing() {
+        assert!(USAGE.contains("--timing"));
+        assert!(rejected(&["--bogus"]).contains("--timing"));
     }
 
     #[test]

@@ -5,6 +5,9 @@ Index des documents de mesure du simulateur (`duel-simulator`, Epic #120).
 **Règle : une mesure = commande + graine + commit + date.** Un nombre sans ces quatre éléments
 n'est pas une mesure : il ne se compare à rien et ne se reproduit pas.
 
+- [`throughput.md`](throughput.md) : le débit du simulateur (parties par seconde), son protocole,
+  la règle de comparaison entre machines, le seuil de régression et le tableau daté des mesures
+  (#123).
 - [`reports/`](reports/) : les rapports d'équilibrage consignés, un fichier par mesure
   (`<AAAA-MM-JJ>-<jeu>-<version>-<politique>-<variante>.md`). Le premier est la ligne de base du
   comportement historique : [`2026-10-17-starter-1.1.0-random-legacy.md`](reports/2026-10-17-starter-1.1.0-random-legacy.md).
@@ -54,3 +57,5 @@ verbatim) qui montre le jeu dans les seuils. Ce n'est jamais un test de CI : un 
 un taux casserait à chaque changement de règle voulu, et la CI ne lance pas de lots de milliers de
 parties. Les tests du simulateur épinglent le **format** et les **compteurs d'un lot court**, pas
 l'équilibre.
+
+Aucune mesure de débit ne tourne en CI, et aucun seuil n'est épinglé dans un test.
