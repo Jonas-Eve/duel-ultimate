@@ -5,9 +5,11 @@
 //! are byte for byte those recorded before. The rules are `RuleSet::legacy()`, explicitly.
 
 use duel_engine::RuleSet;
-use duel_simulator::{BatchConfig, DEFAULT_MAX_ACTIONS, contenders_from, random_policy, run_batch};
+use duel_simulator::{
+    BatchConfig, DEFAULT_MAX_ACTIONS, Report, contenders_from, game_seed, random_policy, run_batch,
+};
 
-fn rendered(set: &str, version: &str, games: u64, seed: u64) -> String {
+fn report(set: &str, version: &str, games: u64, seed: u64) -> Report {
     let (cards, decks) = match (set, version) {
         ("fixture", "1.0.0") => (
             include_str!("../../../data/fixture/1.0.0/cards.json"),
@@ -32,7 +34,11 @@ fn rendered(set: &str, version: &str, games: u64, seed: u64) -> String {
         // The reference of the behaviour before the options: valid whatever the default becomes.
         rules: RuleSet::legacy(),
     };
-    run_batch(&contenders, &config, &random_policy).render()
+    run_batch(&contenders, &config, &random_policy)
+}
+
+fn rendered(set: &str, version: &str, games: u64, seed: u64) -> String {
+    report(set, version, games, seed).render()
 }
 
 #[test]
@@ -85,4 +91,90 @@ aggro (mirror)      150                 -                  -  54.7% [46.7-62.4] 
 control (mirror)    150                 -                  -  68.7% [60.9-75.5]          40.5        150           0        0            0
 ";
     assert_eq!(rendered("fixture", "1.0.0", 150, 3), expected);
+}
+
+/// Integer counters of one matchup, as recorded on the code that predates #153:
+/// `(deck_a, wins_a, wins_b, first_player_wins, hero_down, exhaustion, concede, interrupted,
+/// total_actions)`.
+type Counters<'a> = (&'a str, u64, u64, u64, u64, u64, u64, u64, u64);
+
+/// The counters of the four batches above, captured on the code BEFORE the report format of #123
+/// changed and never touched since: only the rendering may differ, never a game.
+#[test]
+fn counters_unchanged() {
+    let batches: [(&str, &str, u64, u64, [Counters<'static>; 3]); 4] = [
+        (
+            "starter",
+            "1.1.0",
+            1000,
+            0,
+            [
+                ("rush", 981, 19, 981, 1000, 0, 0, 0, 42053),
+                ("rush", 504, 496, 585, 1000, 0, 0, 0, 37589),
+                ("bulwark", 485, 515, 592, 1000, 0, 0, 0, 86091),
+            ],
+        ),
+        (
+            "starter",
+            "1.1.0",
+            200,
+            7,
+            [
+                ("rush", 194, 6, 194, 200, 0, 0, 0, 8131),
+                ("rush", 112, 88, 122, 200, 0, 0, 0, 7687),
+                ("bulwark", 96, 104, 125, 200, 0, 0, 0, 17146),
+            ],
+        ),
+        (
+            "starter",
+            "1.0.0",
+            120,
+            12345,
+            [
+                ("rush", 117, 3, 117, 120, 0, 0, 0, 5104),
+                ("rush", 58, 62, 70, 120, 0, 0, 0, 4230),
+                ("bulwark", 64, 56, 75, 120, 0, 0, 0, 10551),
+            ],
+        ),
+        (
+            "fixture",
+            "1.0.0",
+            150,
+            3,
+            [
+                ("aggro", 19, 131, 19, 150, 0, 0, 0, 4816),
+                ("aggro", 76, 74, 82, 150, 0, 0, 0, 6009),
+                ("control", 75, 75, 103, 150, 0, 0, 0, 6074),
+            ],
+        ),
+    ];
+    for (set, version, games, seed, expected) in batches {
+        let report = report(set, version, games, seed);
+        let actual: Vec<Counters<'_>> = report
+            .matchups
+            .iter()
+            .map(|m| {
+                (
+                    m.deck_a.as_str(),
+                    m.wins_a,
+                    m.wins_b,
+                    m.first_player_wins,
+                    m.hero_down,
+                    m.exhaustion,
+                    m.concede,
+                    m.interrupted,
+                    m.total_actions,
+                )
+            })
+            .collect();
+        assert_eq!(actual, expected, "{set}@{version} {games}/{seed}");
+    }
+}
+
+/// The engine seed of a game is part of the determinism contract: captured before #153.
+#[test]
+fn game_seed_values_are_pinned() {
+    assert_eq!(game_seed(1, 0, 0), 8_841_707_400_507_832_957);
+    assert_eq!(game_seed(7, 2, 13), 4_170_119_748_415_989_943);
+    assert_eq!(game_seed(u64::MAX, 5, 999), 2_055_176_720_511_709_744);
 }
