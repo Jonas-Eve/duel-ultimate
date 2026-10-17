@@ -1,4 +1,5 @@
 import type { CardView } from "../engine/types";
+import type { DeckEmblem } from "../game/controller";
 import { fr } from "./fr";
 
 /** The attack flow's state of a tile, always written as text as well as drawn as a border. */
@@ -27,6 +28,8 @@ export interface CardTileProps {
   mark?: CardMark;
   /** A card in a discard: a "destroyed" icon and legend instead of the life (never "PV 0"). Not interactive. */
   destroyed?: boolean;
+  /** The deck symbol drawn on the art (the card's own seat); absent = no chip. */
+  emblem?: DeckEmblem;
 }
 
 /** The complete accessible name: "Pillard, coût 2, attaque 3, riposte 0, vie 2, provocation, passe la main, sélectionnée". */
@@ -94,10 +97,21 @@ function DestroyedIcon() {
   );
 }
 
+/** The deck chip, top right of the art: a decorative round token (the deck is named by the side's label, never by this). */
+function EmblemChip({ emblem }: { emblem: DeckEmblem }) {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="16" height="16" className={`card-emblem card-emblem-${emblem}`}>
+      <circle cx="8" cy="8" r="7.25" className="card-emblem-disc" />
+      {emblem === "bolt" ? <path d="M9.2 2.5 4.5 9h3l-.8 4.5L11.5 7h-3z" className="card-emblem-glyph" /> : <path d="M3 12.5V6h2v1.5h1.5V6h3v1.5H11V6h2v6.5z" className="card-emblem-glyph" />}
+    </svg>
+  );
+}
+
 /** The art slot: a placeholder drawn inline (no image to load, no hole), until real illustrations come. */
-function ArtPlaceholder() {
+function ArtPlaceholder({ emblem }: { emblem?: DeckEmblem }) {
   return (
     <span className="card-art">
+      {emblem !== undefined && <EmblemChip emblem={emblem} />}
       <svg aria-hidden="true" focusable="false" viewBox="0 0 40 30" width="100%" height="100%" preserveAspectRatio="xMidYMid slice">
         <path d="M0 30V20l9-9 7 7 8-12 16 14v10z" fill="currentColor" opacity="0.35" />
         <circle cx="30" cy="8" r="3" fill="currentColor" opacity="0.35" />
@@ -111,7 +125,7 @@ function ArtPlaceholder() {
  * in hand only), art slot, then the three values attack / riposte / life, riposte shown even at 0.
  * Purely visual: no state, no handler, no accessible name of its own (the tile around it carries it).
  */
-export function CardFace({ card, cost, destroyed = false }: { card: CardView; cost?: number; destroyed?: boolean }) {
+export function CardFace({ card, cost, destroyed = false, emblem }: { card: CardView; cost?: number; destroyed?: boolean; emblem?: DeckEmblem }) {
   return (
     <span className="card-face">
       <span className="card-head">
@@ -123,7 +137,7 @@ export function CardFace({ card, cost, destroyed = false }: { card: CardView; co
         )}
         <span className="card-name">{card.name ?? fr.unknownCard}</span>
       </span>
-      <ArtPlaceholder />
+      <ArtPlaceholder emblem={emblem} />
       <span className="card-values">
         <span className="card-value">
           <StarIcon />
@@ -142,13 +156,13 @@ export function CardFace({ card, cost, destroyed = false }: { card: CardView; co
   );
 }
 
-export function CardTile({ card, cost, timeLeft, handsOver = false, destroyed = false, onPress, disabled = false, inactive = false, pressed, mark }: CardTileProps) {
+export function CardTile({ card, cost, timeLeft, handsOver = false, destroyed = false, emblem, onPress, disabled = false, inactive = false, pressed, mark }: CardTileProps) {
   // The visible mark is part of the accessible name too (label in name).
   const label = cardLabel(card, { cost, handsOver, timeLeft, mark, destroyed });
   const hasTags = card.provocation || cost !== undefined || mark !== undefined || destroyed;
   const body = (
     <>
-      <CardFace card={card} cost={cost} destroyed={destroyed} />
+      <CardFace card={card} cost={cost} destroyed={destroyed} emblem={emblem} />
       {hasTags && (
         <span className="card-tags">
           {card.provocation && (

@@ -164,12 +164,13 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
           <p className="row-caption" aria-hidden="true">
             {fr.otherHandCaption(model.top.label)}
           </p>
-          <Hand cards={model.top.hand ?? []} legal={[]} enabled={false} labels={labels} onPlay={submit} label={names.topHand} readOnly />
+          <Hand cards={model.top.hand ?? []} legal={[]} enabled={false} labels={labels} onPlay={submit} label={names.topHand} readOnly emblem={model.top.emblem} />
         </>
       )}
       <Board
         cards={model.top.board}
         label={names.topBoard}
+        emblem={model.top.emblem}
         tileProps={
           attack.selected === null
             ? undefined
@@ -189,6 +190,7 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
       <Board
         cards={model.bottom.board}
         label={names.bottomBoard}
+        emblem={model.bottom.emblem}
         tileProps={(card) => {
           const can = hasAttack(card.id);
           const isSelected = attack.selected === card.id;
@@ -210,7 +212,7 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
           {fr.logButton}
         </button>
       </div>
-      <Hand cards={model.bottom.hand ?? []} legal={snapshot.legal} enabled={humanTurn} labels={labels} onPlay={submit} label={names.bottomHand} />
+      <Hand cards={model.bottom.hand ?? []} legal={snapshot.legal} enabled={humanTurn} labels={labels} onPlay={submit} label={names.bottomHand} emblem={model.bottom.emblem} />
       <ActionBar
         hero={model.bottom.hero}
         legal={snapshot.legal}

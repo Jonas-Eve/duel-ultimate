@@ -36,7 +36,7 @@ export function HeroBar({ side, label, target }: HeroBarProps) {
       <button type="button" className="btn" onClick={() => setDiscardOpen(true)}>
         {fr.discardButton(side.discard.length)}
       </button>
-      {discardOpen && <DiscardDialog cards={side.discard} who={label} onClose={() => setDiscardOpen(false)} />}
+      {discardOpen && <DiscardDialog cards={side.discard} who={label} emblem={side.emblem} onClose={() => setDiscardOpen(false)} />}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import type { ActionPreview, CardView } from "../engine/types";
 import { isPlay } from "../engine/types";
+import type { DeckEmblem } from "../game/controller";
 import { CardTile, type TimeLeft } from "./CardTile";
 import type { ConsequenceLabels } from "./consequence";
 import { fr } from "./fr";
@@ -15,6 +16,8 @@ interface HandProps {
   label: string;
   /** The other camp's hand in two camps: named in full, but plain tiles, never controls. */
   readOnly?: boolean;
+  /** The deck symbol of the side that owns this hand. */
+  emblem?: DeckEmblem;
 }
 
 /** "Reste N" under the card when the play keeps the main: N is the preview's `budget_after`, never computed here. */
@@ -25,17 +28,18 @@ function keepsTime(preview: ActionPreview | undefined, labels: ConsequenceLabels
 }
 
 /** A hand. Each card's cost and consequence come from its engine preview (found by card id). */
-export function Hand({ cards, legal, enabled, labels, onPlay, label, readOnly = false }: HandProps) {
+export function Hand({ cards, legal, enabled, labels, onPlay, label, readOnly = false, emblem }: HandProps) {
   return (
     <div role="group" aria-label={label} tabIndex={0} className="row hand">
       {cards.length === 0 && <p className="empty">{fr.emptyHand}</p>}
       {cards.map((card) => {
-        if (readOnly) return <CardTile key={card.id} card={card} cost={card.cost} />;
+        if (readOnly) return <CardTile key={card.id} card={card} cost={card.cost} emblem={emblem} />;
         const preview = legal.find((p) => isPlay(p.action) && p.action.play.card === card.id);
         return (
           <CardTile
             key={card.id}
             card={card}
+            emblem={emblem}
             cost={preview?.cost ?? card.cost}
             timeLeft={keepsTime(preview, labels)}
             handsOver={preview?.hands_over ?? false}

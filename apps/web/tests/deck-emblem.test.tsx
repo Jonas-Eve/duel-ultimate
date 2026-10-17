@@ -56,7 +56,7 @@ describe("the emblem chip on card faces", () => {
     expect(rows.length).toBeGreaterThanOrEqual(4);
     for (const g of rows) {
       const kind = camp(g) === "Camp 1" ? "bolt" : camp(g) === "Camp 2" ? "battlements" : null;
-      expect(kind, g.getAttribute("aria-label")).not.toBeNull();
+      expect(kind, g.getAttribute("aria-label") ?? undefined).not.toBeNull();
       expect(g.querySelectorAll(`.card-emblem-${kind}`).length).toBe(faces(g).length);
       expect(chips(g).length).toBe(faces(g).length);
     }
