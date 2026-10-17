@@ -63,7 +63,23 @@ Règles propres à ce repo :
   (« E2E (manual) », `workflow_dispatch` seul, jamais `pull_request` ni `push`), à lancer depuis
   l'onglet Actions : la CI automatique ne couvre donc plus le flux complet (Vitest, lui, reste
   automatique). Permissions `contents: read`, actions épinglées par SHA, aucun secret, aucun artefact ;
-  les deux workflows sont gardés par `apps/web/tests/ci-policy.test.ts`.
+  ces deux workflows sont gardés par `apps/web/tests/ci-policy.test.ts`.
+- **Déploiement sur GitHub Pages** (`.github/workflows/deploy-pages.yml`, « Deploy to Pages », #54/#81) : le
+  client est publié sur <https://jonas-eve.github.io/duel-ultimate/>. Le déclenchement est **manuel**
+  (onglet Actions > « Deploy to Pages » > Run workflow, sur `main`), pour économiser le quota de CI : à lancer
+  **depuis un `main` vert**, car ce workflow ne lance ni tests, ni Clippy, ni `fmt`, ni e2e. Il construit
+  `apps/web` avec `VITE_BASE=/duel-ultimate/` (voir `apps/web/README.md`) et le SHA court du commit. Pour
+  vérifier la version en ligne, le pied de l'écran d'accueil affiche « Version : <SHA à 7 caractères> » (à
+  comparer à `git rev-parse --short origin/main`) et « Données : starter@1.0.0 ». **Cache** : Pages envoie
+  `Cache-Control: max-age=600` et on n'y règle pas les en-têtes ; pendant ~10 minutes après un redéploiement,
+  un `index.html` périmé peut référencer des assets hachés disparus et afficher l'écran d'erreur
+  `wasm_load_failed` avec « Recharger » : attendre ou recharger. Permissions minimales (le job `build` ne lit
+  que `contents` et `pages`, seul le job `deploy` écrit Pages et émet le jeton OIDC), actions `actions/*`
+  épinglées par SHA, aucun secret ; le tout est gardé par `apps/web/tests/ci-policy.test.ts`. Pour
+  redéployer à chaque push sur `main`, ajouter `push: branches: [main]` sous `on:` du workflow **et**
+  adapter le garde du déclencheur du test (qui échoue sinon, volontairement). Action unique du propriétaire :
+  Settings > Pages > Source « GitHub Actions » (et, si un déploiement est refusé par une règle de branche,
+  Settings > Environments > `github-pages` : autoriser `main`).
 - Une nouvelle mécanique ajoute une brique au moteur sans modifier le comportement des decks
   qui ne l'utilisent pas (à vérifier par le simulateur).
 - Format des données : un set = un dossier versionné `data/<set>/<version>/` (`cards.json`, `decks.json`). Une carte a un discriminant `kind` ; un deck embarque son héros et compte exactement 30 cartes ; toute validation passe par `duel-cards` (`parse_cards`, `parse_decks`, `resolve_deck_named`, `resolve_deck` en étant un mince appel), stats bornées à `MAX_STAT` = 10000. Exemple : `data/fixture/1.0.0/`. Une créature a aussi deux champs optionnels : `provocation` (booléen, faux par défaut) et `riposte` (entier ≥ 0, 0 par défaut, borné par `MAX_STAT`), repris tels quels dans `CreatureStats` ; un ancien JSON à quatre clés reste valide ; le moteur lit `provocation` (filtre de cibles) et `riposte` (dégâts rendus à l'attaquant). La fixture `data/fixture/1.0.0/` n'en utilise aucune. Le jeu de départ `data/starter/1.0.0/` (`starter@1.0.0`) fournit deux decks de 30 cartes, Ruée (`rush`) et Rempart (`bulwark`), aux héros et aux distributions de coût, force, PV et coût d'attaque nettement différents ; c'est le premier jeu qui utilise `provocation` (Rempart seul) et `riposte` (Ruée seul). Ses valeurs sont provisoires et non équilibrées ; les propriétés demandées sont vérifiées par `crates/cards/tests/starter_set.rs`. La fixture reste l'exemple de format sans ces mécaniques.
