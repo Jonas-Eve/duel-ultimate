@@ -71,6 +71,8 @@ struct Config {
     games: u64,
     seed: u64,
     set: &'static Set,
+    /// `--against`: the reference set the diff compares `set` with.
+    against: Option<&'static Set>,
     rules: RuleSet,
     /// `--timing`: print one measurement line on stderr after the report.
     timing: bool,
@@ -215,6 +217,7 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
         games: games.unwrap_or(DEFAULT_GAMES),
         seed: seed.unwrap_or(DEFAULT_SEED),
         set: set.unwrap_or(default_set),
+        against: None,
         rules: RuleSet {
             hero_riposte: hero_riposte.unwrap_or(default_rules.hero_riposte),
             board_limit: board_limit.unwrap_or(default_rules.board_limit),
@@ -321,6 +324,66 @@ mod tests {
         assert_eq!(parsed(list), (games, seed, set.to_owned()), "{list:?}");
     }
 
+    fn against_of(list: &[&str]) -> Result<Option<String>, String> {
+        parse_args(&args(list)).map(|config| {
+            config
+                .against
+                .map(|set| format!("{}@{}", set.name, set.version))
+        })
+    }
+
+    #[test]
+    fn against_is_absent_by_default() {
+        assert_eq!(against_of(&["--set", "fixture"]), Ok(None));
+    }
+
+    #[test]
+    fn against_resolves_like_set() {
+        for (spec, resolved) in [
+            ("starter", "starter@1.1.0"),
+            ("starter@1.0.0", "starter@1.0.0"),
+            ("fixture", "fixture@1.0.0"),
+        ] {
+            assert_eq!(
+                against_of(&["--against", spec]),
+                Ok(Some(resolved.to_owned())),
+                "{spec}"
+            );
+            assert_eq!(parsed(&["--set", spec]).2, resolved, "{spec}");
+        }
+    }
+
+    #[test]
+    fn against_given_twice_is_rejected() {
+        let error =
+            against_of(&["--against", "fixture", "--against", "fixture"]).expect_err("given twice");
+        assert!(error.contains("--against given twice"), "{error}");
+    }
+
+    #[test]
+    fn against_without_a_value_is_rejected() {
+        let error = against_of(&["--against"]).expect_err("no value");
+        assert!(error.contains("--against needs a value"), "{error}");
+    }
+
+    #[test]
+    fn against_equal_to_set_is_accepted() {
+        assert_eq!(
+            against_of(&["--set", "starter@1.0.0", "--against", "starter@1.0.0"]),
+            Ok(Some("starter@1.0.0".to_owned()))
+        );
+    }
+
+    #[test]
+    fn against_unknown_set_names_the_available_ones() {
+        let error = against_of(&["--against", "nope"]).expect_err("unknown");
+        assert!(error.contains("unknown set \"nope\""), "{error}");
+        assert!(error.contains("fixture, starter"), "{error}");
+        let error = against_of(&["--against", "starter@9.9.9"]).expect_err("unknown version");
+        assert!(error.contains("1.0.0, 1.1.0"), "{error}");
+    }
+
+    #[test]
     #[test]
     fn no_argument_means_1000_games_seed_0_of_the_starter_set() {
         parsed_is(&[], 1000, 0, "starter@1.1.0");

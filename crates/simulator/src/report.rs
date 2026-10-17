@@ -178,7 +178,7 @@ fn fmt_value(value: Option<u32>) -> String {
 
 /// A text table: the first column left-aligned, the others right-aligned, two spaces between
 /// columns, a header, a line of dashes and the rows; every line ends with `\n`.
-fn table<const N: usize>(headers: [&str; N], rows: &[[String; N]]) -> String {
+pub(crate) fn table<const N: usize>(headers: [&str; N], rows: &[[String; N]]) -> String {
     let widths: [usize; N] = std::array::from_fn(|column| {
         rows.iter()
             .map(|row| row[column].chars().count())
@@ -211,7 +211,7 @@ fn table<const N: usize>(headers: [&str; N], rows: &[[String; N]]) -> String {
 }
 
 impl MatchupReport {
-    fn name(&self) -> String {
+    pub(crate) fn name(&self) -> String {
         match self.kind {
             Kind::Cross => format!("{} vs {}", self.deck_a, self.deck_b),
             Kind::Mirror => format!("{} (mirror)", self.deck_a),
@@ -219,7 +219,7 @@ impl MatchupReport {
     }
 
     /// Games that ran to their end; `None` when more were interrupted than started.
-    fn finished(&self) -> Option<u64> {
+    pub(crate) fn finished(&self) -> Option<u64> {
         self.games.checked_sub(self.interrupted)
     }
 

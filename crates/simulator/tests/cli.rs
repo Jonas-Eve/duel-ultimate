@@ -165,6 +165,10 @@ fn a_bad_command_line_never_panics() {
         &["--board-limit", "99999999999"],
         &["--board-limit", "5", "--board-limit", "none"],
         &["--timing", "--timing"],
+        &["--against"],
+        &["--against", "nope"],
+        &["--against", "fixture", "--against", "fixture"],
+        &["--against", "starter@9.9.9"],
     ] {
         let output = run(args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
@@ -279,5 +283,93 @@ fn timing_prints_one_line_on_stderr_and_leaves_stdout_unchanged() {
     assert!(line.starts_with("timing: 60 games, "), "{line:?}");
     for part in [" games, ", " actions, ", " s, ", " games/s, ", " actions/s"] {
         assert!(line.contains(part), "{part:?} in {line:?}");
+    }
+}
+
+#[test]
+fn against_prints_the_diff_alone_and_is_deterministic() {
+    let args = [
+        "20",
+        "--set",
+        "starter@1.1.0",
+        "--against",
+        "starter@1.0.0",
+        "--seed",
+        "5",
+    ];
+    let output = run(&args);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let text = stdout(&output);
+    assert!(
+        text.starts_with("diff: starter@1.0.0 -> starter@1.1.0 | "),
+        "{text:?}"
+    );
+    // The diff alone: no report header, no report table.
+    assert!(!text.contains("set: "), "{text:?}");
+    assert!(!text.contains("seat One"), "{text:?}");
+    assert_eq!(text, stdout(&run(&args)));
+    // The two versions are identical data and the same seed: nothing moved.
+    for line in text.lines().filter(|l| l.contains("rush")) {
+        if line.contains(" = ") {
+            assert!(line.contains(" 0.0"), "{line}");
+            assert!(!line.contains("yes"), "{line}");
+        }
+    }
+}
+
+#[test]
+fn against_the_same_set_has_only_zero_deltas() {
+    let output = run(&[
+        "20",
+        "--set",
+        "fixture",
+        "--against",
+        "fixture",
+        "--seed",
+        "3",
+    ]);
+    assert!(output.status.success());
+    let text = stdout(&output);
+    assert!(
+        text.starts_with("diff: fixture@1.0.0 -> fixture@1.0.0 | "),
+        "{text:?}"
+    );
+    assert!(!text.contains("NOTE"), "{text:?}");
+    assert!(!text.contains("yes"), "{text:?}");
+    assert!(!text.contains('+'), "{text:?}");
+    assert!(
+        !text.contains("new") && !text.contains("removed"),
+        "{text:?}"
+    );
+}
+
+#[test]
+fn against_without_set_compares_with_the_default_set() {
+    let text = stdout(&run(&["10", "--against", "starter@1.0.0"]));
+    assert!(
+        text.starts_with("diff: starter@1.0.0 -> starter@1.1.0 | "),
+        "{text:?}"
+    );
+}
+
+#[test]
+fn against_unknown_exits_with_code_2() {
+    let output = run(&["10", "--against", "nope"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let message = String::from_utf8(output.stderr).expect("utf-8 message");
+    assert!(message.contains("unknown set \"nope\""), "{message}");
+}
+
+#[test]
+fn against_never_reads_a_path() {
+    for path in ["../data/starter/1.0.0", "/etc/passwd", "."] {
+        let output = run(&["10", "--against", path]);
+        assert_eq!(output.status.code(), Some(2), "{path}");
+        assert!(output.stdout.is_empty(), "{path}");
+        let message = String::from_utf8(output.stderr).expect("utf-8 message");
+        assert!(message.contains("unknown set"), "{message}");
+        assert!(message.contains(path), "{message}");
     }
 }
