@@ -337,7 +337,7 @@ fn noisy_consumption_and_golden_values() {
     assert_eq!(picks, GOLDEN_NOISY_50, "noisy(greedy, 50), seed 7");
 }
 
-const GOLDEN_NOISY_50: [usize; 12] = [0; 12];
+const GOLDEN_NOISY_50: [usize; 12] = [0, 0, 3, 3, 3, 0, 1, 1, 0, 1, 4, 1];
 
 /// Plays one game; returns the winner and the number of actions taken.
 fn play_game(one: &dyn Policy, two: &dyn Policy, seed: u64) -> (PlayerId, usize) {
@@ -390,5 +390,6 @@ fn greedy_beats_random_on_starter() {
         };
         wins += usize::from(winner == greedy_seat);
     }
+    println!("greedy won {wins} of 200");
     assert!(wins >= 140, "greedy won only {wins} of 200 games");
 }

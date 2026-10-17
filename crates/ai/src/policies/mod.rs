@@ -1,6 +1,7 @@
 //! The policies. Sources in this folder only ever see an `Observation` (guarded by
 //! `tests/policies_isolation.rs`).
 
+pub(crate) mod eval;
 pub(crate) mod greedy;
 pub(crate) mod noisy;
 pub(crate) mod random;
@@ -17,7 +18,10 @@ pub const POLICIES: [(&str, PolicyFn); 2] = [
     ("greedy", greedy::greedy_policy),
 ];
 
-/// Stub, replaced by the implementation.
-pub fn policy_named(_name: &str) -> Option<PolicyFn> {
-    None
+/// The policy registered under exactly `name` (case-sensitive), if any.
+pub fn policy_named(name: &str) -> Option<PolicyFn> {
+    POLICIES
+        .iter()
+        .find(|(known, _)| *known == name)
+        .map(|(_, policy)| *policy)
 }
