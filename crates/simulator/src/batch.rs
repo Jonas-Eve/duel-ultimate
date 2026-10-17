@@ -49,6 +49,8 @@ pub struct BatchConfig {
     pub max_actions: u32,
     /// Recorded in every game (and in the report: joined with `, `).
     pub data_versions: Vec<String>,
+    /// The rules of every game, and the ones the report names. No `Default`: always explicit.
+    pub rules: RuleSet,
 }
 
 /// What one game came to. `matchup`, `index` and `seat_of_a` are filled in by the batch;
@@ -82,7 +84,9 @@ pub fn game_seed(batch_seed: u64, matchup: usize, index: u64) -> u64 {
 /// when no action is playable while the game runs, or when the engine refuses a legal action.
 ///
 /// # Panics
-/// When the policy returns an index outside the list it was given.
+/// When the policy returns an index outside the list it was given, and when `setup` is invalid
+/// (data or rules outside [`RuleSet::validate`]): the caller validates first, as the
+/// `duel-simulator` command line does.
 pub fn play_game(
     setup: GameSetup,
     seed: u64,
@@ -176,6 +180,7 @@ pub fn run_batch_observed(
         seed: config.seed,
         games_per_matchup: config.games,
         max_actions: config.max_actions,
+        rules: config.rules,
         matchups: Vec::new(),
     };
     for (matchup, (a, b)) in matchups(contenders.len()).into_iter().enumerate() {
@@ -197,12 +202,7 @@ pub fn run_batch_observed(
             // In a cross matchup A alternates between the seats; in a mirror, A is One.
             let a_is_one = a == b || index % 2 == 0;
             let (one, two) = if a_is_one { (a, b) } else { (b, a) };
-            let setup = GameSetup {
-                one: contenders[one].player.clone(),
-                two: contenders[two].player.clone(),
-                data_versions: config.data_versions.clone(),
-                rules: RuleSet::default(),
-            };
+            let setup = game_setup(contenders, config, one, two);
             let seed = game_seed(config.seed, matchup, index);
             let mut record = play_game(setup, seed, policy, config.max_actions, |_, _| {});
             record.matchup = matchup;
@@ -219,6 +219,17 @@ pub fn run_batch_observed(
     }
     debug_assert!(report.check().is_ok(), "{:?}", report.check());
     report
+}
+
+/// The setup of a duel between contenders `one` (seat One) and `two` (seat Two): their decks,
+/// the data versions and the rules of the batch.
+fn game_setup(contenders: &[Contender], config: &BatchConfig, one: usize, two: usize) -> GameSetup {
+    GameSetup {
+        one: contenders[one].player.clone(),
+        two: contenders[two].player.clone(),
+        data_versions: config.data_versions.clone(),
+        rules: config.rules,
+    }
 }
 
 /// Adds one game to its matchup's counters; an interrupted game only counts as such.

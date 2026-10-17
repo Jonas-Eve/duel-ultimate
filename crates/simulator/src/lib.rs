@@ -16,7 +16,7 @@ pub use batch::{
     run_batch, run_batch_observed,
 };
 pub use duel_ai::{Policy, TAG_POLICY_ONE, TAG_POLICY_TWO, derive_seed, policy_rng, random_policy};
-pub use report::{Kind, MatchupReport, Report};
+pub use report::{Kind, MatchupReport, Report, rules_label};
 pub use stats::{fmt_mean, fmt_share, percent, wilson_95};
 
 use duel_cards::{parse_cards, parse_decks};

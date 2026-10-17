@@ -1,6 +1,7 @@
 //! The balance report: integer counters per matchup and its deterministic text rendering.
 
 use crate::stats::{fmt_mean, fmt_share};
+use duel_engine::RuleSet;
 
 /// Kind of matchup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +41,22 @@ pub struct Report {
     pub seed: u64,
     pub games_per_matchup: u64,
     pub max_actions: u32,
+    /// The rules the batch was played with; written by [`rules_label`] only.
+    pub rules: RuleSet,
     pub matchups: Vec<MatchupReport>,
+}
+
+/// The rules as the header of the report writes them: `hero_riposte=on|off board_limit=none|<n>`.
+/// The only place that writes the rules.
+pub fn rules_label(rules: &RuleSet) -> String {
+    // No `..`: an option added to `RuleSet` breaks the build here, where it must be written.
+    let RuleSet {
+        hero_riposte,
+        board_limit,
+    } = *rules;
+    let hero_riposte = if hero_riposte { "on" } else { "off" };
+    let board_limit = board_limit.map_or_else(|| "none".to_owned(), |limit| limit.to_string());
+    format!("hero_riposte={hero_riposte} board_limit={board_limit}")
 }
 
 const HEADERS: [&str; 10] = [
@@ -139,8 +155,12 @@ impl Report {
             cells.join("  ") + "\n"
         };
         let mut text = format!(
-            "set: {} | seed: {} | games per matchup: {} | action cap: {}\n",
-            self.set, self.seed, self.games_per_matchup, self.max_actions
+            "set: {} | seed: {} | games per matchup: {} | action cap: {} | rules: {}\n",
+            self.set,
+            self.seed,
+            self.games_per_matchup,
+            self.max_actions,
+            rules_label(&self.rules)
         );
         text += &line(&rows[0]);
         let rule: Vec<String> = widths.iter().map(|&width| "-".repeat(width)).collect();
