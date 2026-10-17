@@ -33,10 +33,16 @@ fn policy_rng_is_distinct_per_seat_and_from_the_engine_seed() {
     // Same derivation as the formula, not the game seed itself.
     assert_eq!(
         one,
-        first(rand::SeedableRng::seed_from_u64(derive_seed(9, TAG_POLICY_ONE)))
+        first(rand::SeedableRng::seed_from_u64(derive_seed(
+            9,
+            TAG_POLICY_ONE
+        )))
     );
     assert_eq!(
         two,
-        first(rand::SeedableRng::seed_from_u64(derive_seed(9, TAG_POLICY_TWO)))
+        first(rand::SeedableRng::seed_from_u64(derive_seed(
+            9,
+            TAG_POLICY_TWO
+        )))
     );
 }

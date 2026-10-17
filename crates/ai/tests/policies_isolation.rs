@@ -6,7 +6,12 @@
 use std::fs;
 use std::path::Path;
 
-const FORBIDDEN: [&str; 4] = ["GameState", "apply", "legal_actions", "preview_legal_actions"];
+const FORBIDDEN: [&str; 4] = [
+    "GameState",
+    "apply",
+    "legal_actions",
+    "preview_legal_actions",
+];
 
 fn sources(dir: &Path, found: &mut Vec<(String, String)>) {
     for entry in fs::read_dir(dir).expect("policies/ is readable") {

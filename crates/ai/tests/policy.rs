@@ -1,7 +1,9 @@
 //! `random_policy` and the `choose` harness (#140).
 
 use duel_ai::{AiError, Policy, choose, random_policy};
-use duel_engine::{Action, GameState, Observation, PlayerId, apply, game_setup_from_data, new_game};
+use duel_engine::{
+    Action, GameState, Observation, PlayerId, apply, game_setup_from_data, new_game,
+};
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
