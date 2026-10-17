@@ -6,11 +6,21 @@
 use std::fs;
 use std::path::Path;
 
-const FORBIDDEN: [&str; 4] = [
+/// The state and the engine's entry points (a policy only sees its `Observation`), then what
+/// would put a card-specific rule or floating point (native and WASM could then disagree) into
+/// a policy.
+const FORBIDDEN: [&str; 11] = [
     "GameState",
     "apply",
     "legal_actions",
     "preview_legal_actions",
+    ".name",
+    "f32",
+    "f64",
+    "powi",
+    "sqrt",
+    "ln(",
+    "exp(",
 ];
 
 fn sources(dir: &Path, found: &mut Vec<(String, String)>) {
