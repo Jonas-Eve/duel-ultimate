@@ -3,7 +3,7 @@
 
 use std::cell::RefCell;
 
-use duel_engine::{Action, GameSetup, PlayerId, WinReason};
+use duel_engine::{Action, GameSetup, Observation, PlayerId, WinReason};
 use duel_simulator::{
     BatchConfig, Contender, DEFAULT_MAX_ACTIONS, GameRecord, Policy, Report, contenders_from,
     derive_seed, game_seed, play_game, policy_rng, random_policy, run_batch, run_batch_observed,
@@ -37,7 +37,7 @@ fn config(games: u64, seed: u64) -> BatchConfig {
 fn observed(
     contenders: &[Contender],
     config: &BatchConfig,
-    policy: Policy,
+    policy: &dyn Policy,
 ) -> (Report, Vec<GameRecord>) {
     let mut records = Vec::new();
     let report = run_batch_observed(contenders, config, policy, |record| records.push(*record));
@@ -57,8 +57,8 @@ fn of_matchup(records: &[GameRecord], matchup: usize) -> Vec<GameRecord> {
 #[test]
 fn the_same_batch_gives_the_same_report_and_text() {
     for contenders in [fixture(), starter()] {
-        let first = run_batch(&contenders, &config(40, 9), random_policy);
-        let second = run_batch(&contenders, &config(40, 9), random_policy);
+        let first = run_batch(&contenders, &config(40, 9), &random_policy);
+        let second = run_batch(&contenders, &config(40, 9), &random_policy);
         assert_eq!(first, second);
         assert_eq!(first.render(), second.render());
     }
@@ -67,8 +67,8 @@ fn the_same_batch_gives_the_same_report_and_text() {
 #[test]
 fn another_batch_seed_gives_another_report() {
     for contenders in [fixture(), starter()] {
-        let one = run_batch(&contenders, &config(60, 1), random_policy);
-        let two = run_batch(&contenders, &config(60, 2), random_policy);
+        let one = run_batch(&contenders, &config(60, 1), &random_policy);
+        let two = run_batch(&contenders, &config(60, 2), &random_policy);
         assert_ne!(one.matchups, two.matchups);
         assert_ne!(one.render(), two.render());
     }
@@ -76,7 +76,7 @@ fn another_batch_seed_gives_another_report() {
 
 #[test]
 fn the_report_records_the_settings_and_the_versions() {
-    let report = run_batch(&starter(), &config(5, 77), random_policy);
+    let report = run_batch(&starter(), &config(5, 77), &random_policy);
     assert_eq!(report.set, "test@0");
     assert_eq!(report.seed, 77);
     assert_eq!(report.games_per_matchup, 5);
@@ -134,7 +134,7 @@ thread_local! {
     static DRAWS: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
 }
 
-fn recording_policy(_actions: &[Action], rng: &mut ChaCha8Rng) -> usize {
+fn recording_policy(_obs: &Observation<'_>, rng: &mut ChaCha8Rng) -> usize {
     DRAWS.with(|draws| draws.borrow_mut().push(rng.next_u64()));
     0
 }
@@ -147,7 +147,7 @@ fn a_game_feeds_the_policy_from_one_stream_per_seat_never_from_the_engine_stream
     play_game(
         setup,
         seed,
-        recording_policy,
+        &recording_policy,
         DEFAULT_MAX_ACTIONS,
         |_, _| {},
     );
@@ -188,57 +188,58 @@ fn fixture_setup() -> GameSetup {
 // 3. The policy signature and the Concede filter.
 
 #[test]
-fn a_policy_is_a_plain_function_of_the_legal_actions_and_its_generator() {
-    let _: fn(&[Action], &mut ChaCha8Rng) -> usize = random_policy;
-    let _: Policy = random_policy;
+fn a_policy_is_a_function_of_the_observation_and_its_generator() {
+    let _: &dyn Policy = &random_policy;
+    let _: &dyn Policy = &|_: &Observation<'_>, _: &mut ChaCha8Rng| 0;
 }
 
-fn always_first(_: &[Action], _: &mut ChaCha8Rng) -> usize {
+fn always_first(_: &Observation<'_>, _: &mut ChaCha8Rng) -> usize {
     0
 }
 
-fn always_last(actions: &[Action], _: &mut ChaCha8Rng) -> usize {
-    actions.len() - 1
+fn always_last(obs: &Observation<'_>, _: &mut ChaCha8Rng) -> usize {
+    obs.actions().len() - 1
 }
 
 #[test]
 fn simple_policies_run_whole_batches() {
-    for policy in [always_first as Policy, always_last as Policy] {
+    let policies: [&dyn Policy; 2] = [&always_first, &always_last];
+    for policy in policies {
         let report = run_batch(&fixture(), &config(10, 0), policy);
         assert!(report.check().is_ok());
         assert_eq!(report.matchups.len(), 3);
     }
 }
 
-fn out_of_bounds(actions: &[Action], _: &mut ChaCha8Rng) -> usize {
-    actions.len()
+fn out_of_bounds(obs: &Observation<'_>, _: &mut ChaCha8Rng) -> usize {
+    obs.actions().len()
 }
 
 #[test]
 #[should_panic(expected = "policy returned index")]
 fn an_index_out_of_bounds_is_a_contract_violation() {
-    run_batch(&fixture(), &config(1, 0), out_of_bounds);
+    run_batch(&fixture(), &config(1, 0), &out_of_bounds);
 }
 
-fn refuses_concede(actions: &[Action], rng: &mut ChaCha8Rng) -> usize {
+fn refuses_concede(obs: &Observation<'_>, rng: &mut ChaCha8Rng) -> usize {
     assert!(
-        !actions.contains(&Action::Concede),
+        !obs.actions().contains(&Action::Concede),
         "Concede reached the policy"
     );
-    random_policy(actions, rng)
+    random_policy(obs, rng)
 }
 
 #[test]
 fn concede_is_never_offered_nor_played() {
     for contenders in [fixture(), starter()] {
-        let report = run_batch(&contenders, &config(30, 4), refuses_concede);
+        let report = run_batch(&contenders, &config(30, 4), &refuses_concede);
         assert!(report.matchups.iter().all(|matchup| matchup.concede == 0));
     }
     let mut steps = 0;
     play_game(
         fixture_setup(),
         1,
-        refuses_concede,
+        &refuses_concede,
         DEFAULT_MAX_ACTIONS,
         |actions, _| {
             steps += 1;
@@ -253,7 +254,7 @@ fn concede_is_never_offered_nor_played() {
 
 #[test]
 fn the_deck_with_the_lowest_index_alternates_seats_in_a_cross_matchup() {
-    let (report, records) = observed(&starter(), &config(100, 3), random_policy);
+    let (report, records) = observed(&starter(), &config(100, 3), &random_policy);
     let cross = of_matchup(&records, 0);
     assert_eq!(cross.len(), 100);
     for (index, record) in cross.iter().enumerate() {
@@ -293,7 +294,7 @@ fn three_decks() -> Vec<Contender> {
 
 #[test]
 fn every_cross_matchup_alternates_from_its_own_first_game() {
-    let (report, records) = observed(&three_decks(), &config(5, 3), random_policy);
+    let (report, records) = observed(&three_decks(), &config(5, 3), &random_policy);
     let names: Vec<(String, String)> = report
         .matchups
         .iter()
@@ -332,7 +333,7 @@ fn every_cross_matchup_alternates_from_its_own_first_game() {
 
 #[test]
 fn a_mirror_matchup_has_the_same_deck_on_both_sides() {
-    let (report, _) = observed(&starter(), &config(10, 3), random_policy);
+    let (report, _) = observed(&starter(), &config(10, 3), &random_policy);
     for matchup in &report.matchups[1..] {
         assert_eq!(matchup.deck_a, matchup.deck_b);
         assert_eq!(matchup.kind, duel_simulator::Kind::Mirror);
@@ -351,7 +352,7 @@ fn a_mirror_has_equal_initiatives_and_a_first_player_that_is_not_constant() {
         let (_, records) = observed(
             std::slice::from_ref(contender),
             &config(1000, 0),
-            random_policy,
+            &random_policy,
         );
         assert_eq!(records.len(), 1000);
         let one_starts = records.iter().filter(|r| r.first == PlayerId::One).count();
@@ -380,7 +381,7 @@ fn a_cap_of_3_interrupts_every_game() {
     let mut capped = config(20, 0);
     capped.max_actions = 3;
     for contenders in [fixture(), starter()] {
-        let report = run_batch(&contenders, &capped, random_policy);
+        let report = run_batch(&contenders, &capped, &random_policy);
         assert!(report.check().is_ok());
         for matchup in &report.matchups {
             assert_eq!(matchup.interrupted, 20);
@@ -399,7 +400,7 @@ fn a_cap_of_3_interrupts_every_game() {
 #[test]
 fn the_default_cap_interrupts_nothing() {
     for contenders in [fixture(), starter()] {
-        let report = run_batch(&contenders, &config(50, 0), random_policy);
+        let report = run_batch(&contenders, &config(50, 0), &random_policy);
         assert!(report.matchups.iter().all(|m| m.interrupted == 0));
     }
 }
@@ -410,16 +411,16 @@ fn a_game_ending_exactly_at_the_cap_is_finished_and_one_action_less_interrupts_i
     let full = play_game(
         fixture_setup(),
         seed,
-        random_policy,
+        &random_policy,
         DEFAULT_MAX_ACTIONS,
         |_, _| {},
     );
     assert!(!full.interrupted && full.winner.is_some());
     let n = full.actions;
     assert!(n > 1);
-    let exactly = play_game(fixture_setup(), seed, random_policy, n, |_, _| {});
+    let exactly = play_game(fixture_setup(), seed, &random_policy, n, |_, _| {});
     assert_eq!(exactly, full);
-    let short = play_game(fixture_setup(), seed, random_policy, n - 1, |_, _| {});
+    let short = play_game(fixture_setup(), seed, &random_policy, n - 1, |_, _| {});
     assert!(short.interrupted);
     assert_eq!((short.winner, short.actions), (None, n - 1));
 
@@ -427,12 +428,12 @@ fn a_game_ending_exactly_at_the_cap_is_finished_and_one_action_less_interrupts_i
     let mut at_cap = config(1, 0);
     at_cap.max_actions = n;
     assert_eq!(
-        run_batch(&fixture(), &at_cap, random_policy).matchups[0].interrupted,
+        run_batch(&fixture(), &at_cap, &random_policy).matchups[0].interrupted,
         0
     );
     at_cap.max_actions = n - 1;
     assert_eq!(
-        run_batch(&fixture(), &at_cap, random_policy).matchups[0].interrupted,
+        run_batch(&fixture(), &at_cap, &random_policy).matchups[0].interrupted,
         1
     );
 }
@@ -440,13 +441,13 @@ fn a_game_ending_exactly_at_the_cap_is_finished_and_one_action_less_interrupts_i
 #[test]
 fn interrupted_games_count_apart_and_leave_every_other_figure_alone() {
     let contenders = starter();
-    let (_, records) = observed(&contenders, &config(100, 6), random_policy);
+    let (_, records) = observed(&contenders, &config(100, 6), &random_policy);
     let mut actions: Vec<u32> = records.iter().map(|r| r.actions).collect();
     actions.sort_unstable();
     let cap = actions[actions.len() / 2];
     let mut capped = config(100, 6);
     capped.max_actions = cap;
-    let report = run_batch(&contenders, &capped, random_policy);
+    let report = run_batch(&contenders, &capped, &random_policy);
     assert!(report.check().is_ok());
     for (index, matchup) in report.matchups.iter().enumerate() {
         // The cap only truncates: a game's course does not depend on it.
@@ -488,7 +489,7 @@ fn interrupted_games_count_apart_and_leave_every_other_figure_alone() {
 #[test]
 fn every_game_ends_by_a_hero_going_down_or_exhaustion() {
     for contenders in [fixture(), starter()] {
-        let (report, records) = observed(&contenders, &config(100, 8), random_policy);
+        let (report, records) = observed(&contenders, &config(100, 8), &random_policy);
         assert_eq!(records.len(), 300);
         for record in &records {
             assert!(!record.interrupted, "{record:?}");
@@ -536,7 +537,7 @@ fn a_huge_health_in_the_data_alone_wins_almost_always() {
     for (strong, weak) in [(0, 1), (1, 0)] {
         let decks = set_number(FIXTURE_DECKS, "health", strong, 10_000);
         let decks = set_number(&decks, "health", weak, 1);
-        let report = run_batch(&with_decks(&decks), &config(100, 5), random_policy);
+        let report = run_batch(&with_decks(&decks), &config(100, 5), &random_policy);
         let cross = &report.matchups[0];
         let strong_wins = if strong == 0 {
             cross.wins_a
@@ -555,7 +556,7 @@ fn a_higher_initiative_in_the_data_alone_always_starts() {
     let decks = set_number(FIXTURE_DECKS, "initiative", 1, 9);
     let contenders = with_decks(&decks);
     assert!(contenders[1].player.hero.initiative > contenders[0].player.hero.initiative);
-    let (report, records) = observed(&contenders, &config(100, 5), random_policy);
+    let (report, records) = observed(&contenders, &config(100, 5), &random_policy);
     let cross = of_matchup(&records, 0);
     for record in &cross {
         assert_eq!(record.first, record.seat_of_a.opponent(), "{record:?}");

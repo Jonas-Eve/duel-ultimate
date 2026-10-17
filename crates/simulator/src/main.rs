@@ -162,7 +162,10 @@ fn main() {
         max_actions: DEFAULT_MAX_ACTIONS,
         data_versions: vec![format!("{}@{}", config.set.name, config.set.version)],
     };
-    print!("{}", run_batch(&contenders, &batch, random_policy).render());
+    print!(
+        "{}",
+        run_batch(&contenders, &batch, &random_policy).render()
+    );
 }
 
 #[cfg(test)]

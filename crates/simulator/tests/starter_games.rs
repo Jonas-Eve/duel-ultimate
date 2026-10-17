@@ -13,7 +13,7 @@ fn play_inspected(
     seed: u64,
     on_step: impl FnMut(&[Action], &[Event]),
 ) -> GameRecord {
-    play_game(setup, seed, random_policy, DEFAULT_MAX_ACTIONS, on_step)
+    play_game(setup, seed, &random_policy, DEFAULT_MAX_ACTIONS, on_step)
 }
 
 fn play_with(setup: GameSetup, seed: u64) -> GameRecord {
