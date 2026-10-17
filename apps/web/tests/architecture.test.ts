@@ -58,10 +58,10 @@ describe("architecture of apps/web/src", () => {
     expect(importers).toContain("engine/load.ts");
   });
 
-  test("data/starter.ts and engine/load.ts are read by App only (#64): not by engine/, game/ or ui/", () => {
+  test("data/starter.ts, data/build.ts and engine/load.ts are read by App only (#64): not by engine/, game/ or ui/", () => {
     for (const f of [...inDir("engine"), ...inDir("game"), ...inDir("ui")]) {
       for (const spec of importsOf(f.text)) {
-        expect(/(^|\/)data\/starter$/.test(spec), `${f.rel} imports ${spec}`).toBe(false);
+        expect(/(^|\/)data\/(starter|build)$/.test(spec), `${f.rel} imports ${spec}`).toBe(false);
         expect(/(^|\/)engine\/load$/.test(spec) || (f.rel.startsWith("ui/") && /(^|\/)load$/.test(spec)), `${f.rel} imports ${spec}`).toBe(false);
       }
     }

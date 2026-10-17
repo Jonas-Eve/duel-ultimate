@@ -1,7 +1,8 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import { EngineError } from "../src/engine/errors";
 import { DATA_VERSION } from "../src/data/starter";
+import { Home } from "../src/ui/Home";
 import { messageFor } from "../src/ui/errors.fr";
 import { fr } from "../src/ui/fr";
 import { launch, renderApp, seedField, testFactory, useAppEngine } from "./support/app";
@@ -12,11 +13,19 @@ useAppEngine();
 const home = async () => screen.findByRole("heading", { name: "Choisis ton deck" });
 
 describe("home screen", () => {
+  test("shows the build identifier it is given, apart from the data version (#80)", () => {
+    render(<Home decks={[{ id: "a", name: "A" }]} dataVersion="starter@1.0.0" buildId="abc1234" status="ready" loadError={null} startError={null} onStart={() => {}} onReload={() => {}} />);
+    expect(screen.getByText("Version : abc1234")).toBeTruthy();
+    expect(screen.getByText("Données : starter@1.0.0")).toBeTruthy();
+  });
+
   test("shows the data version, the decks, the opponent's deck (computer mode by default)", async () => {
     const { user } = renderApp();
     await home();
     expect(screen.getByText(`Données : ${DATA_VERSION}`)).toBeTruthy();
     expect(DATA_VERSION).toBe("starter@1.0.0");
+    // The build identifier is its own paragraph (`dev` outside a deployment, #80).
+    expect(screen.getByText("Version : dev")).toBeTruthy();
     expect(screen.getByRole("radio", { name: "Ruée" })).toBeTruthy();
     expect(screen.getByRole("radio", { name: "Rempart" })).toBeTruthy();
     // Two mode radios plus the two decks.
