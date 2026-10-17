@@ -167,6 +167,181 @@ describe(".github/workflows/e2e.yml (manual, #78)", () => {
   });
 });
 
+// The deployment workflow (#54, #81) is manual and has, on purpose, permissions and actions the two
+// other workflows must not have: it is not part of the common describe.each above. A missing file
+// fails the tests below, not the whole module.
+const deployPath = resolve(repoRoot, ".github/workflows/deploy-pages.yml");
+const deployRaw = existsSync(deployPath) ? read(deployPath) : "";
+const deployCode = stripComments(deployRaw);
+// `jobs:` cut by job name (a key indented by two spaces), each value being the job's text.
+const jobsOf = (c: string): Record<string, string> => {
+  const body = c.match(/^jobs:\s*\n((?:[ \t]+.*\n?|[ \t]*\n)*)/m)?.[1] ?? "";
+  const out: Record<string, string> = {};
+  for (const part of body.split(/\n(?=  [A-Za-z0-9_-]+:[ \t]*$)/m)) {
+    const m = part.match(/^\s{2}([A-Za-z0-9_-]+):\s*(?:\n|$)/);
+    if (m) out[m[1]] = part;
+  }
+  return out;
+};
+// The lines of a `permissions:` block (job level, indented by four spaces, or top level).
+const permsOf = (text: string, indent: number): string[] | null => {
+  const pad = " ".repeat(indent);
+  const m = text.match(new RegExp(`^${pad}permissions:[ \\t]*\\n((?:${pad}[ \\t]+\\S.*\\n?)+)`, "m"));
+  return m ? m[1].split("\n").map((l) => l.trim()).filter(Boolean) : null;
+};
+
+describe(".github/workflows/deploy-pages.yml (manuel, #54)", () => {
+  const jobs = jobsOf(deployCode);
+  const build = jobs.build ?? "";
+  const deploy = jobs.deploy ?? "";
+
+  test("the workflow exists", () => {
+    expect(existsSync(deployPath)).toBe(true);
+    expect(deployCode).toMatch(/^name: Deploy to Pages$/m);
+    expect(deployCode).toMatch(/^defaults:\s*\n\s+run:\s*\n\s+shell: bash/m);
+  });
+
+  test("is triggered by workflow_dispatch alone, without inputs: never by itself", () => {
+    const on = onBlock(deployCode);
+    expect(on.trim(), "the on: block was not found").not.toBe("");
+    expect(on.split("\n").filter((l) => /^\s*\S/.test(l)).map((l) => l.trim())).toEqual(["workflow_dispatch:"]);
+    for (const bad of [
+      "pull_request", "pull_request_target", "push", "schedule", "workflow_run",
+      "workflow_call", "repository_dispatch", "issue_comment", "inputs",
+    ]) {
+      expect(on, `"${bad}" must not trigger deploy-pages.yml`).not.toContain(bad);
+    }
+  });
+
+  test("top-level permissions are contents: read alone; a deployment is never cancelled midway", () => {
+    expect(permsOf(deployCode, 0)).toEqual(["contents: read"]);
+    expect(deployCode).toMatch(/^concurrency:\s*\n\s+group: pages\s*\n\s+cancel-in-progress: false\s*$/m);
+  });
+
+  test("exactly two jobs, build and deploy, each with a timeout and ubuntu-24.04", () => {
+    expect(Object.keys(jobs).sort()).toEqual(["build", "deploy"]);
+    for (const [name, text] of Object.entries(jobs)) {
+      expect(text, `${name}: timeout-minutes`).toMatch(/^\s{4}timeout-minutes: \d+\s*$/m);
+      expect(text, `${name}: runs-on`).toMatch(/^\s{4}runs-on: ubuntu-24\.04\s*$/m);
+    }
+  });
+
+  test("build has read permissions only (contents, pages); no write anywhere in it", () => {
+    expect(permsOf(build, 4)?.slice().sort()).toEqual(["contents: read", "pages: read"]);
+    expect(build).not.toMatch(/:\s*write\b/);
+    expect(build).not.toMatch(/id-token|environment:/);
+  });
+
+  test("only deploy writes Pages and mints the OIDC token, and only deploy has the environment", () => {
+    expect(permsOf(deploy, 4)?.slice().sort()).toEqual(["id-token: write", "pages: write"]);
+    expect(deployCode.match(/pages: write/g)).toHaveLength(1);
+    expect(deployCode.match(/id-token: write/g)).toHaveLength(1);
+    expect(deployCode.match(/^\s*environment:/gm)).toHaveLength(1);
+    expect(deploy).toMatch(
+      /^\s{4}environment:\s*\n\s{6}name: github-pages\s*\n\s{6}url: \$\{\{ steps\.deployment\.outputs\.page_url \}\}\s*$/m,
+    );
+    expect(deploy).toMatch(/^\s{4}needs: build\s*$/m);
+  });
+
+  test("deploy runs no repository code: one step, actions/deploy-pages, no checkout, no run", () => {
+    const steps = stepsOf(deploy);
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatch(/^\s*id: deployment\s*$/m);
+    expect(usesOf(deploy)).toHaveLength(1);
+    expect(usesOf(deploy)[0]).toMatch(/^actions\/deploy-pages@/);
+    expect(deploy).not.toMatch(/\brun:/);
+    expect(deploy).not.toContain("checkout");
+  });
+
+  test("every action is first-party, anchored and pinned to a full SHA", () => {
+    const uses = usesOf(deployCode);
+    for (const u of uses) {
+      expect(u).toMatch(/^actions\/(checkout|setup-node|configure-pages|upload-pages-artifact|deploy-pages)@[0-9a-f]{40}$/);
+    }
+    const names = uses.map((u) => u.split("@")[0]).sort();
+    expect(names).toEqual([
+      "actions/checkout", "actions/configure-pages", "actions/deploy-pages",
+      "actions/setup-node", "actions/upload-pages-artifact",
+    ]);
+    // `@<40 hex> # vX.Y.Z`: the version stays readable next to the SHA
+    for (const line of deployRaw.split("\n").filter((l) => /^\s*-?\s*uses:/.test(l))) {
+      expect(line).toMatch(/@[0-9a-f]{40} # v\d+\.\d+\.\d+\s*$/);
+    }
+  });
+
+  test("checkout and setup-node are the exact SHAs of ci.yml", () => {
+    const theirs = usesOf(code);
+    for (const u of usesOf(deployCode).filter((x) => /^actions\/(checkout|setup-node)@/.test(x))) {
+      expect(theirs, `${u} is not the version pinned in ci.yml`).toContain(u);
+    }
+  });
+
+  test("no secret, credentials not persisted, no ${{ }} inside a run script", () => {
+    expect(deployCode).not.toMatch(/secrets\./);
+    expect(deployCode).toContain("persist-credentials: false");
+    const runs = stepsOf(deployCode).filter((s) => /^\s*run:/m.test(s));
+    expect(runs.length).toBeGreaterThan(0);
+    for (const r of runs) expect(r).not.toContain("${{");
+  });
+
+  test("cargo install is --locked and the CLI version comes from the build script", () => {
+    const cmds = deployCode.split("\n").filter((l) => /\bcargo install\b/.test(l));
+    expect(cmds.length).toBeGreaterThanOrEqual(1);
+    for (const c of cmds) expect(c).toContain("--locked");
+    expect(deployCode).toContain("build-wasm.mjs --print-version");
+    expect(deployCode).toContain("-t wasm32-unknown-unknown");
+  });
+
+  test("builds apps/web under the sub-path with a short SHA that only comes from GITHUB_SHA", () => {
+    const step = stepsOf(build).filter((s) => /^\s*run: .*npm run build\s*$/m.test(s));
+    expect(step, 'exactly one step runs "npm run build"').toHaveLength(1);
+    expect(step[0]).toMatch(/^\s*working-directory: apps\/web\s*$/m);
+    expect(step[0]).toMatch(/^\s*VITE_BASE: \/duel-ultimate\/\s*$/m);
+    expect(step[0]).toMatch(/^\s*run: VITE_BUILD_SHA="\$\{GITHUB_SHA::7\}" npm run build\s*$/m);
+    expect(deployCode.match(/VITE_BUILD_SHA/g)).toHaveLength(1);
+    expect(deployCode).not.toMatch(/github\.sha|github\.event|github\.head_ref/);
+    expect(deployCode).toMatch(/^\s*path: apps\/web\/dist\s*$/m);
+  });
+
+  test("steps of build run in the specified order", () => {
+    const order = [
+      "actions/configure-pages",
+      "actions/checkout",
+      "actions/setup-node",
+      "rustup toolchain install",
+      "cargo install wasm-bindgen-cli",
+      "npm ci",
+      "npm run build",
+      "actions/upload-pages-artifact",
+    ];
+    let at = -1;
+    for (const s of order) {
+      const i = build.indexOf(s, at + 1);
+      expect(i, `"${s}" missing or out of order`).toBeGreaterThan(at);
+      at = i;
+    }
+  });
+
+  test("configure-pages does not enable Pages itself and fails fast with an explanation", () => {
+    expect(deployCode).not.toContain("enablement");
+    const [first, second] = stepsOf(build);
+    expect(first).toMatch(/^\s*id: pages\s*$/m);
+    expect(first).toMatch(/uses: actions\/configure-pages@/);
+    expect(second).toMatch(/^\s*if: failure\(\) && steps\.pages\.outcome == 'failure'\s*$/m);
+    expect(second).toContain("::error::");
+    expect(second).toMatch(/Source/);
+    expect(second).toMatch(/^\s*exit 1\s*$/m);
+    expect(second).not.toContain("${{");
+  });
+
+  test("the jobs helper reads names, and the permissions helper reads job blocks only", () => {
+    const sample = "jobs:\n  a:\n    permissions:\n      x: read\n    steps: []\n  b:\n    steps: []\n";
+    expect(Object.keys(jobsOf(sample))).toEqual(["a", "b"]);
+    expect(permsOf(jobsOf(sample).a, 4)).toEqual(["x: read"]);
+    expect(permsOf(jobsOf(sample).b, 4)).toBeNull();
+  });
+});
+
 describe("end-to-end tests (Playwright)", () => {
   const deps = { ...pkg.dependencies, ...pkg.devDependencies } as Record<string, string>;
   const config = read(resolve(webRoot, "playwright.config.ts"));
