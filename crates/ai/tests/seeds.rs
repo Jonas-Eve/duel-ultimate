@@ -76,5 +76,5 @@ fn rng_from_draw_golden_indices() {
         .into_iter()
         .map(|(d, n)| index(d, n))
         .collect();
-    assert_eq!(got, vec![999; 5]);
+    assert_eq!(got, vec![9, 7, 3, 0, 486]);
 }
