@@ -59,7 +59,7 @@ export function CardFace({ card, cost, destroyed = false, emblem }: { card: Card
         )}
         <span className="card-name">{card.name ?? fr.unknownCard}</span>
       </span>
-      <ArtPlaceholder emblem={emblem} />
+      <ArtPlaceholder emblem={emblem} name={card.name} />
       <span className="card-values">
         <span className="card-value">
           <StarIcon />

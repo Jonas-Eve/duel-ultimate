@@ -10,6 +10,11 @@ const dataRoot = fileURLToPath(new URL("../../data", import.meta.url));
 export default defineConfig({
   // `VITE_BASE`: the sub-path of a static deployment (`/` by default, so dev, preview and e2e stay at the root).
   base: resolveBase(process.env.VITE_BASE),
+  build: {
+    // Without this Vite inlines any file under 4 KiB as a `data:` URL in the JavaScript, which the network tests
+    // cannot see and which would undo "card images are not loaded on the home screen" (#89). SVG stays a file.
+    assetsInlineLimit: (file) => (file.endsWith(".svg") ? false : undefined),
+  },
   plugins: [react(), cspPlugin()],
   server: {
     // `src/data/starter.ts` imports `data/starter/<version>/*.json?raw` from the repository

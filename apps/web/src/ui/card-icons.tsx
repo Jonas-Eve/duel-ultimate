@@ -1,6 +1,7 @@
 // The drawn parts of a card, shared by the compact face (`CardTile`) and the detail sheet
 // (`CardDetail`): icons, the deck symbol and the art slots. Pure drawing, no state.
 import type { DeckEmblem } from "../game/controller";
+import { useArtLookup } from "./ArtContext";
 
 /** Every icon is decorative (aria-hidden): each value is also a number, each state also a text. */
 interface IconProps {
@@ -78,7 +79,7 @@ export function EmblemChip({ emblem, size = 16, label, id }: { emblem: DeckEmble
   );
 }
 
-/** The landscape drawn in every art slot until real illustrations come (no image to load, no hole). */
+/** The landscape of a card without an image (no image to load, no hole). */
 function Landscape() {
   return (
     <svg aria-hidden="true" focusable="false" viewBox="0 0 40 30" width="100%" height="100%" preserveAspectRatio="xMidYMid slice">
@@ -88,24 +89,31 @@ function Landscape() {
   );
 }
 
-/** The compact face's art slot, with the deck chip on it. */
-export function ArtPlaceholder({ emblem }: { emblem?: DeckEmblem }) {
+/**
+ * The art of a card: its image when the lookup knows the name, else the landscape. Decorative (`alt=""`, never
+ * a `title`), no `onError`: an image that fails leaves the striped background of the slot, not a hole.
+ */
+function Art({ name }: { name: string | null | undefined }) {
+  const lookup = useArtLookup();
+  const info = name === null || name === undefined ? undefined : lookup(name);
+  return info === undefined ? <Landscape /> : <img src={info.url} alt="" draggable={false} decoding="async" />;
+}
+
+/** The compact face's art slot, with the deck chip on it (the image comes after it in the DOM: no z-index). */
+export function ArtPlaceholder({ emblem, name }: { emblem?: DeckEmblem; name?: string | null }) {
   return (
     <span className="card-art">
       {emblem !== undefined && <EmblemChip emblem={emblem} />}
-      <Landscape />
+      <Art name={name} />
     </span>
   );
 }
 
-/**
- * The detail sheet's art slot: a fixed-height box (CSS), the one place a real illustration will replace
- * the placeholder. It reads nothing about the card and does not look up any art.
- */
-export function DetailArt() {
+/** The detail sheet's art slot: a fixed-height box (CSS) holding the card's image, or the landscape. */
+export function DetailArt({ name }: { name?: string | null }) {
   return (
     <div className="card-detail-art">
-      <Landscape />
+      <Art name={name} />
     </div>
   );
 }
