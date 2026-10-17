@@ -73,6 +73,16 @@ export const fr = {
   passesLegend: "Passe la main",
   noCreature: "Aucune créature",
 
+  // Card detail (#104). The effect line's words live in `card-effects.ts` next to its one builder.
+  detailEffects: "Effets",
+  detailAttackEffect: "Attaque",
+  detailCostCaption: "Coût",
+  detailTimeWord: "temps",
+  detailAttackCaption: "Attaque",
+  detailRiposteCaption: "Riposte",
+  detailLifeCaption: "Vie",
+  detailDeck: (deck: string) => `Deck ${deck}`,
+
   selected: "Sélectionnée",
   targetPossible: "Cible possible",
   targetUnavailable: "Cible non disponible",
