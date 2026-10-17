@@ -104,6 +104,9 @@ fn check_svg(text: &str) -> Result<(), String> {
     if root.tag_name().name() != "svg" || root.tag_name().namespace() != Some(SVG_NS) {
         return Err("root element must be an SVG `svg`".into());
     }
+    if doc.descendants().any(|n| n.is_pi()) {
+        return Err("processing instruction is forbidden".into());
+    }
     if doc.root().children().filter(Node::is_element).count() != 1 {
         return Err("exactly one root element expected".into());
     }
@@ -120,6 +123,13 @@ fn check_webp(bytes: &[u8]) -> Result<(), String> {
 
 fn check_set_dir(dir: &Path) -> Result<(), String> {
     let art_json = dir.join("art.json");
+    if !art_json.is_file() {
+        return if dir.join("art").exists() {
+            Err("art/ exists without art.json".into())
+        } else {
+            Ok(())
+        };
+    }
     let cards_json = fs::read_to_string(dir.join("cards.json")).map_err(|e| e.to_string())?;
     let cards = parse_cards(&cards_json).map_err(|e| e.to_string())?;
     let text = fs::read_to_string(&art_json).map_err(|e| e.to_string())?;
@@ -197,9 +207,7 @@ fn every_art_json_in_data_is_valid() {
         "no data/<set>/<version>/cards.json found: wrong path, the test would be vacuous"
     );
     for dir in dirs {
-        if dir.join("art.json").is_file() {
-            check_set_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
-        }
+        check_set_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
     }
 }
 
