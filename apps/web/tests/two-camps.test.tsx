@@ -12,6 +12,7 @@ import { newSession } from "./support/engine";
 import { launch, renderApp, useAppEngine } from "./support/app";
 import { playHuman, playUntil, randomPreview, stallPreview } from "./support/policies";
 import { inAct, makeCampsController, mountGame, useRealEngine } from "./support/ui";
+import { playTile } from "./support/play";
 
 useRealEngine();
 useAppEngine();
@@ -54,7 +55,7 @@ describe("the screen: both hands visible, the camp holding the main at the botto
     const theirs = s.views.Two!.you.hand;
     const bottom = buttonsIn(`${CAMP1} : main`);
     expect(bottom.map((b) => b.getAttribute("aria-label")!.startsWith(`${mine[bottom.indexOf(b)].name}, coût`))).toEqual(mine.map(() => true));
-    expect(bottom.some((b) => !b.disabled)).toBe(true);
+    for (const b of bottom) expect(b.getAttribute("aria-haspopup")).toBe("dialog");
 
     // The other camp's hand is named in full too; its tiles open a read-only detail (#104), they never play.
     const tiles = buttonsIn(`${CAMP2} : main`);
@@ -130,7 +131,7 @@ describe("the swap when the main passes", () => {
     expect(tile.getAttribute("aria-label")).toContain("passe la main");
     expect(screen.queryAllByText(`Au tour de ${CAMP2}`)).toHaveLength(0);
 
-    await user.click(tile);
+    await playTile(user, tile);
 
     // The very first render after the action already shows the new camp holding the main.
     const after = c.getSnapshot();
@@ -143,7 +144,7 @@ describe("the swap when the main passes", () => {
     // The camp 2 hand is now at the bottom and playable; the camp 1 hand is shown, not playable.
     const nowBottom = buttonsIn(`${CAMP2} : main`);
     expect(nowBottom).toHaveLength(after.views.Two!.you.hand.length);
-    expect(nowBottom.some((b) => !b.disabled)).toBe(true);
+    for (const b of nowBottom) expect(b.getAttribute("aria-haspopup")).toBe("dialog");
     const nowTop = buttonsIn(`${CAMP1} : main`);
     expect(nowTop).toHaveLength(after.views.One!.you.hand.length);
     for (const t of nowTop) expect(t.getAttribute("aria-haspopup")).toBe("dialog");
@@ -166,7 +167,7 @@ describe("the swap when the main passes", () => {
     const seed = seedWithHandOver();
     const c = makeCampsController("rush", "bulwark", seed);
     const { user } = mountGame(c);
-    await user.click(buttonsIn(`${CAMP1} : main`)[handOverIndex(c.getSnapshot())]);
+    await playTile(user, buttonsIn(`${CAMP1} : main`)[handOverIndex(c.getSnapshot())]);
     expect(c.getSnapshot().views.One!.active).toBe("Two");
     await user.click(screen.getByRole("button", { name: "Abandonner" }));
     expect(within(screen.getByRole("dialog")).getByRole("heading", { name: "Le camp 2 abandonne ?" })).toBeTruthy();
@@ -291,11 +292,16 @@ describe("wording of the consequence lines in two camps", () => {
   test("no 'te' / 'adversaire': the other camp is the other camp", async () => {
     const seed = seedWithHandOver();
     const c = makeCampsController("rush", "bulwark", seed);
-    mountGame(c);
+    const { user } = mountGame(c);
     const tile = buttonsIn(`${CAMP1} : main`)[handOverIndex(c.getSnapshot())];
     expect(tile.textContent).toContain("Passe la main");
     const notes = buttonsIn(`${CAMP1} : main`).map((b) => `${b.textContent} ${b.getAttribute("aria-label")}`).join(" ");
     expect(notes).not.toMatch(/te restera|adversaire/);
+    // The sentence itself is in the sheet, worded for two camps.
+    await user.click(tile);
+    const sheet = screen.getByRole("dialog").textContent ?? "";
+    expect(sheet).toMatch(/Passe la main : l'autre camp aura \d+ de temps/);
+    expect(sheet).not.toMatch(/te restera|adversaire/);
   });
 });
 

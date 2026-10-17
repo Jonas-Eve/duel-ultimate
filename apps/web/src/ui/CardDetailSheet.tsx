@@ -11,7 +11,7 @@ interface CardDetailSheetProps {
   /** The deck's name, spoken by the deck symbol. */
   deckName: string;
   onClose(): void;
-  /** Where the next tasks put their buttons (play, attack): above "Fermer". Read-only when absent. */
+  /** Where the buttons go (play, attack): above "Fermer". Read-only when absent. */
   actions?: ReactNode;
 }
 

@@ -200,7 +200,7 @@ c'est l'humain qui choisit l'action des deux sièges (le contrôleur n'a pas de 
 même, alimenté par `toScreenModel` :
 
 - le **camp qui a le jeton** est en bas (zone « joueur », mains et actions jouables) ; l'autre camp est en
-  haut avec **sa main visible** (tuiles non jouables, légende « Main de … (non jouable) ») ; à la
+  haut avec **sa main visible** (tuiles qui n'ouvrent qu'un détail en lecture seule, légende « Main de … (non jouable) ») ; à la
   passation du jeton haut et bas s'échangent aussitôt, **sans écran de passage d'appareil** ; une
   annonce `aria-live` dit « Au tour de {camp} » et le focus passe à la région de partie (la tuile
   pressée a pu quitter la main) ;
@@ -237,10 +237,12 @@ même, alimenté par `toScreenModel` :
 - **Écran de partie** (`GameScreen`, reçoit le contrôleur en prop et lit `useSyncExternalStore(controller.subscribe,
   controller.getSnapshot)`) : de haut en bas, graine et « Infos de partie », héros adverse, plateau adverse,
   bandeau de temps et de jeton, plateau du joueur, héros du joueur, main, barre d'actions (effets de héros et
-  « Abandonner » avec confirmation). Les boutons rendent au contrôleur **l'aperçu du snapshot courant**
+  « Abandonner » avec confirmation). Toucher une carte de la main n'en joue plus aucune : cela ouvre son détail,
+  d'où « Jouer (N temps) » (voir « Jouer depuis le détail de la main (#105) »). Les boutons rendent au contrôleur **l'aperçu du snapshot courant**
   (jamais une action fabriquée) ; coût, « Passe la main », temps restant et fin de partie viennent de cet
   aperçu (`ui/consequence.ts`, pur : action simple, passation, attaque létale, passation par épuisement,
-  abandon). Pendant le tour de l'ordinateur et après la fin, toutes les commandes sont inactives ; un seul
+  abandon). Pendant le tour de l'ordinateur et après la fin, toutes les commandes de jeu sont inactives (les
+  cartes restent ouvrables en lecture, « Jouer » y est inactif) ; un seul
   résumé `aria-live` « L'ordinateur a joué N actions. À toi de jouer. » est annoncé à la **transition**
   `computer-turn` -> `human-turn` (`computerSteps` reste périmé ensuite), puis retiré dès que l'humain agit.
   La main de l'ordinateur n'existe pas dans la vue : seul son nombre est affiché.
@@ -250,7 +252,7 @@ même, alimenté par `toScreenModel` :
   (partie intacte, « Fermer »).
 - **Accessibilité** : vrais `<button>` (zone tactile `--tap: 44px`), aucun `:hover`, provocation = pictogramme
   SVG `aria-hidden` **et** libellé « Provocation », riposte = la deuxième des trois valeurs de la carte, nom
-  accessible complet des cartes (« Pillard, coût 2, attaque 3, riposte 0, vie 2, provocation, passe la main »,
+  accessible complet des cartes (« Pillard, coût 2, attaque 3, riposte 0, vie 2, provocation, Reste 3 »,
   voir « Carte compacte » ci-dessous). `Dialog`
   (`role="dialog"`, `aria-modal`, piège à focus, Échap, focus rendu au déclencheur) n'utilise ni
   `<dialog>.showModal()` ni `inert` (absents de jsdom) ; il est générique et réutilisé par #65 et #66.
@@ -324,9 +326,9 @@ même, alimenté par `toScreenModel` :
   sur un plateau), une illustration de substitution en SVG `aria-hidden`, et trois valeurs à chiffres de
   10 px au moins : attaque (étoile, `force`), riposte (flèche de retour, affichée même à 0), vie (cœur,
   PV courants). Sous la carte : « Provocation », la légende de main « Reste N » ou « Passe la main » (lue sur
-  l'aperçu du moteur, jamais calculée ; le détail complet viendra avec #90) et la marque « Sélectionnée » /
+  l'aperçu du moteur, jamais calculée) et la marque « Sélectionnée » /
   « Cible possible » / « Cible non disponible ». Nom accessible : « Nom, coût N (main seulement), attaque N,
-  riposte N, vie N[, provocation][, passe la main | il te restera N de temps][, marque] » ; le coût d'attaque
+  riposte N, vie N[, provocation][, passe la main | Reste N][, marque] » (le texte visible exact : label-in-name ; la forme parlée « il te restera N de temps » est la description du bouton « Jouer ») ; le coût d'attaque
   n'est plus sur la carte (il reste dans `AttackSheet`). Cinq cartes tiennent en main à 360 px (rangées :
   `gap: 2px`, `padding: 4px`). `.card` reste partagé avec la défausse (`DiscardDialog`, repris dans la tâche suivante de #87) : la taille fixe
   est sur le modificateur `.card-compact`. Pas de vie maximale dans `CardView` : aucun style « blessé » pour
@@ -342,14 +344,29 @@ même, alimenté par `toScreenModel` :
   libellé du camp nomme le deck). Contraste (WCAG 1.4.11, 3:1) : disque `--emblem-fill` sur les deux tons de
   l'illustration, glyphe `--emblem-glyph` sur le disque, anneau `--emblem-ring` contre le cadre brun ; la
   pastille est dans l'illustration, jamais collée au cadre ; gardé par `tests/emblem-contrast.test.ts`.
+- **Jouer depuis le détail de la main (#105)** : une carte de la main (la mienne, ou celle du camp qui a le jeton en
+  deux camps) est un `<button aria-haspopup="dialog">` **toujours ouvrable**, même au tour de l'ordinateur : `Hand`
+  n'a plus de `onPlay`, seulement `onOpen(card)`. `detail` reçoit la zone `"hand"` (clé `{id, zone}`, cherchée dans la
+  main du bas du modèle courant : après une passation en deux camps, la main échangée ne rouvre pas la carte en
+  lecture seule, la feuille se referme pendant le rendu). L'aperçu `snapshot.legal` de la carte est cherché **au
+  rendu** (`playPreviewOf`) ; la feuille reçoit `PlayActions` dans l'emplacement `actions` : la conséquence en texte
+  par `describeConsequence` (coût, « Il te restera N de temps », « Passe la main : … », fin de partie, rien de
+  calculé côté client), puis « Jouer (N temps) » (N = `preview.cost`, 48 px, primaire, décrit par la conséquence) et
+  « Fermer ». « Jouer » appelle `controller.submit(aperçu)`, ferme la feuille et incrémente `focusToken` (la tuile
+  a quitté la main : le focus va à la région de partie) ; un double appui ne joue qu'une fois (feuille fermée,
+  aperçu périmé ignoré par le contrôleur). Sans aperçu (tour de l'ordinateur), « Jouer » est `aria-disabled` mais
+  focalisable, un appui ne fait rien et la raison est un texte visible (`fr.playUnavailableComputer`). Échap et
+  « Fermer » ne jouent rien. Écart de la revue de #92 corrigé : le nom de la tuile reprend le texte visible exact
+  (« Reste N », `fr.keepsLegend`). Les e2e (`tapCard`, `humanStep`, `wearDownStep`…) jouaient en touchant la tuile :
+  ils sont à adapter par la tâche e2e (#107).
 - **Détail de carte en lecture seule (#104)** : toucher une créature du plateau adverse ou une carte de la main
   de l'autre camp (deux camps) ouvre `CardDetailSheet`, une feuille modale (`Dialog`) : coût en gros avec
   sablier, nom, symbole du deck (`EmblemChip` en `role="img"`, « Deck Rempart »), illustration de substitution
   de 230 px fixes (`DetailArt`, que #89 remplacera), zone d'effets défilante et focusable, attaque et riposte
   (toujours affichée, même à 0) à gauche, vie courante à droite (jamais « N / max » : `CardView` n'a pas de vie
-  maximale), « Fermer » de 48 px ; la carte fait 520 px, c'est `.dialog` qui défile sur un petit écran. Aucun
-  autre bouton : ouvrir ou fermer ne soumet rien (les actions arrivent avec #105 et #106 par l'emplacement
-  `actions`). `detail` est un état local de `GameScreen` (`{id, zone}`), la carte est relue dans le modèle à
+  maximale), « Fermer » de 48 px ; la carte fait 520 px, c'est `.dialog` qui défile sur un petit écran. Sans
+  emplacement `actions`, aucun autre bouton : ouvrir ou fermer ne soumet rien (les actions passent par
+  l'emplacement `actions` : #105 pour la main, #106 pour le plateau). `detail` est un état local de `GameScreen` (`{id, zone}`), la carte est relue dans le modèle à
   chaque rendu et l'état est remis à `null` pendant le rendu si elle a disparu. Pendant le choix d'une cible,
   un toucher sur une carte adverse la choisit (jamais le détail). Les tuiles concernées sont des
   `<button aria-haspopup="dialog">` (`opensDialog`), nom accessible inchangé. `card-effects.ts` (pur) range

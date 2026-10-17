@@ -9,6 +9,7 @@ import { faultyFactory } from "./support/faulty";
 import { playHuman, playUntil, randomPreview, settle, stallPolicy, stallPreview } from "./support/policies";
 import { expectedCardLabel } from "./support/card-label";
 import { inAct, makeController, mountGame, useRealEngine } from "./support/ui";
+import { playTile } from "./support/play";
 
 useRealEngine();
 
@@ -170,7 +171,7 @@ describe("cost and hand-over come from the engine preview", () => {
           inHand: true,
           cost: p.cost ?? 0,
           handsOver: p.hands_over,
-          timeLeft: p.hands_over ? undefined : `il te restera ${p.budget_after} de temps`,
+          timeLeft: p.hands_over ? undefined : `Reste ${p.budget_after}`,
         }),
       );
       if (!p.hands_over) expect(text).toContain(`Reste ${p.budget_after}`);
@@ -201,7 +202,7 @@ describe("summon and draw", () => {
     const card = v.you.hand[index];
     const p = snap.legal.find((x) => isPlay(x.action) && x.action.play.card === card.id) as ActionPreview;
 
-    await user.click(handButtons()[index]);
+    await playTile(user, handButtons()[index]);
 
     expect(handButtons()).toHaveLength(v.you.hand.length - 1);
     const onBoard = within(board(true)).getAllByRole("button");
@@ -241,7 +242,8 @@ describe("summon and draw", () => {
     const { user } = mountGame(c);
     const first = handButtons()[0];
     const id = c.getSnapshot().views.One!.you.hand[0].id;
-    await user.dblClick(first);
+    await user.click(first);
+    await user.dblClick(within(screen.getByRole("dialog")).getByRole("button", { name: /^Jouer/ }));
     await waitFor(() => expect(c.getSnapshot().phase).not.toBe("computer-turn"));
     expect(probe.applied.filter((a) => isPlay(a as never) && (a as { play: { card: number } }).play.card === id)).toHaveLength(1);
     expect(screen.queryByRole("alert")).toBeNull();
@@ -293,8 +295,10 @@ describe("the computer's turn", () => {
     const status = screen.getByRole("status");
     expect(status.textContent).toBe("L'ordinateur joue…");
     expect(controls().length).toBeGreaterThan(0);
-    // The game controls are disabled; reading the log and the discards stays possible (#65).
-    for (const b of controls().filter((x) => !/^(Journal|Défausse \(\d+\))$/.test(x.textContent ?? ""))) {
+    // The game controls are disabled; reading the log, the discards and the cards' detail stays possible (#65, #105).
+    const tiles = handButtons();
+    expect(tiles.length).toBeGreaterThan(0);
+    for (const b of controls().filter((x) => !/^(Journal|Défausse \(\d+\))$/.test(x.textContent ?? "") && !tiles.includes(x))) {
       expect(b.disabled, b.textContent ?? "").toBe(true);
     }
     expect(screen.queryByText(/L'ordinateur a joué/)).toBeNull();
@@ -315,7 +319,7 @@ describe("the computer's turn", () => {
     const said = screen.getAllByText(`L'ordinateur a joué ${n} action${n > 1 ? "s" : ""}. À toi de jouer.`);
     expect(said).toHaveLength(1);
     expect(said[0].closest("[aria-live]")?.getAttribute("aria-live")).toBe("polite");
-    expect(handButtons().some((b) => !b.disabled)).toBe(true);
+    expect(handButtons().every((b) => b.getAttribute("aria-haspopup") === "dialog")).toBe(true);
   });
 
   test("one single announcement per chain even when every action publishes a snapshot", async () => {
@@ -473,7 +477,7 @@ describe("errors", () => {
     const before = handButtons().map((b) => b.getAttribute("aria-label"));
     const viewBefore = c.getSnapshot().views;
 
-    await user.click(within(hand()).getByRole("button", { name: /^Fantôme/ }));
+    await playTile(user, within(hand()).getByRole("button", { name: /^Fantôme/ }));
 
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toContain(messageFor("card_not_in_hand"));
@@ -491,7 +495,7 @@ describe("errors", () => {
     const { factory } = faultyFactory("apply");
     const c = makeController("rush", "bulwark", 3, {}, factory);
     const { user, onHome, onReplaySameSeed } = mountGame(c);
-    await user.click(handButtons()[0]);
+    await playTile(user, handButtons()[0]);
     const s: Snapshot = c.getSnapshot();
     expect(s.phase).toBe("fatal");
     expect(screen.getByText(messageFor(s.error!.code))).toBeTruthy();

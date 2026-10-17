@@ -6,18 +6,12 @@ import { fr } from "./fr";
 /** The attack flow's state of a tile, always written as text as well as drawn as a border. */
 export type CardMark = "selected" | "target" | "unavailable";
 
-/** A hand card's time legend, read from the engine preview (never computed): visible short form and spoken form. */
-export interface TimeLeft {
-  legend: string;
-  spoken: string;
-}
-
 export interface CardTileProps {
   card: CardView;
   /** Hand cards only: the cost comes from the engine preview, not from the card. Never given on a board. */
   cost?: number;
-  /** Hand cards: the time left after playing (the preview's `budget_after`), when the card keeps the main. */
-  timeLeft?: TimeLeft;
+  /** Hand cards: the visible legend "Reste N" (N is the preview's `budget_after`), when the card keeps the main. It is also in the name, verbatim. */
+  timeLeft?: string;
   handsOver?: boolean;
   /** A real `<button>` only when given (the attack flow of #66 adds the selection); else a plain element. */
   onPress?: () => void;
@@ -35,15 +29,15 @@ export interface CardTileProps {
   emblem?: DeckEmblem;
 }
 
-/** The complete accessible name: "Pillard, coût 2, attaque 3, riposte 0, vie 2, provocation, passe la main, sélectionnée". */
-export function cardLabel(card: CardView, opts: { cost?: number; handsOver?: boolean; timeLeft?: TimeLeft; mark?: CardMark; destroyed?: boolean } = {}): string {
+/** The complete accessible name: "Pillard, coût 2, attaque 3, riposte 0, vie 2, provocation, Reste 3 | passe la main, sélectionnée". */
+export function cardLabel(card: CardView, opts: { cost?: number; handsOver?: boolean; timeLeft?: string; mark?: CardMark; destroyed?: boolean } = {}): string {
   return (
     `${card.name ?? fr.unknownCard}` +
     (opts.cost === undefined ? "" : `, ${fr.costWord} ${opts.cost}`) +
     `, ${fr.attackWord} ${card.force}, ${fr.riposteWord} ${card.riposte}` +
     (opts.destroyed ? `, ${fr.destroyed.toLowerCase()}` : `, ${fr.lifeWord} ${card.health}`) +
     (card.provocation ? `, ${fr.provocation.toLowerCase()}` : "") +
-    (opts.handsOver ? `, ${fr.passesLegend.toLowerCase()}` : opts.timeLeft === undefined ? "" : `, ${opts.timeLeft.spoken}`) +
+    (opts.handsOver ? `, ${fr.passesLegend.toLowerCase()}` : opts.timeLeft === undefined ? "" : `, ${opts.timeLeft}`) +
     (opts.mark === undefined ? "" : `, ${markText[opts.mark].toLowerCase()}`)
   );
 }
@@ -101,7 +95,7 @@ export function CardTile({ card, cost, timeLeft, handsOver = false, destroyed = 
               {fr.provocation}
             </span>
           )}
-          {cost !== undefined && (handsOver ? <span className="card-legend">{fr.passesLegend}</span> : timeLeft !== undefined && <span className="card-legend">{timeLeft.legend}</span>)}
+          {cost !== undefined && (handsOver ? <span className="card-legend">{fr.passesLegend}</span> : timeLeft !== undefined && <span className="card-legend">{timeLeft}</span>)}
           {destroyed && <span className="card-legend">{fr.destroyed}</span>}
           {mark !== undefined && <span className="card-mark">{markText[mark]}</span>}
         </span>
