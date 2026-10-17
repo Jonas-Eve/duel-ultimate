@@ -372,8 +372,8 @@ même, alimenté par `toScreenModel` :
   (« Reste N », `fr.keepsLegend`). Les e2e jouent désormais depuis le détail (#107, voir « Tests de bout en bout »).
 - **Détail de carte en lecture seule (#104)** : toucher une créature du plateau adverse ou une carte de la main
   de l'autre camp (deux camps) ouvre `CardDetailSheet`, une feuille modale (`Dialog`) : coût en gros avec
-  sablier, nom, symbole du deck (`EmblemChip` en `role="img"`, « Deck Rempart »), illustration de substitution
-  de 230 px fixes (`DetailArt`, que #89 remplacera), zone d'effets défilante et focusable, attaque et riposte
+  sablier, nom, symbole du deck (`EmblemChip` en `role="img"`, « Deck Rempart »), illustration de 230 px
+  (`DetailArt`, qui affiche l'image de la carte ou le paysage de substitution), zone d'effets défilante et focusable, attaque et riposte
   (toujours affichée, même à 0) à gauche, vie courante à droite (jamais « N / max » : `CardView` n'a pas de vie
   maximale), « Fermer » de 48 px ; la carte fait 520 px, c'est `.dialog` qui défile sur un petit écran. Sans
   emplacement `actions`, aucun autre bouton : ouvrir ou fermer ne soumet rien (les actions passent par
