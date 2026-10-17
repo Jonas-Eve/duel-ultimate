@@ -182,14 +182,14 @@ describe("the swap when the main passes", () => {
     expect(c.getSnapshot().records.at(-1)!.events.some((e) => "drew" in e)).toBe(true);
   });
 
-  test("no computer is ever started: the policy is never called over a whole game", async () => {
-    const policy = vi.fn(() => 0);
-    const c = makeCampsController("rush", "bulwark", 2, { policy });
+  test("no computer is ever started: the computer is never asked for an action over a whole game", async () => {
+    const chooseAction = vi.fn(() => "concede" as const);
+    const c = makeCampsController("rush", "bulwark", 2, { chooseAction });
     mountGame(c);
     const { humanActions, snapshot } = await inAct(() => playHuman(c, randomPreview(1), 400));
     expect(humanActions).toBeGreaterThan(0);
     expect(snapshot.phase).toBe("over");
-    expect(policy).not.toHaveBeenCalled();
+    expect(chooseAction).not.toHaveBeenCalled();
   });
 });
 

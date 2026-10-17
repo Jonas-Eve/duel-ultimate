@@ -1,7 +1,7 @@
 import type { GameFactory, WasmGameLike } from "../../src/engine/session";
 import { testFactory } from "./engine";
 
-export type Method = "start_events" | "view" | "legal_actions" | "legal_actions_with_time" | "apply";
+export type Method = "start_events" | "view" | "legal_actions" | "legal_actions_with_time" | "computer_action" | "apply";
 
 export interface FaultyOptions {
   thrower?: () => never;
@@ -36,6 +36,7 @@ export function faultyFactory(failing: Method, opts: FaultyOptions = {}) {
       view: wrap("view", (seat: string) => game.view(seat)),
       legal_actions: wrap("legal_actions", () => game.legal_actions()),
       legal_actions_with_time: wrap("legal_actions_with_time", () => game.legal_actions_with_time()),
+      computer_action: wrap("computer_action", (seat: string, policy: string, draw: number) => game.computer_action(seat, policy, draw)),
       apply: wrap("apply", (a: string) => game.apply(a)),
       free: () => {
         calls.push("free");

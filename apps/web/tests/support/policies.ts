@@ -1,7 +1,6 @@
 import type { Action, ActionPreview } from "../../src/engine/types";
 import { isActivate, isAttack, isPlay } from "../../src/engine/types";
-import type { ComputerPolicy } from "../../src/game/computer";
-import type { ControllerDeps, GameController, Snapshot } from "../../src/game/controller";
+import type { ChooseAction, ControllerDeps, GameController, Snapshot } from "../../src/game/controller";
 import { mulberry32 } from "../../src/game/seed";
 import { instrumentedFactory, newSession } from "./engine";
 import type { GameFactory } from "../../src/engine/session";
@@ -19,17 +18,23 @@ export function stallRank(a: Action): number {
   throw new Error("concede has no rank: it must be excluded before ranking");
 }
 
-/** `ComputerPolicy` form: the index of the first action after a stable sort by rank. */
-export const stallPolicy: ComputerPolicy = (actions) => {
+/** The index of the first action after a stable sort by rank (concede already excluded). */
+function stallIndex(actions: readonly Action[]): number {
   let best = 0;
   for (let i = 1; i < actions.length; i++) if (stallRank(actions[i]) < stallRank(actions[best])) best = i;
   return best;
+}
+
+/** TEST ONLY, `chooseAction` form (the test injection point of `ControllerDeps`): the computer wears down too. */
+export const stallPolicy: ChooseAction = (session) => {
+  const playable = session.legalActions().filter((a) => a !== "concede");
+  return playable[stallIndex(playable)];
 };
 
 /** Preview form, for the human: sorts `snapshot.legal` AFTER excluding `concede`. Same choice as `stallPolicy`. */
 export function stallPreview(s: Snapshot): ActionPreview {
   const playable = s.legal.filter((p) => p.action !== "concede");
-  return playable[stallPolicy(playable.map((p) => p.action), () => 0)];
+  return playable[stallIndex(playable.map((p) => p.action))];
 }
 
 /** Seeded uniform human choice, never concede. */
@@ -78,7 +83,6 @@ export async function playHuman(
 export function realDeps(over: Partial<ControllerDeps> = {}, factory?: GameFactory): ControllerDeps {
   return {
     createSession: (r) => newSession(r.deckOne, r.deckTwo, r.seed, factory),
-    policy: (a, rng) => Math.floor(rng() * a.length),
     scheduler: immediateScheduler,
     now: () => 0,
     ...over,

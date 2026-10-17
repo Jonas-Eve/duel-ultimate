@@ -315,7 +315,7 @@ describe("dispose", () => {
     expect(fn).not.toHaveBeenCalled();
   });
 
-  test("dispose in the middle of the computer's chain: no apply, no legalActions, no publication afterwards", async () => {
+  test("dispose in the middle of the computer's chain: no apply, no computerAction, no publication afterwards", async () => {
     const { session, probe } = decorateSession(newSession("bulwark", "rush", 3));
     let clock = 0;
     const gates: (() => void)[] = [];
@@ -336,7 +336,7 @@ describe("dispose", () => {
     expect(probe.calls.apply).toBeGreaterThanOrEqual(1);
     expect(c.getSnapshot().phase).toBe("computer-turn");
     const applied = probe.calls.apply;
-    const listed = probe.calls.legalActions;
+    const listed = probe.calls.computerAction;
     const published = fn.mock.calls.length;
     c.dispose();
     for (let i = 0; i < 5; i++) {
@@ -345,7 +345,7 @@ describe("dispose", () => {
       await Promise.resolve();
     }
     expect(probe.calls.apply).toBe(applied);
-    expect(probe.calls.legalActions).toBe(listed);
+    expect(probe.calls.computerAction).toBe(listed);
     expect(fn.mock.calls.length).toBe(published);
     expect(probe.calls.dispose).toBe(1);
   });
@@ -426,10 +426,10 @@ describe("a fatal engine failure (carry-over of the #62 review)", () => {
 });
 
 describe("two camps", () => {
-  test("no policy is ever called, both views are present, nothing is the computer's", async () => {
-    const policy = vi.fn(stallPolicy);
+  test("the computer is never asked, both views are present, nothing is the computer's", async () => {
+    const chooseAction = vi.fn(stallPolicy);
     const { session, probe } = decorateSession(newSession("rush", "bulwark", 5));
-    const c = GameController.create(config("two-camps", "rush", "bulwark", 5), realDeps({ createSession: () => session, policy }));
+    const c = GameController.create(config("two-camps", "rush", "bulwark", 5), realDeps({ createSession: () => session, chooseAction }));
     try {
       c.start();
       const s0 = c.getSnapshot();
@@ -440,9 +440,10 @@ describe("two camps", () => {
       expect(s0.phase).toBe("human-turn");
       const { snapshot } = await playHuman(c, randomPreview(5));
       expect(snapshot.phase).toBe("over");
-      expect(policy).not.toHaveBeenCalled();
+      expect(chooseAction).not.toHaveBeenCalled();
       expect(snapshot.records.every((r) => r.by !== "computer")).toBe(true);
       expect(probe.calls.legalActions).toBe(0);
+      expect(probe.calls.computerAction).toBe(0);
       const seats = new Set(probe.timedCalls.map((t) => t.active));
       expect(seats).toEqual(new Set<Seat>(["One", "Two"]));
     } finally {
@@ -493,7 +494,7 @@ describe("two camps", () => {
 
 describe("computer mode", () => {
   test("humanSeat One, and the same pinned exhaustion with human and computer both wearing down", async () => {
-    const c = GameController.create(config("computer", "rush", "bulwark", 2), realDeps({ policy: stallPolicy }));
+    const c = GameController.create(config("computer", "rush", "bulwark", 2), realDeps({ chooseAction: stallPolicy }));
     try {
       expect(c.getSnapshot().humanSeat).toBe("One");
       c.start();
@@ -516,7 +517,9 @@ describe("the driver on engine doubles", () => {
     const s = await settle(c);
     expect(s.phase).toBe("fatal");
     expect(s.error?.code).toBe("computer_stuck");
+    expect(s.error?.fatal).toBe(true);
     expect(state.applied).toBe(0);
+    expect(state.computerActionCalls).toBe(1);
     c.dispose();
   });
 
@@ -561,18 +564,49 @@ describe("the driver on engine doubles", () => {
     c.dispose();
   });
 
-  test("concede is never played even if the policy asks for the head of the raw list", async () => {
-    const { session, state } = fakeSession({
-      activeAfter: (applied) => (applied < 2 ? "Two" : "One"),
-      legal: () => ["concede", { play: { card: 1 } }],
-    });
-    const c = GameController.create(config("computer", "rush", "bulwark", 1), realDeps({ createSession: () => session, policy: () => 0 }));
-    c.start();
-    const s = await settle(c);
-    expect(s.phase).toBe("human-turn");
-    expect(state.applied).toBe(2);
-    expect(s.records.every((r) => r.events.every((e) => !("game_won" in e)))).toBe(true);
-    c.dispose();
+  test("concede is never played: over real games the computer's steps never hold a concession", async () => {
+    let computerSteps = 0;
+    for (const [one, two] of PAIRS) {
+      for (let seed = 0; seed < 8; seed++) {
+        const { session, probe } = decorateSession(newSession(one, two, seed));
+        const c = GameController.create(config("computer", one, two, seed), realDeps({ createSession: () => session }));
+        try {
+          c.start();
+          const { snapshot } = await playHuman(c, randomPreview(seed));
+          expect(snapshot.phase, `${one}/${two} seed ${seed}`).toBe("over");
+          // The computer's applied actions are the real engine's: none is a concession.
+          expect(probe.applied).not.toContain("concede");
+          for (const r of snapshot.records.filter((x) => x.by === "computer")) {
+            computerSteps += 1;
+            expect(r.events.every((e) => !("game_won" in e) || e.game_won.reason !== "concede")).toBe(true);
+          }
+        } finally {
+          c.dispose();
+        }
+      }
+    }
+    expect(computerSteps).toBeGreaterThan(100);
+  });
+
+  test("the test injection point replaces the choice, and receives the session, the seat and the draw", async () => {
+    const seen: { actor: Seat; draw: number }[] = [];
+    const c = GameController.create(
+      config("computer", "bulwark", "rush", 3),
+      realDeps({
+        chooseAction: (session, actor, draw) => {
+          seen.push({ actor, draw });
+          return stallPolicy(session, actor, draw);
+        },
+      }),
+    );
+    try {
+      c.start();
+      await settle(c);
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((x) => x.actor === "Two" && Number.isInteger(x.draw) && x.draw >= 0 && x.draw < 2 ** 32)).toBe(true);
+    } finally {
+      c.dispose();
+    }
   });
 });
 
@@ -618,33 +652,42 @@ describe("what the controller writes into its records (mutations 2, 12c, 13a)", 
     gates.splice(0).forEach((g) => g());
     for (let i = 0; i < 5; i++) await Promise.resolve();
     expect(probe.calls.apply).toBe(0);
-    expect(probe.calls.legalActions).toBe(0);
+    expect(probe.calls.computerAction).toBe(0);
   });
 
-  test("the computer draws its randomness from mulberry32(deriveAiSeed(seed)), one draw per action", async () => {
+  test("one draw per computer action: the u32 sequence of mulberry32(deriveAiSeed(seed))", async () => {
     const seed = 21;
-    const expected = mulberry32(deriveAiSeed(seed));
-    const draws: number[] = [];
-    const reference: number[] = [];
-    const c = GameController.create(
-      config("computer", "bulwark", "rush", seed),
-      realDeps({
-        policy: (actions, rng) => {
-          const got = rng();
-          draws.push(got);
-          reference.push(expected());
-          return Math.floor(got * actions.length);
-        },
-      }),
-    );
+    const rng = mulberry32(deriveAiSeed(seed));
+    const { session, probe } = decorateSession(newSession("bulwark", "rush", seed));
+    const c = GameController.create(config("computer", "bulwark", "rush", seed), realDeps({ createSession: () => session }));
     try {
       c.start();
       await playHuman(c, randomPreview(seed));
-      expect(draws.length).toBeGreaterThan(5);
-      expect(draws).toEqual(reference);
+      const computerSteps = c.getSnapshot().records.filter((r) => r.by === "computer").length;
+      expect(computerSteps).toBeGreaterThan(5);
+      // Exactly one call, hence one draw, per computer action.
+      expect(probe.draws).toHaveLength(computerSteps);
+      expect(probe.draws).toEqual(probe.draws.map(() => Math.floor(rng() * 2 ** 32)));
     } finally {
       c.dispose();
     }
+  });
+
+  test("a game replays: same seed and same human actions give the same logs, computer included", async () => {
+    const run = async (seed: number) => {
+      const c = GameController.create(config("computer", "bulwark", "rush", seed), realDeps());
+      try {
+        c.start();
+        const { snapshot } = await playHuman(c, randomPreview(seed));
+        return snapshot.records.map((r) => ({ seq: r.seq, by: r.by, events: r.events }));
+      } finally {
+        c.dispose();
+      }
+    };
+    const first = await run(33);
+    expect(first.some((r) => r.by === "computer")).toBe(true);
+    expect(await run(33)).toEqual(first);
+    expect(await run(34)).not.toEqual(first);
   });
 });
 

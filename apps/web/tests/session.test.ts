@@ -87,6 +87,142 @@ describe("legal actions", () => {
   });
 });
 
+describe("computerAction", () => {
+  const active = (s: GameSession) => s.view("One").active;
+
+  test("returns an action the engine accepts, never concede, from the active seat", () => {
+    for (let seed = 0; seed < 10; seed++) {
+      const s = newSession("rush", "bulwark", seed);
+      try {
+        for (let i = 0; i < 300 && s.view("One").result === null; i++) {
+          const legal = s.legalActions();
+          const action = s.computerAction(active(s), (seed * 31 + i * 7919) >>> 0);
+          expect(action).not.toBe("concede");
+          expect(legal).toContainEqual(action);
+          s.apply(action);
+        }
+      } finally {
+        s.dispose();
+      }
+    }
+  });
+
+  test("the same state, seat and draw give the same action, and nothing moves", () => {
+    const s = newSession("rush", "bulwark", 4);
+    try {
+      const view = JSON.stringify(s.view("One"));
+      const legal = JSON.stringify(s.legalActions());
+      const first = s.computerAction(active(s), 123);
+      for (let i = 0; i < 5; i++) expect(s.computerAction(active(s), 123)).toEqual(first);
+      expect(JSON.stringify(s.view("One"))).toBe(view);
+      expect(JSON.stringify(s.legalActions())).toBe(legal);
+    } finally {
+      s.dispose();
+    }
+  });
+
+  test("the draw decides: over 300 draws several different actions come out", () => {
+    const s = newSession("rush", "bulwark", 4);
+    try {
+      const seen = new Set<string>();
+      for (let draw = 0; draw < 300; draw++) seen.add(JSON.stringify(s.computerAction(active(s), draw)));
+      expect(seen.size).toBeGreaterThan(1);
+    } finally {
+      s.dispose();
+    }
+  });
+
+  test("the seat that does not hold the main is refused with not_active_seat (not fatal)", () => {
+    const s = newSession("rush", "bulwark", 4);
+    try {
+      const idle = active(s) === "One" ? "Two" : "One";
+      let caught: unknown;
+      try {
+        s.computerAction(idle, 0);
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(EngineError);
+      expect((caught as EngineError).code).toBe("not_active_seat");
+      expect((caught as EngineError).fatal).toBe(false);
+      expect(s.computerAction(active(s), 0)).not.toBe("concede");
+    } finally {
+      s.dispose();
+    }
+  });
+
+  test("after the end of the game: game_over", () => {
+    const s = newSession("rush", "bulwark", 4);
+    try {
+      s.apply("concede");
+      expect(() => s.computerAction("One", 0)).toThrow(expect.objectContaining({ code: "game_over" }));
+    } finally {
+      s.dispose();
+    }
+  });
+
+  test.each([-1, 1.5, 4294967296, Number.NaN, Number.POSITIVE_INFINITY])("draw %s is refused before the binding, never reduced in silence", (draw) => {
+    const { factory, counters } = instrumentedFactory();
+    const calls: number[] = [];
+    const spying: GameFactory = (...args) => {
+      const game = factory(...args);
+      const original = game.computer_action.bind(game);
+      game.computer_action = (seat, policy, d) => {
+        calls.push(d);
+        return original(seat, policy, d);
+      };
+      return game;
+    };
+    const s = newSession("rush", "bulwark", 4, spying);
+    try {
+      let caught: unknown;
+      try {
+        s.computerAction(active(s), draw);
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(EngineError);
+      expect((caught as EngineError).code).toBe("internal_error");
+      expect(calls).toEqual([]);
+      // The refusal does not kill the session: a valid draw still works.
+      expect(s.computerAction(active(s), 0)).not.toBe("concede");
+      expect(calls).toEqual([0]);
+    } finally {
+      s.dispose();
+    }
+    expect(counters.callsAfterFree).toBe(0);
+  });
+
+  test("the bounds 0 and 4294967295 are accepted", () => {
+    const s = newSession("rush", "bulwark", 4);
+    try {
+      for (const draw of [0, 4294967295]) expect(s.computerAction(active(s), draw)).not.toBe("concede");
+    } finally {
+      s.dispose();
+    }
+  });
+
+  test("the policy sent to the binding is the closed constant \"random\"", () => {
+    const seen: string[] = [];
+    const spying: GameFactory = (...args) => {
+      const game = testFactory(...args);
+      const original = game.computer_action.bind(game);
+      game.computer_action = (seat, policy, d) => {
+        seen.push(policy);
+        return original(seat, policy, d);
+      };
+      return game;
+    };
+    const s = newSession("rush", "bulwark", 4, spying);
+    try {
+      s.computerAction(active(s), 1);
+      expect(seen).toEqual(["random"]);
+    } finally {
+      s.dispose();
+    }
+  });
+});
+
 describe("seed validation", () => {
   test.each([4294967296, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])("seed %s is refused before the factory", (seed) => {
     const calls: number[] = [];
@@ -151,6 +287,7 @@ describe("lifecycle", () => {
       () => s.legalActions(),
       () => s.legalActionsWithTime(),
       () => s.view("One"),
+      () => s.computerAction("One", 0),
       () => s.apply("concede"),
     ];
     for (const call of calls) expect(call).toThrow(SessionDisposedError);

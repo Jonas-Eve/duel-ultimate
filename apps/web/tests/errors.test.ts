@@ -58,6 +58,7 @@ describe("isFatalCode", () => {
       "game_over", "card_not_in_hand", "unknown_effect", "effect_not_applicable", "attacker_not_on_board",
       "target_not_on_board", "target_forbidden_by_provocation", "invalid_setup", "invalid_json",
       "unknown_deck", "input_too_large", "invalid_seat", "invalid_seed", "wasm_load_failed",
+      "not_active_seat", "invalid_policy",
     ]) {
       expect(isFatalCode(c)).toBe(false);
     }
@@ -97,6 +98,20 @@ const legal = (g: WasmGameLike) => JSON.parse(g.legal_actions()) as Action[];
 describe("real engine errors", () => {
   test("invalid_seat", () => {
     live(start(), (g) => expectCode(thrown(() => g.view("one")), "invalid_seat"));
+  });
+
+  test("invalid_policy and not_active_seat, and the order of the checks, from the real binding", () => {
+    live(start(), (g) => {
+      const active = (JSON.parse(g.view("One")) as { active: string }).active;
+      const idle = active === "One" ? "Two" : "One";
+      expectCode(thrown(() => g.computer_action(active, "greedy", 0)), "invalid_policy");
+      expectCode(thrown(() => g.computer_action(idle, "random", 0)), "not_active_seat");
+      expectCode(thrown(() => g.computer_action("one", "random", 0)), "invalid_seat");
+      expectCode(thrown(() => g.computer_action(active, "x".repeat(1024 * 1024 + 1), 0)), "input_too_large");
+      expect(JSON.parse(g.computer_action(active, "random", 0))).not.toBe("concede");
+      g.apply(JSON.stringify("concede"));
+      expectCode(thrown(() => g.computer_action(active, "random", 0)), "game_over");
+    });
   });
 
   test("unknown_deck", () => {

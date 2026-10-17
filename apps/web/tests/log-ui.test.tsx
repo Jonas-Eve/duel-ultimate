@@ -232,7 +232,7 @@ describe("the end screen shows the whole log", () => {
   // 220 actions rendered through jsdom: ~3.5 s alone in the full suite, 7+ s under CPU contention;
   // the default 5 s timeout flaked in CI (#77).
   test("exhaustion (pinned: rush vs bulwark, seed 2, both stalling)", async () => {
-    const c = makeController("rush", "bulwark", 2, { policy: stallPolicy });
+    const c = makeController("rush", "bulwark", 2, { chooseAction: stallPolicy });
     c.start();
     await playHuman(c, stallPreview);
     mountGame(c);

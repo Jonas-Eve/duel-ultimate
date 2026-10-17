@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, test } from "vitest";
 import { EVENT_KINDS, eventKind } from "../src/engine/types";
 import type { Action, ActionPreview, EngineEvent, PlayerView } from "../src/engine/types";
 import { DATA_VERSION } from "../src/data/starter";
+import { CLIENT_CODES, ENGINE_CODES } from "../src/engine/errors";
 import { PAIRS, initTestEngine, newSession, randomPolicy } from "./support/engine";
 import { repoRoot } from "./support/paths";
 
@@ -44,6 +45,40 @@ describe("EVENT_KINDS against the Rust source", () => {
 
   test("EVENT_KEYS of this test cover exactly EVENT_KINDS", () => {
     expect(Object.keys(EVENT_KEYS)).toEqual([...EVENT_KINDS]);
+  });
+});
+
+describe("the computer's action (#142)", () => {
+  test("the three codes of the new method are engine codes, computer_stuck is no longer a client one", () => {
+    for (const code of ["not_active_seat", "invalid_policy", "computer_stuck"]) expect(ENGINE_CODES, code).toContain(code);
+    expect(CLIENT_CODES).not.toContain("computer_stuck");
+    expect(CLIENT_CODES).toContain("computer_chain_limit");
+  });
+
+  test("the binding takes (seat, policy, draw) and its result is exactly an action `legalActions` lists", () => {
+    let checked = 0;
+    for (const [one, two] of PAIRS) {
+      for (let seed = 0; seed < 5; seed++) {
+        const s = newSession(one, two, seed);
+        try {
+          for (let i = 0; i < 400 && s.view("One").result === null; i++) {
+            const action = s.computerAction(s.view("One").active, (seed + i * 2654435761) >>> 0);
+            expect(s.legalActions().map((a) => JSON.stringify(a))).toContain(JSON.stringify(action));
+            expect(action).not.toBe("concede");
+            checked += 1;
+            s.apply(action);
+          }
+        } finally {
+          s.dispose();
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(200);
+  });
+
+  test("the Rust sources hold the three codes as literal error_json calls", () => {
+    const lib = readFileSync(resolve(repoRoot, "crates/engine-wasm/src/lib.rs"), "utf8");
+    for (const code of ["not_active_seat", "invalid_policy", "computer_stuck"]) expect(lib).toContain(`"${code}"`);
   });
 });
 

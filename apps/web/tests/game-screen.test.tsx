@@ -423,7 +423,7 @@ describe("the three ends of the game", () => {
   // 220 actions rendered through jsdom: ~3.5 s alone in the full suite, 7+ s under CPU contention;
   // the default 5 s timeout flaked in CI (#77).
   test("exhaustion (pinned case: rush against bulwark, seed 2, both sides stalling): the reason is not swapped", async () => {
-    const c = makeController("rush", "bulwark", 2, { policy: stallPolicy });
+    const c = makeController("rush", "bulwark", 2, { chooseAction: stallPolicy });
     c.start();
     const { snapshot } = await playHuman(c, stallPreview);
     const result = snapshot.views.One!.result!;
