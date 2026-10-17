@@ -38,8 +38,152 @@ const SELECTORS: [&str; 5] = [
 ];
 const WAVE1_OPERATIONS: [&str; 5] = ["Attack", "DealDamage", "Draw", "ModifyStat", "GrantKeyword"];
 
+/// Splits a Markdown table line into trimmed cells (a `|` can never be inside a cell).
+fn cells(line: &str) -> Vec<String> {
+    let t = line.trim();
+    let t = t.strip_prefix('|').unwrap_or(t);
+    let t = t.strip_suffix('|').unwrap_or(t);
+    t.split('|').map(|c| c.trim().to_string()).collect()
+}
+
+fn in_list(value: &str, list: &[&str]) -> bool {
+    list.contains(&value)
+}
+
+/// Every `, `-separated value of a cell must belong to the closed list.
+fn all_in_list(value: &str, list: &[&str]) -> bool {
+    value.split(", ").all(|v| in_list(v, list))
+}
+
 /// Checks the table of the catalog section; the error names the faulty line and element.
-fn check_catalog(_md: &str) -> Result<(), String> {
+fn check_catalog(md: &str) -> Result<(), String> {
+    let lines: Vec<&str> = md.lines().collect();
+    let start = lines
+        .iter()
+        .position(|l| l.trim_end() == SECTION_TITLE)
+        .ok_or_else(|| format!("section `{SECTION_TITLE}` manquante"))?;
+    // Only the table lines between the title and the next `## ` heading are read.
+    let mut table: Vec<(usize, &str)> = Vec::new();
+    for (i, l) in lines.iter().enumerate().skip(start + 1) {
+        if l.starts_with("## ") {
+            break;
+        }
+        if l.trim_start().starts_with('|') {
+            table.push((i + 1, l));
+        }
+    }
+    let Some(&(hline, header)) = table.first() else {
+        return Err("section du tableau sans tableau".to_string());
+    };
+    if cells(header) != HEADER {
+        return Err(format!("ligne {hline}: en-tête attendu {HEADER:?}"));
+    }
+    let Some(&(sline, sep)) = table.get(1) else {
+        return Err("ligne de séparation manquante".to_string());
+    };
+    let sep_cells = cells(sep);
+    let sep_ok = sep_cells.len() == HEADER.len()
+        && sep_cells
+            .iter()
+            .all(|c| !c.is_empty() && c.chars().all(|ch| ch == '-' || ch == ':'));
+    if !sep_ok {
+        return Err(format!("ligne {sline}: séparation à 8 colonnes attendue"));
+    }
+
+    let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut operations: BTreeSet<String> = BTreeSet::new();
+    let mut selectors: BTreeSet<String> = BTreeSet::new();
+    for &(n, line) in &table[2..] {
+        let c = cells(line);
+        let name = c.first().cloned().unwrap_or_default();
+        let at = format!("ligne {n}, élément `{name}`");
+        if c.len() != HEADER.len() {
+            return Err(format!("{at}: {} cellules au lieu de 8", c.len()));
+        }
+        if let Some(i) = c.iter().position(String::is_empty) {
+            return Err(format!("{at}: cellule vide (colonne {})", HEADER[i]));
+        }
+        let [_, family, trigger, selector, duration, usage, class, wave] =
+            <[String; 8]>::try_from(c).expect("8 cells checked above");
+        if !in_list(&family, &FAMILIES) {
+            return Err(format!("{at}: famille `{family}` hors liste fermée"));
+        }
+        if !all_in_list(&trigger, &TRIGGERS) {
+            return Err(format!("{at}: déclencheur `{trigger}` hors liste fermée"));
+        }
+        if !in_list(&duration, &DURATIONS) {
+            return Err(format!("{at}: durée `{duration}` hors liste fermée"));
+        }
+        if !in_list(&class, &CLASSES) {
+            return Err(format!("{at}: classe Φ `{class}` hors liste fermée"));
+        }
+        if !in_list(&wave, &WAVES) {
+            return Err(format!("{at}: vague `{wave}` hors liste fermée"));
+        }
+        if !seen.insert((name.clone(), family.clone())) {
+            return Err(format!("{at}: ligne en double (élément, famille)"));
+        }
+        // R5: `on_event` is reserved, never wave 1.
+        if trigger.split(", ").any(|t| t == "on_event") && wave != "réservé" {
+            return Err(format!(
+                "{at}: `on_event` n'est permis qu'en vague `réservé`"
+            ));
+        }
+        if wave == "réservé" && trigger != "on_event" {
+            return Err(format!(
+                "{at}: la vague `réservé` ne vaut que pour `on_event`"
+            ));
+        }
+        match family.as_str() {
+            "opération" => {
+                // R1
+                if !matches!(class.as_str(), "S" | "D" | "N") {
+                    return Err(format!("{at}: une opération a une classe Φ S, D ou N"));
+                }
+                if usage == "n/a" {
+                    return Err(format!("{at}: condition d'usage obligatoire"));
+                }
+                // R2
+                if class == "D" && !usage.contains("résol") {
+                    return Err(format!(
+                        "{at}: une opération D dit quand elle se résout (`résol`)"
+                    ));
+                }
+                // R3
+                if class == "N" && wave == "1" {
+                    return Err(format!("{at}: opération N interdite en vague 1"));
+                }
+                // R4
+                if class == "S" && trigger != "continuous" {
+                    return Err(format!("{at}: une opération S est `continuous` seulement"));
+                }
+                if selector != "n/a" && !all_in_list(&selector, &SELECTORS) {
+                    return Err(format!("{at}: sélecteur `{selector}` hors liste fermée"));
+                }
+                if wave == "1" {
+                    operations.insert(name);
+                }
+            }
+            "sélecteur" => {
+                if !in_list(&name, &SELECTORS) {
+                    return Err(format!("{at}: sélecteur hors liste fermée"));
+                }
+                selectors.insert(name);
+            }
+            _ => {}
+        }
+    }
+    // R6
+    for op in WAVE1_OPERATIONS {
+        if !operations.contains(op) {
+            return Err(format!("opération de vague 1 `{op}` absente du tableau"));
+        }
+    }
+    for sel in SELECTORS {
+        if !selectors.contains(sel) {
+            return Err(format!("sélecteur `{sel}` absent du tableau"));
+        }
+    }
     Ok(())
 }
 
@@ -244,7 +388,6 @@ fn committed_catalog_passes_all_checks() {
 
 #[test]
 fn catalog_lists_every_wave1_operation_and_selector() {
-    let _ = (&FAMILIES, &TRIGGERS, &DURATIONS, &CLASSES, &WAVES, &HEADER);
     let cells: BTreeSet<String> = CATALOG
         .lines()
         .filter(|l| l.trim_start().starts_with('|'))
