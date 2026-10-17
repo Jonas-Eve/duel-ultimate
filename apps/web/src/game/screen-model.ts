@@ -7,6 +7,8 @@ import type { DeckEmblem, Snapshot } from "./controller";
 export interface SideModel {
   seat: Seat;
   label: string;
+  /** The name of this side's deck (`snapshot.players[seat].name`), spoken by the deck symbol of the card detail. */
+  deckName: string;
   /** The deck symbol of this side's seat (read from the snapshot's decks), undefined = none. */
   emblem: DeckEmblem | undefined;
   hero: HeroView;
@@ -33,11 +35,12 @@ function required(view: PlayerView | undefined, seat: Seat): PlayerView {
 }
 
 /** A side from the `you` block of that seat's own view: its hand is visible, its deck is a count. */
-function ownSide(view: PlayerView, label: string, emblem: DeckEmblem | undefined, activeSeat: Seat): SideModel {
+function ownSide(view: PlayerView, label: string, deckName: string, emblem: DeckEmblem | undefined, activeSeat: Seat): SideModel {
   const you = view.you;
   return {
     seat: view.seat,
     label,
+    deckName,
     emblem,
     hero: you.hero,
     handCount: you.hand.length,
@@ -65,6 +68,7 @@ export function toScreenModel(snapshot: Snapshot): ScreenModel {
     const top: SideModel = {
       seat: "Two",
       label: `Ordinateur — ${deck("Two")}`,
+      deckName: deck("Two"),
       emblem: emblem("Two"),
       hero: opp.hero,
       handCount: opp.hand_count,
@@ -74,7 +78,7 @@ export function toScreenModel(snapshot: Snapshot): ScreenModel {
       discard: opp.discard,
       active: active === "Two",
     };
-    const bottom = ownSide(one, `Toi — ${deck("One")}`, emblem("One"), active);
+    const bottom = ownSide(one, `Toi — ${deck("One")}`, deck("One"), emblem("One"), active);
     return { top, bottom, budget: one.budget, active, bottomIsActive: active === "One" };
   }
 
@@ -82,8 +86,8 @@ export function toScreenModel(snapshot: Snapshot): ScreenModel {
   const bottomView = required(snapshot.views[active], active);
   const topView = required(snapshot.views[other(active)], other(active));
   return {
-    top: ownSide(topView, camp(topView.seat), emblem(topView.seat), active),
-    bottom: ownSide(bottomView, camp(bottomView.seat), emblem(bottomView.seat), active),
+    top: ownSide(topView, camp(topView.seat), deck(topView.seat), emblem(topView.seat), active),
+    bottom: ownSide(bottomView, camp(bottomView.seat), deck(bottomView.seat), emblem(bottomView.seat), active),
     budget: bottomView.budget,
     active,
     bottomIsActive: true,

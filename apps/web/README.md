@@ -74,7 +74,7 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
 |---|---|
 | `src/engine/` | contrat JSON typé (`types.ts`, écrit depuis les sources Rust), `GameSession` (`session.ts`, le seul accès au moteur), adaptateur `createWasmSession` (`wasm-session.ts`), chargeur mémoïsé `loadEngine` (`load.ts`), erreurs (`errors.ts`) |
 | `src/game/` | logique du client sans React ni WASM : la graine (`seed.ts`), les types de l'art (`art.ts` : `ArtInfo`, `ArtLookup`), les enregistrements de journal (`records.ts`), la politique de l'ordinateur (`computer.ts`), le contrôleur de la partie locale (`controller.ts`), le démarrage sans exception (`start.ts`) et le modèle d'écran (`screen-model.ts`) |
-| `src/ui/` | composants et textes français : écrans (`Home`, `GameScreen`, `EndScreen`, `FatalScreen`), éléments (`HeroBar`, `TimeBand`, `Board`, `CardTile`, `Hand`, `ActionBar`, `ThinkingIndicator`, `ErrorBanner`, `LogBar`, `LogHistory`), dialogues (`Dialog`, `ConfirmDialog`, `AttackSheet`, `LogDrawer`, `DiscardDialog`), textes (`fr.ts`, `errors.fr.ts`), le contexte d'art `ArtContext.tsx` (`ArtProvider`, `useArtLookup`), `consequence.ts`, l'état du flux d'attaque `attack-state.ts` et le formateur du journal `log-format.ts` |
+| `src/ui/` | composants et textes français : écrans (`Home`, `GameScreen`, `EndScreen`, `FatalScreen`), éléments (`HeroBar`, `TimeBand`, `Board`, `CardTile`, `Hand`, `ActionBar`, `ThinkingIndicator`, `ErrorBanner`, `LogBar`, `LogHistory`), dialogues (`Dialog`, `ConfirmDialog`, `AttackSheet`, `LogDrawer`, `DiscardDialog`, `CardDetailSheet`), détail de carte (`CardDetail`, `card-effects.ts`, `keywords.fr.ts`, `card-icons.tsx`), textes (`fr.ts`, `errors.fr.ts`), le contexte d'art `ArtContext.tsx` (`ArtProvider`, `useArtLookup`), `consequence.ts`, l'état du flux d'attaque `attack-state.ts` et le formateur du journal `log-format.ts` |
 | `src/App.tsx` | assemble les écrans ; le seul à lire `data/starter`, `data/art`, `data/build` et `engine/load` |
 | `src/data/starter.ts` | données `starter` importées en `?raw` |
 | `src/data/art.ts` | art optionnel du set (`art.json`, `art/`) : `buildArtIndex` (pure), `ART` (`ArtLookup`), `ART_LICENSES` ; lu par `App` seul (#101) |
@@ -342,6 +342,24 @@ même, alimenté par `toScreenModel` :
   libellé du camp nomme le deck). Contraste (WCAG 1.4.11, 3:1) : disque `--emblem-fill` sur les deux tons de
   l'illustration, glyphe `--emblem-glyph` sur le disque, anneau `--emblem-ring` contre le cadre brun ; la
   pastille est dans l'illustration, jamais collée au cadre ; gardé par `tests/emblem-contrast.test.ts`.
+- **Détail de carte en lecture seule (#104)** : toucher une créature du plateau adverse ou une carte de la main
+  de l'autre camp (deux camps) ouvre `CardDetailSheet`, une feuille modale (`Dialog`) : coût en gros avec
+  sablier, nom, symbole du deck (`EmblemChip` en `role="img"`, « Deck Rempart »), illustration de substitution
+  de 230 px fixes (`DetailArt`, que #89 remplacera), zone d'effets défilante et focusable, attaque et riposte
+  (toujours affichée, même à 0) à gauche, vie courante à droite (jamais « N / max » : `CardView` n'a pas de vie
+  maximale), « Fermer » de 48 px ; la carte fait 520 px, c'est `.dialog` qui défile sur un petit écran. Aucun
+  autre bouton : ouvrir ou fermer ne soumet rien (les actions arrivent avec #105 et #106 par l'emplacement
+  `actions`). `detail` est un état local de `GameScreen` (`{id, zone}`), la carte est relue dans le modèle à
+  chaque rendu et l'état est remis à `null` pendant le rendu si elle a disparu. Pendant le choix d'une cible,
+  un toucher sur une carte adverse la choisit (jamais le détail). Les tuiles concernées sont des
+  `<button aria-haspopup="dialog">` (`opensDialog`), nom accessible inchangé. `card-effects.ts` (pur) range
+  les champs de la carte en effets actifs (`EffectLine` : « Attaque », `attack_cost`, `force`, jamais calculés),
+  effets passifs et valeurs ; `effectLineText`/`effectLineLabel` écrivent la ligne d'effet une seule fois
+  (« Attaque (2) : inflige 1 dégât » + `.sr-only` « , pour 2 temps »). `keywords.fr.ts` est la source unique
+  des explications (Provocation), gardée par `tests/card-detail-keywords.test.ts` contre les clés d'une vraie
+  `CardView`. Annonce : nom de la carte, puis un résumé parlé (coût, valeurs, effets) et le nom du deck.
+  `Dialog` gagne `hideTitle`, `initialFocus="dialog"` et `describedBy` (optionnels), et Maj+Tab depuis le
+  conteneur remonte au dernier contrôle. `SideModel.deckName` porte le nom du deck.
 - **Sélection périmée** : si plus aucun aperçu ne soutient l'attaquant (créature morte, tour de
   l'ordinateur) ou la cible en attente, l'état est remis à zéro **pendant le rendu** (jamais par un
   `useEffect`) ; elle ne ressuscite donc pas au tour suivant.

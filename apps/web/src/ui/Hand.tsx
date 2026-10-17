@@ -14,8 +14,10 @@ interface HandProps {
   onPlay(preview: ActionPreview): void;
   /** The accessible name of the row ("Ta main", or the camp's hand in two camps). */
   label: string;
-  /** The other camp's hand in two camps: named in full, but plain tiles, never controls. */
+  /** The other camp's hand in two camps: named in full, never played; a touch only opens its detail (`onInspect`). */
   readOnly?: boolean;
+  /** Read-only hands: a touch on a card asks for its detail. */
+  onInspect?(card: CardView): void;
   /** The deck symbol of the side that owns this hand. */
   emblem?: DeckEmblem;
 }
@@ -28,12 +30,14 @@ function keepsTime(preview: ActionPreview | undefined, labels: ConsequenceLabels
 }
 
 /** A hand. Each card's cost and consequence come from its engine preview (found by card id). */
-export function Hand({ cards, legal, enabled, labels, onPlay, label, readOnly = false, emblem }: HandProps) {
+export function Hand({ cards, legal, enabled, labels, onPlay, label, readOnly = false, onInspect, emblem }: HandProps) {
   return (
     <div role="group" aria-label={label} tabIndex={0} className="row hand">
       {cards.length === 0 && <p className="empty">{fr.emptyHand}</p>}
       {cards.map((card) => {
-        if (readOnly) return <CardTile key={card.id} card={card} cost={card.cost} emblem={emblem} />;
+        if (readOnly) {
+          return <CardTile key={card.id} card={card} cost={card.cost} emblem={emblem} onPress={onInspect === undefined ? undefined : () => onInspect(card)} opensDialog={onInspect !== undefined} />;
+        }
         const preview = legal.find((p) => isPlay(p.action) && p.action.play.card === card.id);
         return (
           <CardTile

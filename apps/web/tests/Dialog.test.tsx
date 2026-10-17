@@ -103,3 +103,52 @@ describe("Dialog (reused as is by #65 and #66)", () => {
     expect(document.activeElement).toBe(trigger);
   });
 });
+
+describe("Dialog options (#104, all optional)", () => {
+  function Options({ options }: { options: { hideTitle?: boolean; initialFocus?: "first" | "dialog"; describedBy?: string } }) {
+    return (
+      <Dialog title="Titre du dialogue" onClose={() => undefined} {...options}>
+        <p id="desc">Description</p>
+        <button type="button">Premier</button>
+        <button type="button">Dernier</button>
+      </Dialog>
+    );
+  }
+
+  test("by default nothing changes: the title is visible and the first control holds the focus", () => {
+    render(<Options options={{}} />);
+    const dialog = screen.getByRole("dialog");
+    expect(screen.getByText("Titre du dialogue").classList.contains("sr-only")).toBe(false);
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Premier" }));
+    expect(dialog.getAttribute("aria-describedby")).toBeNull();
+  });
+
+  test("hideTitle keeps the title as the accessible name but visually hides it", () => {
+    render(<Options options={{ hideTitle: true }} />);
+    const title = screen.getByText("Titre du dialogue");
+    expect(title.classList.contains("sr-only")).toBe(true);
+    expect(screen.getByRole("dialog", { name: "Titre du dialogue" })).toBeTruthy();
+  });
+
+  test("describedBy points the dialog's description at the given ids", () => {
+    render(<Options options={{ describedBy: "desc" }} />);
+    expect(screen.getByRole("dialog").getAttribute("aria-describedby")).toBe("desc");
+  });
+
+  test("initialFocus 'dialog' puts the focus on the container itself", () => {
+    render(<Options options={{ initialFocus: "dialog" }} />);
+    expect(document.activeElement).toBe(screen.getByRole("dialog"));
+  });
+
+  test("with the focus on the container, Shift+Tab goes to the last control and Tab to the first", async () => {
+    const user = userEvent.setup();
+    render(<Options options={{ initialFocus: "dialog" }} />);
+    const dialog = screen.getByRole("dialog");
+    dialog.focus();
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Dernier" }));
+    dialog.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Premier" }));
+  });
+});

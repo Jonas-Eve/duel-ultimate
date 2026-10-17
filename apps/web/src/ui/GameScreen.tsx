@@ -6,6 +6,7 @@ import { ActionBar } from "./ActionBar";
 import { AttackSheet } from "./AttackSheet";
 import { deriveAttackState, previewOn } from "./attack-state";
 import { Board } from "./Board";
+import { CardDetailSheet } from "./CardDetailSheet";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { describeConsequence } from "./consequence";
 import { EndScreen } from "./EndScreen";
@@ -70,6 +71,9 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
   const [selected, setSelected] = useState<number | null>(null);
   const [pending, setPending] = useState<Target | null>(null);
   const [focusToken, setFocusToken] = useState(0);
+  // The read-only card detail: which card (by id) of which zone. Looked up in the current model on every
+  // render, and dropped during render when the card is no longer there (never by an effect).
+  const [detail, setDetail] = useState<{ id: number; zone: "opp-board" | "other-hand" } | null>(null);
   const region = useRef<HTMLElement>(null);
   // After an attack is confirmed the focus goes back to the game region: the dialog closes and
   // the tile that opened it may be gone. Runs after the dialog's own focus restoration.
@@ -124,6 +128,10 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
     controller.submit(preview);
   };
 
+  const detailCard =
+    detail === null ? undefined : (detail.zone === "opp-board" ? model.top.board : (model.top.hand ?? [])).find((c) => c.id === detail.id);
+  if (detail !== null && detailCard === undefined) setDetail(null);
+
   const attack = deriveAttackState(selected, snapshot.legal);
   if (selected !== null && attack.selected === null) {
     setSelected(null);
@@ -164,7 +172,17 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
           <p className="row-caption" aria-hidden="true">
             {fr.otherHandCaption(model.top.label)}
           </p>
-          <Hand cards={model.top.hand ?? []} legal={[]} enabled={false} labels={labels} onPlay={submit} label={names.topHand} readOnly emblem={model.top.emblem} />
+          <Hand
+            cards={model.top.hand ?? []}
+            legal={[]}
+            enabled={false}
+            labels={labels}
+            onPlay={submit}
+            label={names.topHand}
+            readOnly
+            onInspect={(card) => setDetail({ id: card.id, zone: "other-hand" })}
+            emblem={model.top.emblem}
+          />
         </>
       )}
       <Board
@@ -173,7 +191,7 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
         emblem={model.top.emblem}
         tileProps={
           attack.selected === null
-            ? undefined
+            ? (card) => ({ onPress: () => setDetail({ id: card.id, zone: "opp-board" }), opensDialog: true })
             : (card) =>
                 attack.creatureTargets.has(card.id)
                   ? { onPress: () => setPending({ creature: card.id }), mark: "target" }
@@ -222,6 +240,7 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
         onConcede={() => setConfirming(true)}
       />
       {logOpen && <LogDrawer blocks={formatBlocks(snapshot.records, ctx)} onClose={() => setLogOpen(false)} />}
+      {detail !== null && detailCard !== undefined && <CardDetailSheet card={detailCard} emblem={model.top.emblem} deckName={model.top.deckName} onClose={() => setDetail(null)} />}
       {pending !== null && pendingPreview !== undefined && (
         <AttackSheet
           summary={fr.attackSummary(attackerName, targetName(pending))}

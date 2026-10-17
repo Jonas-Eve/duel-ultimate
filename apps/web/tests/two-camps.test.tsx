@@ -56,10 +56,13 @@ describe("the screen: both hands visible, the camp holding the main at the botto
     expect(bottom.map((b) => b.getAttribute("aria-label")!.startsWith(`${mine[bottom.indexOf(b)].name}, coût`))).toEqual(mine.map(() => true));
     expect(bottom.some((b) => !b.disabled)).toBe(true);
 
-    // The other camp's hand is named in full too, but its tiles are not buttons.
-    expect(buttonsIn(`${CAMP2} : main`)).toHaveLength(0);
-    const tiles = within(group(`${CAMP2} : main`)).getAllByRole("group");
+    // The other camp's hand is named in full too; its tiles open a read-only detail (#104), they never play.
+    const tiles = buttonsIn(`${CAMP2} : main`);
     expect(tiles.map((t) => t.getAttribute("aria-label"))).toEqual(theirs.map((card) => `${baseLabel(card)}`));
+    for (const t of tiles) {
+      expect(t.getAttribute("aria-haspopup")).toBe("dialog");
+      expect(t.disabled).toBe(false);
+    }
 
     // Heroes and counters of both camps (decks are counts only).
     for (const seat of seats) {
@@ -141,8 +144,9 @@ describe("the swap when the main passes", () => {
     const nowBottom = buttonsIn(`${CAMP2} : main`);
     expect(nowBottom).toHaveLength(after.views.Two!.you.hand.length);
     expect(nowBottom.some((b) => !b.disabled)).toBe(true);
-    expect(buttonsIn(`${CAMP1} : main`)).toHaveLength(0);
-    expect(within(group(`${CAMP1} : main`)).getAllByRole("group")).toHaveLength(after.views.One!.you.hand.length);
+    const nowTop = buttonsIn(`${CAMP1} : main`);
+    expect(nowTop).toHaveLength(after.views.One!.you.hand.length);
+    for (const t of nowTop) expect(t.getAttribute("aria-haspopup")).toBe("dialog");
 
     // The vertical order really swapped: camp 2's board is below camp 1's.
     const position = (name: string) => group(name).compareDocumentPosition(group(`${CAMP2} : plateau`));

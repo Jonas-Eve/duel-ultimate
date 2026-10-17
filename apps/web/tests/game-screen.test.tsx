@@ -72,11 +72,12 @@ describe("the permanent information", () => {
       [true, v.you.board],
       [false, v.opponent.board],
     ] as const) {
+      // Mine are the attack flow's buttons (#66), the opponent's open the read-only detail (#104).
       const names = within(board(mine))
-        .getAllByRole(mine ? "button" : "group") // my creatures are the attack flow's buttons (#66)
+        .getAllByRole("button")
         .map((g) => g.getAttribute("aria-label"));
       expect(names).toEqual(cards.map((x) => label(x)));
-      for (const g of within(board(mine)).getAllByRole(mine ? "button" : "group")) {
+      for (const g of within(board(mine)).getAllByRole("button")) {
         const text = g.textContent ?? "";
         // Three values on every card, riposte included even at 0, and never a cost on a board.
         expect(g.querySelectorAll(".card-values .card-value")).toHaveLength(3);
