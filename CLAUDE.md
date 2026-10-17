@@ -70,7 +70,12 @@ Règles propres à ce repo :
 - **Tests de bout en bout** (`apps/web/e2e/*.e2e.ts`, Playwright, #68) : ils jouent le **build de
   production** (CSP, `.wasm` hachés) servi par `vite preview` sur `127.0.0.1:4173`, avec le vrai
   moteur et le vrai ordinateur, sans rien simuler ; ils lisent les libellés du DOM et ne recalculent
-  jamais un coût ni une règle. **Dérogation à « dernière version stable » (§3), consignée et validée
+  jamais un coût ni une règle. Depuis #104 à #106 une tuile n'est plus un critère de jouabilité (toute tuile ouvre le détail) :
+  les aides de `e2e/support.ts` (`openDetail`, `playFromDetail`, `tapCard`, `selectAttacker`, `attackWith`) ouvrent le détail puis
+  touchent « Jouer » ou la ligne d'attaque et lisent leur `aria-disabled`, et `e2e/detail.e2e.ts` (#107, huit cas : ouvrir et
+  fermer, jouer avec passation, attaque face à un provocateur, détail adverse en lecture seule, choix de cible, tour de
+  l'ordinateur, deux camps, 360 x 640) couvre le détail ; seul le cas du tour de l'ordinateur retient les `setTimeout` à zéro de
+  la page jusqu'à ce que le test les relâche. **Dérogation à « dernière version stable » (§3), consignée et validée
   par le propriétaire** : `@playwright/test` est épinglé à **1.56.1** (avec `playwright-core` 1.56.1,
   pair de `@axe-core/playwright`), la dernière version exécutable avec le Chromium 141 préinstallé
   dans les environnements d'agents (`/opt/pw-browsers`, aucun téléchargement possible) : chaque version

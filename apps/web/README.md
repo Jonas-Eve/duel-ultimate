@@ -362,8 +362,7 @@ même, alimenté par `toScreenModel` :
   aperçu périmé ignoré par le contrôleur). Sans aperçu (tour de l'ordinateur), « Jouer » est `aria-disabled` mais
   focalisable, un appui ne fait rien et la raison est un texte visible (`fr.playUnavailableComputer`). Échap et
   « Fermer » ne jouent rien. Écart de la revue de #92 corrigé : le nom de la tuile reprend le texte visible exact
-  (« Reste N », `fr.keepsLegend`). Les e2e (`tapCard`, `humanStep`, `wearDownStep`…) jouaient en touchant la tuile :
-  ils sont à adapter par la tâche e2e (#107).
+  (« Reste N », `fr.keepsLegend`). Les e2e jouent désormais depuis le détail (#107, voir « Tests de bout en bout »).
 - **Détail de carte en lecture seule (#104)** : toucher une créature du plateau adverse ou une carte de la main
   de l'autre camp (deux camps) ouvre `CardDetailSheet`, une feuille modale (`Dialog`) : coût en gros avec
   sablier, nom, symbole du deck (`EmblemChip` en `role="img"`, « Deck Rempart »), illustration de substitution
@@ -411,7 +410,27 @@ tactile par défaut (`apps/web/playwright.config.ts`), interactions par `tap()`.
 - **Fichiers** : `computer.e2e.ts` (cas 1 à 3 : duel entier contre l'ordinateur, humain Rempart, temps
   annoncé et payé), `two-camps.e2e.ts` (cas 4 à 6 : provocation, riposte, deux camps, les trois fins),
   `layout.e2e.ts` (cas 7 et 8 : 360 px, CSP du build, 1280 px), `cards.e2e.ts` (#95, cartes compactes :
-  boîte fixe de la face, contenu, symboles de deck, interactions, défausse « Détruite », contrôles mobiles).
+  boîte fixe de la face, contenu, symboles de deck, interactions, défausse « Détruite », contrôles mobiles),
+  `detail.e2e.ts` (#107, détail de carte : huit cas, voir ci-dessous).
+- **Le détail de carte dans les e2e (#107)** : une tuile n'est plus un critère de jouabilité (toute tuile de main ou
+  de plateau est un bouton qui ouvre le détail, même au tour de l'ordinateur) : ce qu'autorise le moteur se lit
+  sur l'état de « Jouer (N temps) » (`aria-disabled`) et de la ligne « Attaque (N) : inflige D dégâts »
+  (`aria-disabled`), jamais recalculé. Aides de `support.ts` : `openDetail` / `closeDetail` (feuille = le dialogue
+  qui contient `.card-detail`, `detailSheet`), `playFromDetail`, `tapCard` (joue la première carte dont « Jouer »
+  est actif), `selectAttacker` / `selectAttackerAt` / `hasAttacker` (ouvrent le détail d'une créature à moi et
+  touchent la ligne d'attaque : le détail se ferme, « Choisis une cible » apparaît), `attackWith`, `humanStep` et
+  `wearDownStep` bâtis dessus ; `enabledButtons` et les `aria-pressed` ont disparu. Les huit cas de
+  `detail.e2e.ts` : ouvrir, « Fermer » et Échap, focus rendu, journal inchangé ; jouer avec passation (le texte
+  « Passe la main : … aura N de temps » lu avant, vérifié sur la bande de temps et le journal après) ; attaquer face
+  à un provocateur (cibles = les seuls provocateurs, confirmation, résultat) ; détail adverse sans autre bouton que
+  « Fermer » ; toucher une carte adverse pendant le choix de cible la choisit sans ouvrir le détail ; tour de
+  l'ordinateur (détail ouvrable, « Jouer » et attaque inactifs) ; deux camps (main de l'autre camp en lecture
+  seule, aucune feuille ouverte après la passation) ; 360 x 640 (carte de 520 px, illustration de 230 px, « Fermer »
+  de 48 px atteignable en faisant défiler `.dialog`, ligne d'effet de 44 px, zone d'effets défilante, mêmes
+  contrôles mobiles sur chaque feuille). **Seule mise en scène** : le tour de l'ordinateur dure quelques
+  millisecondes, donc ce cas retient les `setTimeout` à zéro de la page (ceux sur lesquels le contrôleur cède la
+  main entre deux actions de l'ordinateur) par un script d'initialisation jusqu'à ce que le test les relâche ;
+  le moteur, l'ordinateur et l'interface restent les vrais.
 - **Graine fixe** : 42 (`SEED`, saisie dans le champ d'accueil), notée dans les tests. Une situation
   voulue (provocation, riposte) est **cherchée** par une boucle bornée (`playUntil`, au plus 40 à 60
   actions) plutôt que supposée ; si les données `starter` changent et que la graine ne la produit plus,

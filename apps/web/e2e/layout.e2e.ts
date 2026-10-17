@@ -6,7 +6,6 @@
 // screen unreachable (the start button stays disabled) so these tests could not get this far.
 import {
   SEED,
-  attackers,
   expect,
   expectMobileSound,
   expectNoHorizontalScroll,
@@ -15,6 +14,7 @@ import {
   openHome,
   ownHand,
   playToEnd,
+  selectAttacker,
   settle,
   startGame,
   tapCard,
@@ -80,7 +80,7 @@ test.describe("7. Mobile 360 px", () => {
     await startGame(page, { deck: "Ruée", seed: String(SEED) });
     expect(await tapCard(page)).toBe(true);
     await settle(page);
-    await attackers(page).first().tap();
+    expect(await selectAttacker(page)).toBeGreaterThanOrEqual(0);
     await expect(page.getByRole("button", { name: "Annuler la sélection" })).toBeVisible();
     await expectMobileSound(page, "partie, attaquant sélectionné");
     await page.getByRole("button", { name: /^Attaquer le héros/ }).tap();

@@ -8,20 +8,20 @@ import type { Locator, Page } from "@playwright/test";
 import {
   SEED,
   activeCamp,
-  attackers,
   bottomBoard,
   confirmAttack,
   creatureTargets,
-  enabledButtons,
   expect,
   expectMobileSound,
   expectNoHorizontalScroll,
   gameRegion,
+  hasAttacker,
   heroTarget,
   openHome,
   ownHand,
   playUntil,
   readJournal,
+  selectAttacker,
   settle,
   startGame,
   tapCard,
@@ -89,14 +89,7 @@ test.describe("1. Taille fixe", () => {
     // Invoke until both boards hold cards (the computer plays its own turn in between).
     await playUntil(
       page,
-      async (p) => {
-        const hands = enabledButtons(ownHand(p));
-        if ((await hands.count()) > 0) {
-          await hands.first().tap();
-          return true;
-        }
-        return tapEffect(p);
-      },
+      async (p) => (await tapCard(p)) || (await tapEffect(p)),
       async (p) => (await faces(topBoard(p)).count()) > 0 && (await faces(bottomBoard(p)).count()) > 0,
       30,
       "a creature on each board",
@@ -243,8 +236,6 @@ test.describe("4. Interactions inchangées", () => {
     await twoCamps(page);
 
     // Invoking moves the card from the hand to the board.
-    const handBefore = await enabledButtons(regionOf(page, CAMP_1, "main")).count();
-    expect(handBefore).toBeGreaterThan(0);
     const handAll = await regionOf(page, CAMP_1, "main").locator(".card").count();
     expect(await tapCard(page)).toBe(true);
     await expect(regionOf(page, CAMP_1, "main").locator(".card")).toHaveCount(handAll - 1);
@@ -254,13 +245,15 @@ test.describe("4. Interactions inchangées", () => {
     await playUntil(
       page,
       async (p) => ((await activeCamp(p)) === CAMP_1 ? (await tapCard(p)) || (await tapEffect(p)) : (await tapCard(p, /Garde du rempart/)) || (await tapEffect(p)) || (await tapCard(p))),
-      async (p) => (await activeCamp(p)) === CAMP_1 && (await attackers(p).count()) > 0 && (await topBoard(p).locator(".card-keyword").count()) > 0,
+      async (p) => (await activeCamp(p)) === CAMP_1 && (await hasAttacker(p)) && (await topBoard(p).locator(".card-keyword").count()) > 0,
       40,
       "Ruée can attack a board with a Garde du rempart",
     );
-    const attacker = attackers(page).first();
-    await attacker.tap();
-    await expect(attacker).toHaveAttribute("aria-pressed", "true");
+    // The attack starts from the creature's detail (its attack line); the creature then wears "Sélectionnée" on its tile.
+    expect(await selectAttacker(page)).toBeGreaterThanOrEqual(0);
+    await expect(page.getByText("Choisis une cible", { exact: true })).toBeVisible();
+    const attacker = bottomBoard(page).locator(".card-selected");
+    await expect(attacker).toHaveCount(1);
     await expect(attacker).toContainText("Sélectionnée");
     await expect(attacker).toHaveAccessibleName(/sélectionnée$/);
 
@@ -298,7 +291,7 @@ test.describe("5. Défausse", () => {
     await playUntil(
       page,
       async (p) => ((await activeCamp(p)) === CAMP_1 ? (await tapCard(p, /Loup hérissé/)) || (await tapCard(p)) || (await tapEffect(p)) : (await tapCard(p)) || (await tapEffect(p))),
-      async (p) => (await activeCamp(p)) === CAMP_2 && (await attackers(p).count()) > 0 && (await wolfOnBoard(p).count()) > 0,
+      async (p) => (await activeCamp(p)) === CAMP_2 && (await hasAttacker(p)) && (await wolfOnBoard(p).count()) > 0,
       60,
       "Rempart can attack a Loup hérissé of Ruée",
     );
@@ -306,7 +299,7 @@ test.describe("5. Défausse", () => {
     const ref = { width: boardBox.width, height: boardBox.height };
     expectSameBox([ref], ref, "loup sur le plateau");
 
-    await attackers(page).first().tap();
+    expect(await selectAttacker(page)).toBeGreaterThanOrEqual(0);
     await wolfOnBoard(page).first().tap();
     await confirmAttack(page);
     await settle(page);

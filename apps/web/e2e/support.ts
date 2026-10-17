@@ -155,10 +155,7 @@ export const isOver = async (page: Page): Promise<boolean> => (await endHeading(
 
 // ---- Bots driven by the DOM ----------------------------------------------------------------------
 
-export const enabledButtons = (row: Locator): Locator => row.locator("button:not([disabled])");
 const effectButtons = (page: Page): Locator => page.locator(".btn-effect:not([disabled])");
-/** Creatures of the bottom board that can attack (`aria-pressed` is set only for those). */
-export const attackers = (page: Page): Locator => bottomBoard(page).locator('button[aria-pressed]:not([aria-disabled="true"])');
 export const creatureTargets = (page: Page): Locator => topBoard(page).locator("button.card-target");
 export const heroTarget = (page: Page): Locator => page.getByRole("button", { name: /^Attaquer le héros/ });
 export const confirmAttack = async (page: Page): Promise<void> => {
@@ -166,15 +163,99 @@ export const confirmAttack = async (page: Page): Promise<void> => {
   await expect(page.getByRole("dialog", { name: "Confirmer l'attaque" })).toHaveCount(0);
 };
 
+// ---- The card detail (#104 to #106) ------------------------------------------------------------------
+// A card is touched to be read: every tile of a hand or a board opens a detail sheet (a dialog named by the card),
+// and the actions live there: "Jouer (N temps)" for a hand card, the line "Attaque (N) : inflige D dégâts" for an
+// own board creature. A tile is therefore never a criterion of playability any more: what the engine allows is
+// read from the state of those two buttons (`aria-disabled`), nothing is recomputed.
+
+/** The card detail sheet: the dialog that holds a `.card-detail` (the journal, the discard and the attack confirmation are others). */
+export const detailSheet = (page: Page): Locator => page.getByRole("dialog").filter({ has: page.locator(".card-detail") });
+/** The tiles (compact cards) of the hand of the camp that holds the main, and of each board. */
+export const handTiles = (page: Page): Locator => ownHand(page).locator(".card");
+export const ownBoardTiles = (page: Page): Locator => bottomBoard(page).locator(".card");
+export const opponentBoardTiles = (page: Page): Locator => topBoard(page).locator(".card");
+/** "Jouer (N temps)" of a hand card's sheet. */
+export const playButton = (sheet: Locator): Locator => sheet.locator(".btn-play");
+/** The attack line of an own creature's sheet, a button: "Attaque (N) : inflige D dégâts, pour N temps". */
+export const attackLine = (sheet: Locator): Locator => sheet.getByRole("button", { name: /^Attaque \(\d+\) : inflige/ });
+/** An action button is inactive (but still focusable) when the engine offers no preview of it. */
+export const isInactive = async (button: Locator): Promise<boolean> => (await button.getAttribute("aria-disabled")) === "true";
+
+/** Touches a tile and waits for its detail sheet; returns the sheet. */
+export async function openDetail(page: Page, tileLocator: Locator): Promise<Locator> {
+  await tileLocator.tap();
+  const sheet = detailSheet(page);
+  await expect(sheet).toBeVisible();
+  return sheet;
+}
+
+/** Closes the open detail sheet with its "Fermer" button. */
+export async function closeDetail(page: Page): Promise<void> {
+  const sheet = detailSheet(page);
+  await sheet.getByRole("button", { name: "Fermer" }).tap();
+  await expect(sheet).toHaveCount(0);
+}
+
 /**
- * Selects attacker `i`, then the target (a creature if `prefer` is "creature" and one is possible,
- * else the hero), reads the confirmation sheet and confirms. Returns the text of the sheet (what the
- * engine announced), or null when there is no attacker `i`.
+ * Opens the detail of a hand tile and taps "Jouer" if the engine offers it (true, the sheet closes);
+ * otherwise closes the sheet and returns false. The state of the button is the only criterion.
  */
-export async function attackWith(page: Page, i: number, prefer: "creature" | "hero"): Promise<string | null> {
-  const list = attackers(page);
-  if ((await list.count()) <= i) return null;
-  await list.nth(i).tap();
+export async function playFromDetail(page: Page, tileLocator: Locator): Promise<boolean> {
+  const sheet = await openDetail(page, tileLocator);
+  const play = playButton(sheet);
+  if (await isInactive(play)) {
+    await closeDetail(page);
+    return false;
+  }
+  await play.tap();
+  await expect(sheet).toHaveCount(0);
+  return true;
+}
+
+/**
+ * Opens the detail of the own creature at `index` of the board and taps its attack line if the engine offers
+ * it (true: the sheet closes and the creature is selected, "Choisis une cible"); otherwise closes the sheet
+ * and returns false.
+ */
+export async function selectAttackerAt(page: Page, index: number): Promise<boolean> {
+  const sheet = await openDetail(page, ownBoardTiles(page).nth(index));
+  const line = attackLine(sheet);
+  if (await isInactive(line)) {
+    await closeDetail(page);
+    return false;
+  }
+  await line.tap();
+  await expect(sheet).toHaveCount(0);
+  return true;
+}
+
+/** Selects the first own creature that can attack, from board position `from`; returns its position, or -1 if none can. */
+export async function selectAttacker(page: Page, from = 0): Promise<number> {
+  const n = await ownBoardTiles(page).count();
+  for (let i = from; i < n; i++) if (await selectAttackerAt(page, i)) return i;
+  return -1;
+}
+
+/** An own creature can attack (the sheet is opened and closed again; nothing is selected). */
+export async function hasAttacker(page: Page): Promise<boolean> {
+  const n = await ownBoardTiles(page).count();
+  for (let i = 0; i < n; i++) {
+    const sheet = await openDetail(page, ownBoardTiles(page).nth(i));
+    const can = !(await isInactive(attackLine(sheet)));
+    await closeDetail(page);
+    if (can) return true;
+  }
+  return false;
+}
+
+/**
+ * Selects the first creature that can attack, then the target (a creature if `prefer` is "creature" and one is
+ * possible, else the hero), reads the confirmation sheet and confirms. Returns the text of the sheet (what the
+ * engine announced), or null when no creature can attack.
+ */
+export async function attackWith(page: Page, prefer: "creature" | "hero"): Promise<string | null> {
+  if ((await selectAttacker(page)) < 0) return null;
   if (prefer === "creature" && (await creatureTargets(page).count()) > 0) {
     await creatureTargets(page).first().tap();
   } else if (await heroTarget(page).count()) {
@@ -196,12 +277,8 @@ export class BudgetExceeded extends Error {}
  * One action per call; returns false if nothing could be done.
  */
 export async function humanStep(page: Page): Promise<boolean> {
-  const hand = enabledButtons(ownHand(page));
-  if ((await hand.count()) > 0) {
-    await hand.first().tap();
-    return true;
-  }
-  if ((await attackWith(page, 0, "hero")) !== null) return true;
+  if (await tapCard(page)) return true;
+  if ((await attackWith(page, "hero")) !== null) return true;
   const fx = effectButtons(page);
   if ((await fx.count()) > 0) {
     await fx.first().tap();
@@ -234,14 +311,8 @@ export async function wearDownStep(page: Page): Promise<boolean> {
     await fx.first().tap();
     return true;
   }
-  const hand = enabledButtons(ownHand(page));
-  if ((await hand.count()) > 0) {
-    await hand.first().tap();
-    return true;
-  }
-  const n = await attackers(page).count();
-  for (let i = 0; i < n; i++) {
-    await attackers(page).nth(i).tap();
+  if (await tapCard(page)) return true;
+  for (let i = await selectAttacker(page); i >= 0; i = await selectAttacker(page, i + 1)) {
     if ((await creatureTargets(page).count()) > 0) {
       await creatureTargets(page).first().tap();
       await confirmAttack(page);
@@ -249,7 +320,7 @@ export async function wearDownStep(page: Page): Promise<boolean> {
     }
     await page.getByRole("button", { name: "Annuler la sélection" }).tap();
   }
-  return (await attackWith(page, 0, "hero")) !== null;
+  return (await attackWith(page, "hero")) !== null;
 }
 
 // ---- Mobile checks ------------------------------------------------------------------------------
@@ -311,12 +382,15 @@ export async function activeCamp(page: Page): Promise<string> {
   return text.replace(/^Au tour de /, "");
 }
 
-/** Taps the first playable card of the playing camp's hand whose name matches, or returns false. */
+/**
+ * Plays the first card of the playing camp's hand whose name matches, from its detail ("Jouer"), or returns
+ * false when none can be played (the state of "Jouer" decides: during the computer's turn it is inactive).
+ */
 export async function tapCard(page: Page, name?: RegExp): Promise<boolean> {
-  const cards = ownHand(page).locator("button:not([disabled])").filter(name === undefined ? {} : { has: page.locator(".card-name").filter({ hasText: name }) });
-  if ((await cards.count()) === 0) return false;
-  await cards.first().tap();
-  return true;
+  const tiles = handTiles(page).filter(name === undefined ? {} : { has: page.locator(".card-name").filter({ hasText: name }) });
+  const n = await tiles.count();
+  for (let i = 0; i < n; i++) if (await playFromDetail(page, tiles.nth(i))) return true;
+  return false;
 }
 
 /** Taps the first hero effect that can be used, or returns false. */
