@@ -60,7 +60,7 @@ fn card(n: u32) -> CreatureStats {
 fn secret_setup() -> GameSetup {
     let side = |offset: u32| PlayerSetup {
         hero: hero(),
-        cards: (0..DECK_SIZE).map(|i| card(offset + i)).collect(),
+        cards: (0..DECK_SIZE).map(|i| card(offset + i).into()).collect(),
         card_names: (0..DECK_SIZE)
             .map(|i| format!("SECRET-{}", offset + i))
             .collect(),
@@ -98,7 +98,8 @@ fn replace_card(setup: &mut GameSetup, seat: PlayerId, id: CardInstanceId) {
         health: 9,
         provocation: true,
         riposte: 9,
-    };
+    }
+    .into();
     side.card_names[index] = format!("OTHER-{}", id.0);
 }
 

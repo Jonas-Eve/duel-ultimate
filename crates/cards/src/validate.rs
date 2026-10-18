@@ -1,4 +1,4 @@
-use crate::{Card, CreatureStats, Deck, Effect, Hero};
+use crate::{Card, CardSpec, CreatureStats, Deck, Effect, Hero};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Exact number of cards in a deck.
@@ -137,6 +137,14 @@ pub fn parse_decks(json: &str) -> Result<Vec<Deck>, CardsError> {
             })?;
     }
     Ok(decks)
+}
+
+/// Validates a card of any kind: today a creature, so the bounds and the errors are those of
+/// [`validate_creature`].
+pub fn validate_card_spec(spec: &CardSpec) -> Result<(), CardsError> {
+    match spec {
+        CardSpec::Creature(stats) => validate_creature(stats),
+    }
 }
 
 pub fn validate_creature(stats: &CreatureStats) -> Result<(), CardsError> {

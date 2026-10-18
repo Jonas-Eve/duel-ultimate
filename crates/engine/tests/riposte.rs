@@ -65,12 +65,12 @@ fn arena_with(
         GameSetup {
             one: PlayerSetup {
                 hero: hero(2, n, 30),
-                cards: one_cards,
+                cards: one_cards.into_iter().map(Into::into).collect(),
                 card_names: Vec::new(),
             },
             two: PlayerSetup {
                 hero: hero(1, 1, two_max),
-                cards: two_cards,
+                cards: two_cards.into_iter().map(Into::into).collect(),
                 card_names: Vec::new(),
             },
             data_versions: vec!["fixture@1.0.0".into()],

@@ -2,7 +2,7 @@
 
 use crate::state::{CardInstance, GameState, PlayerState};
 use crate::{GameSetup, PlayerSetup, RuleSet};
-use duel_cards::{CreatureStats, Effect, Hero, HeroEffect};
+use duel_cards::{CardSpec, CreatureStats, Effect, Hero, HeroEffect};
 
 pub(crate) fn draw(cost: u32, count: u32) -> HeroEffect {
     HeroEffect {
@@ -54,9 +54,9 @@ pub(crate) fn stats_with(
 }
 
 /// 30 distinguishable cards.
-pub(crate) fn deck() -> Vec<CreatureStats> {
+pub(crate) fn deck() -> Vec<CardSpec> {
     (1..=30)
-        .map(|n| stats(n, 1 + n % 3, 1 + n % 2, 1 + n % 4))
+        .map(|n| stats(n, 1 + n % 3, 1 + n % 2, 1 + n % 4).into())
         .collect()
 }
 

@@ -1,7 +1,7 @@
 //! Public-API tests of the engine: setup, the time rule through hero effects, concede,
 //! `legal_actions`, the event log. Cases needing private state live next to `GameState`.
 
-use duel_cards::{CardsError, CreatureStats, Effect, Hero, HeroEffect, MAX_STAT};
+use duel_cards::{CardSpec, CardsError, CreatureStats, Effect, Hero, HeroEffect, MAX_STAT};
 use duel_engine::{
     Action, CardInstanceId, Event, GameSetup, GameState, PlayerId, PlayerSetup, RuleError, RuleSet,
     SetupError, Target, WinReason, apply, legal_actions, new_game,
@@ -39,12 +39,12 @@ fn setup(one: Hero, two: Hero) -> GameSetup {
     GameSetup {
         one: PlayerSetup {
             hero: one,
-            cards: cards(),
+            cards: cards().into_iter().map(Into::into).collect(),
             card_names: Vec::new(),
         },
         two: PlayerSetup {
             hero: two,
-            cards: cards(),
+            cards: cards().into_iter().map(Into::into).collect(),
             card_names: Vec::new(),
         },
         data_versions: vec!["fixture@1.0.0".into()],
@@ -237,11 +237,11 @@ fn invalid_data_is_rejected_at_setup_without_panicking() {
     assert!(matches!(e, CardsError::WrongDeckSize { found: 29, .. }));
     let e = bad(&|s| s.one.hero.starting_hand = 31);
     assert!(matches!(e, CardsError::StartingHandExceedsDeck { .. }));
-    let e = bad(&|s| s.one.cards[3].cost = 0);
+    let e = bad(&|s| stats_mut(&mut s.one.cards[3]).cost = 0);
     assert_eq!(e, CardsError::CostBelowOne { field: "cost" });
-    let e = bad(&|s| s.two.cards[0].force = 0);
+    let e = bad(&|s| stats_mut(&mut s.two.cards[0]).force = 0);
     assert_eq!(e, CardsError::NonPositiveStat { field: "force" });
-    let e = bad(&|s| s.one.cards[5].riposte = MAX_STAT + 1);
+    let e = bad(&|s| stats_mut(&mut s.one.cards[5]).riposte = MAX_STAT + 1);
     assert_eq!(
         e,
         CardsError::StatTooHigh {
@@ -250,7 +250,7 @@ fn invalid_data_is_rejected_at_setup_without_panicking() {
             max: MAX_STAT
         }
     );
-    let e = bad(&|s| s.two.cards[0].health = MAX_STAT + 1);
+    let e = bad(&|s| stats_mut(&mut s.two.cards[0]).health = MAX_STAT + 1);
     assert!(matches!(
         e,
         CardsError::StatTooHigh {
@@ -633,8 +633,8 @@ fn flat_duel(cost: u32, two_max: u32) -> GameState {
         hero(2, 3, 8, vec![draw(1, 1)]),
         hero(1, 1, two_max, vec![draw(1, 1)]),
     );
-    s.one.cards = flat_cards(cost);
-    s.two.cards = flat_cards(cost);
+    s.one.cards = flat_cards(cost).into_iter().map(Into::into).collect();
+    s.two.cards = flat_cards(cost).into_iter().map(Into::into).collect();
     new_game(s, 7).unwrap().0
 }
 
@@ -805,7 +805,7 @@ fn only_the_active_players_hand_is_playable() {
 #[test]
 fn a_hero_without_effects_can_still_play_its_hand() {
     let mut s = setup(hero(2, 3, 8, vec![]), hero(1, 1, 8, vec![draw(1, 1)]));
-    s.one.cards = flat_cards(1);
+    s.one.cards = flat_cards(1).into_iter().map(Into::into).collect();
     let (mut state, _) = new_game(s, 3).unwrap();
     assert_eq!(state.winner(), None);
     for _ in 0..2 {
@@ -879,8 +879,14 @@ fn armed_with(
         hero(1, 1, two_max, vec![draw(1, 1)]),
     );
     s.rules = rules;
-    s.one.cards = attackers(force, attack_cost);
-    s.two.cards = attackers(force, attack_cost);
+    s.one.cards = attackers(force, attack_cost)
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    s.two.cards = attackers(force, attack_cost)
+        .into_iter()
+        .map(Into::into)
+        .collect();
     s.two.hero.health = two_health;
     let (mut state, _) = new_game(s, 7).unwrap();
     play_first(&mut state);
@@ -1057,8 +1063,8 @@ fn both_armed() -> (GameState, CardInstanceId, CardInstanceId) {
         hero(2, 1, 8, vec![draw(1, 1)]),
         hero(1, 1, 8, vec![draw(1, 1)]),
     );
-    s.one.cards = attackers(1, 1);
-    s.two.cards = attackers(1, 1);
+    s.one.cards = attackers(1, 1).into_iter().map(Into::into).collect();
+    s.two.cards = attackers(1, 1).into_iter().map(Into::into).collect();
     let (mut state, _) = new_game(s, 7).unwrap();
     play_first(&mut state); // One summons and hands over (cost 1 = budget 1)
     play_first(&mut state); // Two does the same
@@ -1363,6 +1369,13 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 /// `(winner, reason, number of events, FNV-1a of the events as JSON)` per seed 0..20,
 /// recorded on the engine as merged by S1, before creatures became attackable. Attacking a
 /// hero must keep producing exactly these games.
+/// The stats of a card, to edit them in place (`CardSpec` has a single variant for now).
+fn stats_mut(spec: &mut CardSpec) -> &mut CreatureStats {
+    match spec {
+        CardSpec::Creature(stats) => stats,
+    }
+}
+
 const S1_GOLDEN: [(PlayerId, WinReason, usize, u64); 20] = [
     (PlayerId::One, WinReason::HeroDown, 178, 0x3b151a1a9605c44e),
     (PlayerId::One, WinReason::HeroDown, 177, 0x8b94d569b261925e),
@@ -1659,8 +1672,8 @@ fn skirmish(one: CreatureStats, two: CreatureStats, rounds: usize, two_max: u32)
         hero(2, 1, 8, vec![draw(1, 1)]),
         hero(1, 1, two_max, vec![draw(1, 1)]),
     );
-    s.one.cards = vec![one; 30];
-    s.two.cards = vec![two; 30];
+    s.one.cards = vec![one; 30].into_iter().map(Into::into).collect();
+    s.two.cards = vec![two; 30].into_iter().map(Into::into).collect();
     let (mut state, _) = new_game(s, 7).unwrap();
     for _ in 0..rounds {
         play_first(&mut state);
@@ -1789,8 +1802,14 @@ fn a_creature_attack_never_ends_the_game_by_hero_down() {
         hero(2, 1, 8, vec![draw(1, 1)]),
         hero(1, 1, 8, vec![draw(1, 1)]),
     );
-    s.one.cards = vec![stats(1, 9, 1, 3); 30];
-    s.two.cards = vec![stats(1, 1, 1, 1); 30];
+    s.one.cards = vec![stats(1, 9, 1, 3); 30]
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    s.two.cards = vec![stats(1, 1, 1, 1); 30]
+        .into_iter()
+        .map(Into::into)
+        .collect();
     s.two.hero.health = 1;
     let (mut state, _) = new_game(s, 7).unwrap();
     play_first(&mut state);
@@ -2098,8 +2117,11 @@ fn lone_card_duel_with(rules: RuleSet, creature: CreatureStats) -> GameState {
     };
     let mut s = setup(lone(2), lone(1));
     s.rules = rules;
-    s.one.cards = vec![creature.clone(); 30];
-    s.two.cards = vec![creature; 30];
+    s.one.cards = vec![creature.clone(); 30]
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    s.two.cards = vec![creature; 30].into_iter().map(Into::into).collect();
     new_game(s, 7).unwrap().0
 }
 

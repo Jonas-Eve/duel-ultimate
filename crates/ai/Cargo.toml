@@ -12,4 +12,5 @@ rand_chacha.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+duel-cards.workspace = true
 serde_json.workspace = true

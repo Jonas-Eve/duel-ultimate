@@ -4,17 +4,17 @@ use crate::rules::{self, Event};
 use crate::ruleset::{RuleSet, RuleSetError};
 use crate::state::{CardInstance, CardInstanceId, GameState, PlayerId, PlayerState};
 use duel_cards::{
-    CardsError, CreatureStats, Hero, validate_card_names, validate_creature, validate_deck_shape,
+    CardSpec, CardsError, Hero, validate_card_names, validate_card_spec, validate_deck_shape,
     validate_hero,
 };
 use serde::{Deserialize, Serialize};
 
-/// One side of a game: a hero and the resolved stats of its 30 cards, in deck order.
+/// One side of a game: a hero and the validated cards (`CardSpec`) of its 30 slots, in deck order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlayerSetup {
     pub hero: Hero,
-    pub cards: Vec<CreatureStats>,
+    pub cards: Vec<CardSpec>,
     /// Optional display names, parallel to `cards` (same order). Absent or empty: no names.
     /// Presentation only: no rule, formula or draw reads them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -60,7 +60,7 @@ fn validate_side(side: &PlayerSetup) -> Result<(), CardsError> {
     validate_hero(&side.hero)?;
     validate_deck_shape(&side.hero, side.cards.len())?;
     validate_card_names(&side.card_names, side.cards.len())?;
-    side.cards.iter().try_for_each(validate_creature)
+    side.cards.iter().try_for_each(validate_card_spec)
 }
 
 /// Builds a player's pile in deck order; `next_id` runs on across both players so that ids
@@ -72,7 +72,8 @@ fn build_side(side: PlayerSetup, next_id: &mut u32) -> PlayerState {
     let deck = side
         .cards
         .into_iter()
-        .map(|stats| {
+        .map(|spec| {
+            let CardSpec::Creature(stats) = spec;
             let id = CardInstanceId(*next_id);
             *next_id += 1;
             CardInstance {
@@ -168,7 +169,11 @@ mod tests {
     /// the distinct costs 1..=30, so a name says which stats it must sit next to.
     fn named(mut setup: GameSetup) -> GameSetup {
         for side in [&mut setup.one, &mut setup.two] {
-            side.card_names = side.cards.iter().map(|s| format!("c{}", s.cost)).collect();
+            side.card_names = side
+                .cards
+                .iter()
+                .map(|s| format!("c{}", s.creature().cost))
+                .collect();
         }
         setup
     }
@@ -260,7 +265,7 @@ mod tests {
             .cards
             .iter()
             .rev()
-            .map(|c| format!("c{}", c.cost))
+            .map(|c| format!("c{}", c.creature().cost))
             .collect();
         let (state, _) = new_game(s, 5).unwrap();
         for card in &state.one.deck {

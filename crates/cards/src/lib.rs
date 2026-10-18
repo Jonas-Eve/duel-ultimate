@@ -23,11 +23,11 @@ pub use art::{
     ART_LICENSES, ArtEntry, ArtError, ArtFormat, ArtLicense, MAX_ART_AUTHOR_LEN, MAX_ART_DOC_BYTES,
     MAX_ART_SOURCE_LEN, parse_art,
 };
-pub use card::{Card, CreatureStats};
+pub use card::{Card, CardSpec, CreatureStats};
 pub use deck::Deck;
 pub use hero::{Effect, Hero, HeroEffect};
 pub use validate::{
     CardsError, DECK_SIZE, MAX_HERO_EFFECTS, MAX_NAME_LEN, MAX_STAT, parse_cards, parse_decks,
-    resolve_deck, resolve_deck_named, validate_card_names, validate_creature, validate_deck_shape,
-    validate_hero,
+    resolve_deck, resolve_deck_named, validate_card_names, validate_card_spec, validate_creature,
+    validate_deck_shape, validate_hero,
 };

@@ -99,12 +99,12 @@ fn game(
         GameSetup {
             one: PlayerSetup {
                 hero: one.0,
-                cards: one.1,
+                cards: one.1.into_iter().map(Into::into).collect(),
                 card_names: Vec::new(),
             },
             two: PlayerSetup {
                 hero: two.0,
-                cards: two.1,
+                cards: two.1.into_iter().map(Into::into).collect(),
                 card_names: Vec::new(),
             },
             data_versions: vec!["fixture@1.0.0".into()],
