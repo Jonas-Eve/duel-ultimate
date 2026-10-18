@@ -4,13 +4,13 @@
 //! The current health (`stats.health`) is not an effective value and stays read directly.
 //!
 //! Scanned: `crates/engine/src/*.rs`, the text before the first `#[cfg(test)]` of each file.
-//! Skipped: `testing.rs` and `reference.rs` (compiled under `cfg(test)` only; the frozen oracle
-//! of #128 reads `.stats.` on purpose), and, in `effects.rs`, the body of `effective` alone.
+//! Skipped: `testing.rs` (compiled under `cfg(test)` only), and, in `effects.rs`, the body of
+//! `effective` alone.
 
 use std::fs;
 use std::path::PathBuf;
 
-const SKIPPED_FILES: [&str; 2] = ["testing.rs", "reference.rs"];
+const SKIPPED_FILES: [&str; 1] = ["testing.rs"];
 /// The files that carry the `CreatureStats` type: the only ones that may name it as a pattern.
 const STATS_TYPE_FILES: [&str; 2] = ["setup.rs", "state.rs"];
 const EFFECTIVE_SIGNATURE: &str = "pub(crate) fn effective(";
