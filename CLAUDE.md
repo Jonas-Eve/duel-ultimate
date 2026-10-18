@@ -77,7 +77,7 @@ Règles propres à ce repo :
   fermer, jouer avec passation, attaque face à un provocateur, détail adverse en lecture seule, choix de cible, tour de
   l'ordinateur, deux camps, 360 x 640) couvre le détail, et `e2e/greedy-computer.e2e.ts` (#162, quinze cas contre
   l'ordinateur gourmand : duels entiers graines 42, 7 et 1234 avec chaque deck, une seule annonce de fin de chaîne
-  (`MutationObserver`), déterminisme du journal par graine, « Rejouer », 360 x 640, `Math.random` jamais appelé en partie) ; seul le cas du tour de l'ordinateur retient les `setTimeout` à zéro de
+  (`MutationObserver`), déterminisme du journal par graine, « Rejouer », 360 x 640, `Math.random` jamais appelé en partie), et `e2e/rules.e2e.ts` (#174, riposte du héros, avertissement avant confirmation, limite de plateau et raison, sept tests dont deux duels contre l'ordinateur : le build joue les règles standard, rien n'est épinglé, les situations sont cherchées par des boucles bornées) ; seul le cas du tour de l'ordinateur retient les `setTimeout` à zéro de
   la page jusqu'à ce que le test les relâche. **Dérogation à « dernière version stable » (§3), consignée et validée
   par le propriétaire** : `@playwright/test` est épinglé à **1.56.1** (avec `playwright-core` 1.56.1,
   pair de `@axe-core/playwright`), la dernière version exécutable avec le Chromium 141 préinstallé

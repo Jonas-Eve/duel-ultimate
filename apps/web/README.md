@@ -449,7 +449,13 @@ tactile par défaut (`apps/web/playwright.config.ts`), interactions par `tap()`.
   l'ordinateur, une seule annonce de fin de chaîne observée par `MutationObserver` avec son nombre d'actions égal
   aux lignes du journal, même graine et mêmes choix humains donnent le même journal, « Rejouer » et retour à
   l'accueil, 360 x 640 sans défilement horizontal, aucun appel à `Math.random` pendant une partie ; le bruit, `--policy`
-  et le rapport du simulateur sont couverts par les tests CLI, pas ici).
+  et le rapport du simulateur sont couverts par les tests CLI, pas ici),
+  `rules.e2e.ts` (#174, riposte du héros et limite de plateau, six cas en sept tests : attaque non létale du héros
+  (avertissement « La créature qui attaque sera détruite. » lu avant de confirmer, attaquant à la défausse et au journal),
+  attaque létale (aucun avertissement, ni riposte ni mort de l'attaquant), plateau plein (« Jouer » grisé, focalisable,
+  raison en texte, une carte jouable ailleurs le reste), mêmes textes pour chaque camp, duels entiers contre l'ordinateur
+  sans pose refusée, 360 x 640 avec bordure, 44 px et axe). Le build ne reçoit aucune règle (standard) : rien n'est
+  épinglé, chaque situation est cherchée par une boucle bornée ; aides `peekHeroAttack` et `playUntilBoardFull`).
 - **Le détail de carte dans les e2e (#107)** : une tuile n'est plus un critère de jouabilité (toute tuile de main ou
   de plateau est un bouton qui ouvre le détail, même au tour de l'ordinateur) : ce qu'autorise le moteur se lit
   sur l'état de « Jouer (N temps) » (`aria-disabled`) et de la ligne « Attaque (N) : inflige D dégâts »

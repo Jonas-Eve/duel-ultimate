@@ -433,3 +433,52 @@ export async function playUntil(page: Page, step: (p: Page) => Promise<boolean>,
   }
   throw new Error(`not reached within ${max} actions: ${what}`);
 }
+
+// ---- Hero riposte and board limit (#174) ---------------------------------------------------------------
+
+export const attackSheet = (page: Page): Locator => page.getByRole("dialog", { name: "Confirmer l'attaque" });
+
+/**
+ * Selects the first creature that can attack, touches the hero as the target and READS the text of the
+ * "Confirmer l'attaque" sheet without answering it: the caller confirms or cancels. Returns the text, or
+ * null when no creature can attack (nothing is left selected then). Fails if the hero is not a target.
+ */
+export async function peekHeroAttack(page: Page): Promise<string | null> {
+  if ((await selectAttacker(page)) < 0) return null;
+  await expect(heroTarget(page), "the hero is a possible target (no provocation in the way)").toHaveCount(1);
+  await heroTarget(page).tap();
+  await expect(attackSheet(page)).toBeVisible();
+  return attackSheet(page).innerText();
+}
+
+/** Answers the sheet read by `peekHeroAttack` with "Annuler" and drops the selection: nothing was played. */
+export async function cancelHeroAttack(page: Page): Promise<void> {
+  await attackSheet(page).getByRole("button", { name: "Annuler" }).tap();
+  await expect(attackSheet(page)).toHaveCount(0);
+  await page.getByRole("button", { name: "Annuler la sélection" }).tap();
+}
+
+/** The sentence the board limit gives as the reason of an inactive "Jouer" (read in the sheet, never computed). */
+export const BOARD_FULL_TEXT = "Le plateau est plein : aucune créature de plus ne peut y être posée.";
+
+/**
+ * Plays `step` until the first card of the hand of the camp that holds the main (`camp`, any camp if omitted)
+ * has an inactive "Jouer" whose sheet gives the board-full reason, at most `max` actions (the sheet is closed
+ * again). `BudgetExceeded` names what to look at. Reads the DOM only: the limit is never counted here.
+ */
+export async function playUntilBoardFull(page: Page, step: (p: Page) => Promise<boolean>, max: number, camp?: string): Promise<number> {
+  for (let n = 0; n <= max; n++) {
+    await settle(page);
+    if (await isOver(page)) throw new Error(`the game ended after ${n} actions before a board was full`);
+    // An empty hand has nothing to ask about (the step draws with a hero effect and the loop looks again).
+    if ((camp === undefined || (await activeCamp(page)) === camp) && (await handTiles(page).count()) > 0) {
+      const sheet = await openDetail(page, handTiles(page).first());
+      const full = (await isInactive(playButton(sheet))) && ((await sheet.textContent()) ?? "").includes(BOARD_FULL_TEXT);
+      await closeDetail(page);
+      if (full) return n;
+    }
+    if (n === max) break;
+    if (!(await step(page))) throw new Error(`no action available after ${n} actions, before a board was full`);
+  }
+  throw new BudgetExceeded(`no board was full within ${max} actions (look at ${camp ?? "the camp that plays"}: its hand and its board)`);
+}
