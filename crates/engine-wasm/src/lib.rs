@@ -342,6 +342,11 @@ mod tests {
         Duel::from_json(&setup_value().to_string(), 1).unwrap()
     }
 
+    fn message(err: &str) -> String {
+        let v: Value = serde_json::from_str(err).unwrap();
+        v["message"].as_str().unwrap().to_string()
+    }
+
     fn code(err: &str) -> String {
         let v: Value = serde_json::from_str(err).expect("errors are JSON");
         assert!(
@@ -632,25 +637,27 @@ mod tests {
 
     #[test]
     fn computer_action_is_accepted_by_apply_and_is_never_concede_over_200_games() {
-        for seed in 0..200u32 {
-            let mut game = starter(seed);
-            let mut draw = seed.wrapping_mul(2_654_435_761);
-            let mut steps = 0;
-            while !is_over(&game) {
-                let seat = active_seat(&game);
-                draw = draw.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                let action = game.computer_action_json(seat, "random", draw).unwrap();
-                assert_ne!(action, r#""concede""#, "seed {seed}");
-                let legal: Value =
-                    serde_json::from_str(&game.legal_actions_json().unwrap()).unwrap();
-                let parsed: Value = serde_json::from_str(&action).unwrap();
-                assert!(
-                    legal.as_array().unwrap().contains(&parsed),
-                    "seed {seed}: {action}"
-                );
-                game.apply_json(&action).unwrap();
-                steps += 1;
-                assert!(steps < 2000, "seed {seed}: the game does not end");
+        for policy in COMPUTER_POLICIES {
+            for seed in 0..200u32 {
+                let mut game = starter(seed);
+                let mut draw = seed.wrapping_mul(2_654_435_761);
+                let mut steps = 0;
+                while !is_over(&game) {
+                    let seat = active_seat(&game);
+                    draw = draw.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    let action = game.computer_action_json(seat, policy, draw).unwrap();
+                    assert_ne!(action, r#""concede""#, "{policy} seed {seed}");
+                    let legal: Value =
+                        serde_json::from_str(&game.legal_actions_json().unwrap()).unwrap();
+                    let parsed: Value = serde_json::from_str(&action).unwrap();
+                    assert!(
+                        legal.as_array().unwrap().contains(&parsed),
+                        "{policy} seed {seed}: {action}"
+                    );
+                    game.apply_json(&action).unwrap();
+                    steps += 1;
+                    assert!(steps < 2000, "{policy} seed {seed}: the game does not end");
+                }
             }
         }
     }
@@ -659,10 +666,12 @@ mod tests {
     fn computer_action_is_a_pure_function_of_state_seat_policy_and_draw() {
         let game = starter(3);
         let seat = active_seat(&game);
-        for draw in [0, 1, 7, 99, u32::MAX] {
-            let a = game.computer_action_json(seat, "random", draw).unwrap();
-            let b = game.computer_action_json(seat, "random", draw).unwrap();
-            assert_eq!(a, b);
+        for policy in COMPUTER_POLICIES {
+            for draw in [0, 1, 7, 99, u32::MAX] {
+                let a = game.computer_action_json(seat, policy, draw).unwrap();
+                let b = game.computer_action_json(seat, policy, draw).unwrap();
+                assert_eq!(a, b, "{policy}");
+            }
         }
     }
 
@@ -675,8 +684,10 @@ mod tests {
             probed.legal_actions_json().unwrap(),
             probed.view_json(seat).unwrap(),
         );
-        for draw in 0..50 {
-            probed.computer_action_json(seat, "random", draw).unwrap();
+        for policy in COMPUTER_POLICIES {
+            for draw in 0..50 {
+                probed.computer_action_json(seat, policy, draw).unwrap();
+            }
         }
         assert_eq!(probed.legal_actions_json().unwrap(), legal);
         assert_eq!(probed.view_json(seat).unwrap(), view);
@@ -710,9 +721,23 @@ mod tests {
     fn computer_action_refuses_a_policy_outside_the_closed_list() {
         let game = starter(1);
         let seat = active_seat(&game);
-        for bad in ["greedy", "Random", "", "random ", "random\0"] {
+        for bad in [
+            "unknown",
+            "Random",
+            "Greedy",
+            "",
+            "random ",
+            "greedy\0",
+            "noisy",
+            "defensive",
+        ] {
             let err = game.computer_action_json(seat, bad, 0).unwrap_err();
             assert_eq!(code(&err), "invalid_policy", "{bad:?}");
+            let message = message(&err);
+            assert!(
+                message.contains("random") && message.contains("greedy"),
+                "{message}"
+            );
         }
     }
 
@@ -721,10 +746,12 @@ mod tests {
         let game = starter(1);
         let seat = active_seat(&game);
         let huge = "x".repeat(MAX_INPUT_BYTES + 1);
-        assert_eq!(
-            code(&game.computer_action_json(&huge, "random", 0).unwrap_err()),
-            "input_too_large"
-        );
+        for policy in COMPUTER_POLICIES {
+            assert_eq!(
+                code(&game.computer_action_json(&huge, policy, 0).unwrap_err()),
+                "input_too_large"
+            );
+        }
         assert_eq!(
             code(&game.computer_action_json(seat, &huge, 0).unwrap_err()),
             "input_too_large"
@@ -749,14 +776,14 @@ mod tests {
         assert_eq!(
             code(
                 &game
-                    .computer_action_json("nobody", "greedy", 0)
+                    .computer_action_json("nobody", "unknown", 0)
                     .unwrap_err()
             ),
             "invalid_seat"
         );
         // The policy is judged before whose turn it is.
         assert_eq!(
-            code(&game.computer_action_json(idle, "greedy", 0).unwrap_err()),
+            code(&game.computer_action_json(idle, "unknown", 0).unwrap_err()),
             "invalid_policy"
         );
         // Whose turn it is, on a running game.
@@ -764,17 +791,24 @@ mod tests {
             code(&game.computer_action_json(idle, "random", 0).unwrap_err()),
             "not_active_seat"
         );
+        assert_eq!(
+            code(&game.computer_action_json(idle, "greedy", 0).unwrap_err()),
+            "not_active_seat"
+        );
         // A finished game is `game_over` for either seat, before the turn check.
         game.apply_json(r#""concede""#).unwrap();
-        for seat in ["One", "Two"] {
-            assert_eq!(
-                code(&game.computer_action_json(seat, "random", 0).unwrap_err()),
-                "game_over"
-            );
+        for policy in COMPUTER_POLICIES {
+            for seat in ["One", "Two"] {
+                assert_eq!(
+                    code(&game.computer_action_json(seat, policy, 0).unwrap_err()),
+                    "game_over",
+                    "{policy}"
+                );
+            }
         }
         // ... but the policy is still judged first.
         assert_eq!(
-            code(&game.computer_action_json("One", "greedy", 0).unwrap_err()),
+            code(&game.computer_action_json("One", "unknown", 0).unwrap_err()),
             "invalid_policy"
         );
     }
@@ -806,6 +840,64 @@ mod tests {
                 n > expected / 2 && n < expected * 2,
                 "{action}: {n} / {expected}"
             );
+        }
+    }
+
+    #[test]
+    fn computer_policies_all_resolve_in_the_ai_registry() {
+        for policy in COMPUTER_POLICIES {
+            assert!(duel_ai::policy_named(policy).is_some(), "{policy}");
+        }
+    }
+
+    /// `n` states of games at different depths (different seeds), all with a playable turn.
+    fn sampled_states(n: u32) -> Vec<Duel> {
+        let mut states = Vec::new();
+        for seed in 0..n {
+            let mut game = starter(seed);
+            for step in 0..(seed % 17) {
+                if is_over(&game) {
+                    break;
+                }
+                let seat = active_seat(&game);
+                let action = game
+                    .computer_action_json(seat, "random", seed * 31 + step)
+                    .unwrap();
+                game.apply_json(&action).unwrap();
+            }
+            if !is_over(&game) {
+                states.push(game);
+            }
+        }
+        states
+    }
+
+    #[test]
+    fn greedy_ignores_the_draw() {
+        let states = sampled_states(20);
+        assert!(states.len() >= 10);
+        for game in &states {
+            let seat = active_seat(game);
+            let first = game.computer_action_json(seat, "greedy", 0).unwrap();
+            for draw in [1, 7, 99, u32::MAX] {
+                assert_eq!(
+                    game.computer_action_json(seat, "greedy", draw).unwrap(),
+                    first
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn greedy_agrees_with_the_simulator_policy() {
+        let states = sampled_states(50);
+        assert!(states.len() >= 25);
+        for game in &states {
+            let seat = active_seat(game);
+            let from_binding = game.computer_action_json(seat, "greedy", 0).unwrap();
+            let mut rng = rng_from_draw(0);
+            let direct = choose(&game.state, &duel_ai::greedy_policy, &mut rng).unwrap();
+            assert_eq!(from_binding, to_json(&direct).unwrap());
         }
     }
 
