@@ -15,7 +15,10 @@ fn parse_one(json: &str) -> Result<Card, CardsError> {
 }
 
 fn mobile(kind: &str) -> String {
-    unit_json(kind, r#","force":3,"attack_cost":4,"provocation":true,"riposte":1"#)
+    unit_json(
+        kind,
+        r#","force":3,"attack_cost":4,"provocation":true,"riposte":1"#,
+    )
 }
 
 fn invalid(source: CardsError) -> CardsError {
@@ -74,9 +77,7 @@ fn a_spec_with_kind_unit_or_creature_is_read() {
         let written = serde_json::to_string(&spec).unwrap();
         assert!(!written.contains("kind"), "{written}");
     }
-    assert!(
-        serde_json::from_str::<CardSpec>(r#"{"kind":"spell","cost":1,"health":1}"#).is_err()
-    );
+    assert!(serde_json::from_str::<CardSpec>(r#"{"kind":"spell","cost":1,"health":1}"#).is_err());
 }
 
 #[test]
@@ -203,7 +204,10 @@ fn an_immobile_spec_is_written_without_force_and_attack_cost() {
         json,
         r#"{"cost":2,"health":5,"provocation":false,"riposte":0,"immobile":true}"#
     );
-    assert_eq!(serde_json::from_str::<CardSpec>(&json).unwrap(), immobile_spec());
+    assert_eq!(
+        serde_json::from_str::<CardSpec>(&json).unwrap(),
+        immobile_spec()
+    );
     let tagged = CardSpec::Unit(UnitSpec {
         tags: vec!["bâtiment".into()],
         ..match immobile_spec() {
@@ -228,7 +232,9 @@ fn an_immobile_spec_with_force_is_refused_by_serde() {
             "attack_cost",
         ),
     ] {
-        let error = serde_json::from_str::<CardSpec>(json).unwrap_err().to_string();
+        let error = serde_json::from_str::<CardSpec>(json)
+            .unwrap_err()
+            .to_string();
         assert!(error.contains(field), "{error}");
         assert!(error.contains("immobile"), "{error}");
     }

@@ -24,7 +24,8 @@ fn invalid(source: CardsError) -> CardsError {
 
 #[test]
 fn tags_are_optional_and_omitted_when_empty() {
-    let plain = r#"[{"kind":"unit","id":"a","name":"A","cost":1,"force":1,"attack_cost":1,"health":1}]"#;
+    let plain =
+        r#"[{"kind":"unit","id":"a","name":"A","cost":1,"force":1,"attack_cost":1,"health":1}]"#;
     let cards = parse_cards(plain).unwrap();
     let written = serde_json::to_value(&cards[0]).unwrap();
     assert!(written.get("tags").is_none(), "{written}");
@@ -37,7 +38,10 @@ fn a_tag_is_text_with_accents_not_a_slug() {
     let tags = list(&["bâtiment", "Pièce rare"]);
     let cards = parse_card_set(&card_with(r#"["bâtiment","Pièce rare"]"#), &tags).unwrap();
     let written = serde_json::to_value(&cards[0]).unwrap();
-    assert_eq!(written["tags"], serde_json::json!(["bâtiment", "Pièce rare"]));
+    assert_eq!(
+        written["tags"],
+        serde_json::json!(["bâtiment", "Pièce rare"])
+    );
 }
 
 #[test]
@@ -92,7 +96,10 @@ fn parse_tags_bounds() {
         let items: Vec<String> = (0..n).map(|i| format!("\"t{i}\"")).collect();
         format!("[{}]", items.join(","))
     };
-    assert_eq!(parse_tags(&many(MAX_DATASET_TAGS)).unwrap().len(), MAX_DATASET_TAGS);
+    assert_eq!(
+        parse_tags(&many(MAX_DATASET_TAGS)).unwrap().len(),
+        MAX_DATASET_TAGS
+    );
     assert_eq!(
         parse_tags(&many(MAX_DATASET_TAGS + 1)).unwrap_err(),
         TagsError::TooManyEntries {
@@ -129,7 +136,10 @@ fn parse_tags_bounds() {
         TagsError::DuplicateTag("a".into())
     );
     for json in [r#"{"a":1}"#, r#"[1]"#, r#"["a",2]"#, r#""a""#, "not json"] {
-        assert!(matches!(parse_tags(json), Err(TagsError::Json(_))), "{json}");
+        assert!(
+            matches!(parse_tags(json), Err(TagsError::Json(_))),
+            "{json}"
+        );
     }
 }
 
@@ -179,6 +189,9 @@ fn a_game_without_tags_json_and_without_tags_is_read_as_before() {
         include_str!("../../../data/fixture/1.0.0/cards.json"),
         include_str!("../../../data/starter/1.1.0/cards.json"),
     ] {
-        assert_eq!(parse_cards(json).unwrap(), parse_card_set(json, &[]).unwrap());
+        assert_eq!(
+            parse_cards(json).unwrap(),
+            parse_card_set(json, &[]).unwrap()
+        );
     }
 }

@@ -1,4 +1,5 @@
-use crate::{Card, CardSpec, CreatureStats, Deck, Effect, Hero};
+use crate::tags::validate_card_tags;
+use crate::{Card, CardSpec, CreatureStats, Deck, Effect, Hero, UnitSpec};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Exact number of cards in a deck.
@@ -60,6 +61,24 @@ pub enum CardsError {
     CardNamesMismatch { names: usize, cards: usize },
     #[error("a card name is {len} characters long, above the maximum of {max}")]
     NameTooLong { len: usize, max: usize },
+    #[error("an immobile unit has no `{field}`")]
+    ImmobileWithAttackStat { field: &'static str },
+    #[error("a unit that is not immobile needs `{field}`")]
+    MissingAttackStat { field: &'static str },
+    #[error("a card has at most {max} tags, found {found}")]
+    TooManyTags { found: usize, max: usize },
+    #[error("a tag cannot be empty")]
+    TagEmpty,
+    #[error("a tag is {len} characters long, above the maximum of {max}")]
+    TagTooLong { len: usize, max: usize },
+    #[error("a tag cannot contain a control character")]
+    TagControlChar,
+    #[error("a tag cannot start or end with whitespace")]
+    TagUntrimmed,
+    #[error("duplicate tag `{0}` on a card")]
+    DuplicateTag(String),
+    #[error("unknown tag `{0}` (not in the tag list of the data set)")]
+    UnknownTag(String),
     #[error("card `{id}`: {source}")]
     InvalidCard { id: String, source: Box<CardsError> },
     #[error("deck `{id}`: {source}")]
@@ -104,19 +123,65 @@ fn ensure_unique<'a>(
     Ok(())
 }
 
-/// Parses and validates a `cards.json` document.
+/// Parses and validates a `cards.json` document. Fail-closed on tags: no tag list is given, so
+/// a card carrying a tag is refused (see [`parse_card_set`]).
 pub fn parse_cards(json: &str) -> Result<Vec<Card>, CardsError> {
+    parse_card_set(json, &[])
+}
+
+/// Like [`parse_cards`], with the closed tag list of the data set (`tags.json`, see
+/// [`parse_tags`](crate::parse_tags)): a tag outside `tags` is refused, after the checks of the
+/// shape of the card.
+pub fn parse_card_set(json: &str, tags: &[String]) -> Result<Vec<Card>, CardsError> {
     let cards: Vec<Card> =
         serde_json::from_str(json).map_err(|e| CardsError::Json(e.to_string()))?;
     ensure_unique(cards.iter().map(Card::id), CardsError::DuplicateCard)?;
     ensure_unique(cards.iter().map(Card::name), CardsError::DuplicateCardName)?;
     for card in &cards {
-        validate_creature(&card.stats()).map_err(|e| CardsError::InvalidCard {
-            id: card.id().to_owned(),
-            source: Box::new(e),
-        })?;
+        let checked = validate_card(card).and_then(|spec| {
+            let CardSpec::Unit(unit) = &spec;
+            match unit.tags.iter().find(|t| !tags.contains(t)) {
+                Some(unknown) => Err(CardsError::UnknownTag(unknown.clone())),
+                None => Ok(()),
+            }
+        });
+        checked.map_err(|e| invalid_card(card, e))?;
     }
     Ok(cards)
+}
+
+fn invalid_card(card: &Card, error: CardsError) -> CardsError {
+    CardsError::InvalidCard {
+        id: card.id().to_owned(),
+        source: Box::new(error),
+    }
+}
+
+/// The data-level checks of one card (which of `force` and `attack_cost` it may carry), then
+/// the validation of its spec.
+fn validate_card(card: &Card) -> Result<CardSpec, CardsError> {
+    let Card::Creature {
+        force,
+        attack_cost,
+        immobile,
+        ..
+    } = card;
+    if *immobile {
+        for (field, value) in [("force", force), ("attack_cost", attack_cost)] {
+            if value.is_some() {
+                return Err(CardsError::ImmobileWithAttackStat { field });
+            }
+        }
+    } else {
+        for (field, value) in [("force", force), ("attack_cost", attack_cost)] {
+            if value.is_none() {
+                return Err(CardsError::MissingAttackStat { field });
+            }
+        }
+    }
+    let spec = card.spec();
+    validate_card_spec(&spec)?;
+    Ok(spec)
 }
 
 /// Parses and validates a `decks.json` document (hero and deck shape; card ids are
@@ -139,12 +204,31 @@ pub fn parse_decks(json: &str) -> Result<Vec<Deck>, CardsError> {
     Ok(decks)
 }
 
-/// Validates a card of any kind: today a creature, so the bounds and the errors are those of
-/// [`validate_creature`].
+/// Validates a card of any kind: today a unit, see [`validate_unit`].
 pub fn validate_card_spec(spec: &CardSpec) -> Result<(), CardsError> {
     match spec {
-        CardSpec::Creature(stats) => validate_creature(stats),
+        CardSpec::Unit(unit) => validate_unit(unit),
     }
+}
+
+/// Validates a unit. Not immobile: [`validate_creature`], then the tags. Immobile: the same
+/// bounds for `cost`, `health` and `riposte`, and `force` and `attack_cost` must be 0 (the
+/// internal state of a unit without them), then the tags.
+pub fn validate_unit(unit: &UnitSpec) -> Result<(), CardsError> {
+    let stats = &unit.stats;
+    if unit.immobile {
+        cost_in_range("cost", stats.cost)?;
+        positive_in_range("health", stats.health)?;
+        below_max("riposte", stats.riposte)?;
+        for (field, value) in [("force", stats.force), ("attack_cost", stats.attack_cost)] {
+            if value != 0 {
+                return Err(CardsError::ImmobileWithAttackStat { field });
+            }
+        }
+    } else {
+        validate_creature(stats)?;
+    }
+    validate_card_tags(&unit.tags)
 }
 
 pub fn validate_creature(stats: &CreatureStats) -> Result<(), CardsError> {
@@ -248,18 +332,18 @@ pub fn validate_card_names(names: &[String], cards_len: usize) -> Result<(), Car
     Ok(())
 }
 
-/// Validates a deck (hero, shape, card references, stats) and returns the resolved
-/// stats of its cards, in deck order.
-pub fn resolve_deck(deck: &Deck, cards: &[Card]) -> Result<Vec<CreatureStats>, CardsError> {
-    resolve_deck_named(deck, cards).map(|(stats, _)| stats)
+/// Validates a deck (hero, shape, card references, specs) and returns the resolved
+/// specs of its cards, in deck order.
+pub fn resolve_deck(deck: &Deck, cards: &[Card]) -> Result<Vec<CardSpec>, CardsError> {
+    resolve_deck_named(deck, cards).map(|(specs, _)| specs)
 }
 
 /// The single resolution path: like [`resolve_deck`], and also returns the names of the
-/// cards, parallel to the stats (deck order). The names are presentation only.
+/// cards, parallel to the specs (deck order). The names are presentation only.
 pub fn resolve_deck_named(
     deck: &Deck,
     cards: &[Card],
-) -> Result<(Vec<CreatureStats>, Vec<String>), CardsError> {
+) -> Result<(Vec<CardSpec>, Vec<String>), CardsError> {
     validate_hero(&deck.hero)?;
     validate_deck_shape(&deck.hero, deck.cards.len())?;
     let by_id: BTreeMap<&str, &Card> = cards.iter().map(|c| (c.id(), c)).collect();
@@ -272,12 +356,11 @@ pub fn resolve_deck_named(
                     deck: deck.id.clone(),
                     card: id.clone(),
                 })?;
-            let stats = card.stats();
-            validate_creature(&stats).map_err(|e| CardsError::InvalidCard {
+            let spec = validate_card(card).map_err(|e| CardsError::InvalidCard {
                 id: id.clone(),
                 source: Box::new(e),
             })?;
-            Ok((stats, card.name().to_owned()))
+            Ok((spec, card.name().to_owned()))
         })
         .collect()
 }
