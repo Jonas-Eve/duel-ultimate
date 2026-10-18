@@ -28,8 +28,9 @@ cargo build --release -p duel-simulator
 target/release/duel-simulator 10000 --set starter@1.1.0 --seed 1 --hero-riposte off --board-limit none --timing > /dev/null
 ```
 
-- Les options de règles sont **explicites** pour que la commande reste vraie après #127, qui
-  change les défauts du moteur.
+- Les options de règles sont **explicites** pour que la commande reste vraie après #127 (défaut du
+  moteur devenu `standard` avec #172) : la commande ci-dessus mesure les règles historiques ; pour les
+  règles par défaut, remplacer par `--hero-riposte on --board-limit 5` (ligne `aa1fdbc` du tableau).
 - Lot : 3 matchups x 10 000 parties = 30 000 parties.
 - **1 passe de chauffe écartée + 5 passes mesurées** ; valeur de référence = **médiane** des 5
   passes (minimum et maximum consignés aussi).
@@ -61,6 +62,7 @@ Le seuil n'est épinglé dans aucun test et aucune mesure de débit ne tourne en
 |---|---|---|---|---|---|---|
 | 2026-10-17 | `e798210` | `--hero-riposte off --board-limit none`, `starter@1.1.0`, graine 1 | Intel Xeon 2,10 GHz, 4 coeurs (`nproc`), rustc 1.97.0 (2026-07-07), conteneur Linux | 14 151,4 (13 690,3 - 14 906,7) | 776 602,2 | 11 321,1 parties/s |
 | 2026-10-17 | `f21f1c5` | idem, **nouveau format de rapport** (#153, histogramme des durées) | idem (Intel Xeon 2,10 GHz, 4 coeurs, rustc 1.97.0) | 14 136,9 (13 402,5 - 14 778,1) | 775 810,0 | **non gardante** (informative) |
+| 2026-10-18 | `aa1fdbc` | **`--hero-riposte on --board-limit 5` (règles par défaut, `standard`)**, `starter@1.1.0`, graine 1 | Intel Xeon 2,10 GHz, 4 coeurs (`nproc`), rustc 1.97.0 (2026-07-07), conteneur Linux | 15 557,6 (14 200,8 - 15 605,9) | 931 366,1 | **12 446,1 parties/s** (gardante sous les règles par défaut) |
 
 Détail de la mesure du 2026-10-17 : 6 passes de 30 000 parties (1 646 347 actions chacune), la
 première écartée ; passes retenues en parties/s : 14 151,4 ; 13 954,7 ; 14 906,7 ; 13 690,3 ;
@@ -77,6 +79,19 @@ Ligne `f21f1c5` (informative, **non gardante** ; le seuil gardant reste celui de
 le débit varie. La médiane est à 99,9 % de celle de `e798210` (14 151,4), soit bien dans la dispersion
 d'environ 9 % observée : le surcoût de l'histogramme n'est pas mesurable sur cette machine (charge
 moyenne d'environ 1 sur 4 coeurs).
+
+Ligne `aa1fdbc` (**référence gardante sous les règles par défaut** de #127 : c'est contre elle que #128
+puis #131 comparent, seuil **0,8 x 15 557,6 = 12 446,1 parties/s** ; la ligne `e798210` reste la référence
+des règles historiques et ne garde plus que les lots lancés avec `--hero-riposte off --board-limit none`) :
+même protocole, commande exacte
+`target/release/duel-simulator 10000 --set starter@1.1.0 --seed 1 --hero-riposte on --board-limit 5 --timing > /dev/null`.
+Lot de 30 000 parties et **1 795 973 actions** par passe (contre 1 646 347 en `legacy` : les parties durent
+plus longtemps avec la riposte du héros, d'où le complément actions/s). Passe de chauffe écartée à
+15 365,0 parties/s ; 5 passes retenues en parties/s : 14 381,0 ; 15 557,6 ; 15 605,9 ; 14 200,8 ; 15 579,6 ;
+en actions/s : 860 929,2 ; 931 366,1 ; 934 260,0 ; 850 140,4 ; 932 685,5 (min-max 850 140,4 - 934 260,0).
+Charge moyenne de 0,8 sur 4 coeurs avant et après (machine essentiellement inactive, une seule exécution à la
+fois, exécution monocoeur). La médiane est à 109,9 % de celle de `e798210` : une seule mesure, dans une autre session (même classe de machine)
+et un autre jour, **ne dit rien d'un gain** ; elle fixe seulement le seuil sous les nouveaux défauts.
 
 ## Politique gloutonne (`--policy greedy`, #160)
 
@@ -108,5 +123,5 @@ grandeur, dans l'attendu. Réserve : la machine n'était **pas inactive** (charg
 sur 4 coeurs, une autre session compilait en parallèle) ; l'exécution est monocoeur, la dispersion
 observée est d'environ 18 % : lire la valeur comme un ordre de grandeur.
 
-La ligne « nouveaux défauts de #127 » est ajoutée par #127 avec le même protocole : c'est elle
-qui garde #128 puis #131.
+La ligne « nouveaux défauts de #127 » (`aa1fdbc`, `standard`) est dans le tableau « Mesures » ci-dessus,
+mesurée avec le même protocole par #173 : c'est elle qui garde #128 puis #131.
