@@ -467,7 +467,7 @@ describe("the three ends of the game", () => {
 describe("errors", () => {
   test("a refused action: French alert (never the English text), the game intact, Close clears it", async () => {
     const phantom: CardView = { id: 999999, name: "Fantôme", cost: 1, force: 1, attack_cost: 1, health: 1, provocation: false, riposte: 0 };
-    const injected: ActionPreview = { action: { play: { card: 999999 } }, cost: 1, hands_over: false, budget_after: 1, ends_game: null };
+    const injected: ActionPreview = { action: { play: { card: 999999 } }, cost: 1, hands_over: false, budget_after: 1, ends_game: null, attacker_destroyed: false };
     const { session } = decorateSession(newSession("rush", "bulwark", 3), {
       injectPreview: injected,
       forceView: (seat, v) => (seat === "One" ? { ...v, you: { ...v.you, hand: [...v.you.hand, phantom] } } : v),

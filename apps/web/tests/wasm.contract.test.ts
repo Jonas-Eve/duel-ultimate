@@ -5,7 +5,7 @@ import { EVENT_KINDS, eventKind } from "../src/engine/types";
 import type { Action, ActionPreview, EngineEvent, PlayerView } from "../src/engine/types";
 import { DATA_VERSION } from "../src/data/starter";
 import { CLIENT_CODES, ENGINE_CODES } from "../src/engine/errors";
-import { PAIRS, initTestEngine, newSession, randomPolicy } from "./support/engine";
+import { PAIRS, initTestEngine, newSession, randomPolicy, rulesFactory, testFactory } from "./support/engine";
 import { repoRoot } from "./support/paths";
 
 beforeAll(async () => {
@@ -24,6 +24,7 @@ const EVENT_KEYS: Record<string, string[]> = {
   damaged: ["amount", "player"],
   creature_damaged: ["amount", "creature", "player"],
   riposted: ["amount", "creature", "player"],
+  hero_riposted: ["creature", "player"],
   died: ["creature", "player"],
   token_moved: ["budget", "player"],
   active_player_changed: ["player"],
@@ -83,7 +84,7 @@ describe("the computer's action (#142)", () => {
 });
 
 describe("JSON shapes of real games", () => {
-  test("exact keys of every event, action, preview and view met in 80 real games", () => {
+  test("exact keys of every event, action, preview and view met in 160 real games (80 per rule set)", () => {
     const seenEvents = new Set<string>();
     const seenActions = new Set<string>();
     let games = 0;
@@ -94,7 +95,9 @@ describe("JSON shapes of real games", () => {
         expect(EVENT_KINDS).toContain(kind);
         const body = (e as Record<string, object>)[kind];
         // `data_versions` is present on game_started because the setup carries versions.
-        expect(keys(body)).toEqual(EVENT_KEYS[kind]);
+        // `rules` is the last key of game_started, present only when the options differ from the engine default.
+        const expected = kind === "game_started" && "rules" in body ? [...EVENT_KEYS[kind], "rules"].sort() : EVENT_KEYS[kind];
+        expect(keys(body)).toEqual(expected);
         seenEvents.add(kind);
       }
     };
@@ -124,21 +127,24 @@ describe("JSON shapes of real games", () => {
       }
     };
 
+    // Default rules, then the hero's riposte on (#170): `hero_riposted` only exists under the option.
+    for (const factory of [testFactory, rulesFactory('{"hero_riposte":true,"board_limit":null}')])
     for (const [one, two] of PAIRS) {
       for (let seed = 0; seed < 20; seed++) {
-        const s = newSession(one, two, seed * 7 + 1);
+        const s = newSession(one, two, seed * 7 + 1, factory);
         games += 1;
         try {
           checkEvents(s.startEvents);
           expect(s.startEvents[0]).toEqual({
-            game_started: { first: expect.stringMatching(/^(One|Two)$/), budget: expect.any(Number), data_versions: [DATA_VERSION] },
+            game_started: expect.objectContaining({ first: expect.stringMatching(/^(One|Two)$/), budget: expect.any(Number), data_versions: [DATA_VERSION] }),
           });
           const pick = randomPolicy(seed);
           for (let i = 0; i < 400; i++) {
             const previews: ActionPreview[] = s.legalActionsWithTime();
             if (previews.length === 0) break;
             for (const p of previews) {
-              expect(keys(p)).toEqual(["action", "budget_after", "cost", "ends_game", "hands_over"]);
+              expect(keys(p)).toEqual(["action", "attacker_destroyed", "budget_after", "cost", "ends_game", "hands_over"]);
+              expect(typeof p.attacker_destroyed).toBe("boolean");
               checkAction(p.action);
               if (p.ends_game) expect(keys(p.ends_game)).toEqual(["reason", "winner"]);
             }
@@ -151,7 +157,7 @@ describe("JSON shapes of real games", () => {
         }
       }
     }
-    expect(games).toBe(80);
+    expect(games).toBe(160);
     expect([...seenEvents].sort()).toEqual([...EVENT_KINDS].sort());
     expect([...seenActions].sort()).toEqual(["activate", "attack", "attack_creature", "attack_hero", "concede", "play"].sort());
   }, 120_000);

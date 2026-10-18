@@ -24,6 +24,8 @@ export interface ActionPreview {
   hands_over: boolean;
   budget_after: number | null;
   ends_game: GameResult | null;
+  /** The action destroys the attacker (killed by the riposte of the hero or of a creature): always present, `false` but for an attack. */
+  attacker_destroyed: boolean;
 }
 
 export interface HeroEffect {
@@ -86,6 +88,7 @@ export type EngineEvent =
   | { damaged: { player: Seat; amount: number } }
   | { creature_damaged: { player: Seat; creature: number; amount: number } }
   | { riposted: { player: Seat; creature: number; amount: number } }
+  | { hero_riposted: { player: Seat; creature: number } }
   | { died: { player: Seat; creature: number } }
   | { token_moved: { player: Seat; budget: number } }
   | { active_player_changed: { player: Seat } }
@@ -101,6 +104,7 @@ export const EVENT_KINDS = [
   "damaged",
   "creature_damaged",
   "riposted",
+  "hero_riposted",
   "died",
   "token_moved",
   "active_player_changed",

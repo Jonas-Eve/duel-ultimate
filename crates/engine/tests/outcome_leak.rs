@@ -354,3 +354,47 @@ fn the_content_of_the_opposing_hand_does_not_change_the_outcome() {
         assert_eq!(outcomes(&state_a), outcomes(&state_b), "seed {seed}");
     }
 }
+
+// ---- 7. with the hero's riposte on, still nothing hidden (#170) --------------------------
+
+#[test]
+fn a_suicidal_hit_on_the_hero_reveals_nothing_hidden_in_the_outcome() {
+    let mut suicides = 0;
+    for seed in 0..60 {
+        let mut setup = secret_setup();
+        setup.rules = RuleSet {
+            hero_riposte: true,
+            ..RuleSet::legacy()
+        };
+        let (mut state, _) = new_game(setup, seed).unwrap();
+        let mut rng = Xorshift(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+        while state.winner().is_none() {
+            let seat = state.active();
+            let other = seat.opponent();
+            let mut hidden = deck_ids(&state, seat);
+            hidden.extend(deck_ids(&state, other));
+            hidden.extend(state.hand(other).iter().map(|c| c.0));
+            let obs = Observation::of(&state).unwrap();
+            for i in 0..obs.actions().len() {
+                let outcome = obs.outcome(i).unwrap();
+                let text = format!("{outcome:?}");
+                let mentioned: BTreeSet<u32> = mentioned_ids(&text, "CardInstanceId(")
+                    .chain(mentioned_ids(&text, "SECRET-"))
+                    .collect();
+                if let Some(id) = mentioned.intersection(&hidden).next() {
+                    panic!("seed {seed}: card {id} in {text}");
+                }
+                let value = serde_json::to_value(&outcome.preview).unwrap();
+                if value["attacker_destroyed"] == true {
+                    suicides += 1;
+                }
+            }
+            let playable: Vec<Action> = legal_actions(&state)
+                .into_iter()
+                .filter(|a| *a != Action::Concede)
+                .collect();
+            apply(&mut state, playable[rng.below(playable.len())]).unwrap();
+        }
+    }
+    assert!(suicides > 20, "suicidal hits seen: {suicides}");
+}

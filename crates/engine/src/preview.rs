@@ -8,11 +8,11 @@
 //! and a handover can end the game by exhaustion. The clone keeps the real state and its
 //! generator untouched (`apply` never consumes the generator, so cloning it is enough).
 //!
-//! Only five fields come out. What a draw brings (the `drew` events) is hidden information and
+//! Only six fields come out. What a draw brings (the `drew` events) is hidden information and
 //! is never copied: a draw of several cards changes only `cost` and the handover.
 
 use crate::rules::{Action, Event, apply, legal_actions};
-use crate::state::GameState;
+use crate::state::{CardInstanceId, GameState};
 use crate::view::GameResult;
 use serde::Serialize;
 
@@ -26,6 +26,10 @@ use serde::Serialize;
 /// - `ends_game`: how the game ends, if this action ends it. Combine it with `hands_over` for
 ///   display: a lethal attack ends the game without handing over; a handover can end the game
 ///   by exhaustion.
+/// - `attacker_destroyed`: the action destroys the attacker (killed by the riposte of the hero
+///   or of a creature). Read from a fact of the dry run (a `Died` that names the attacker), so
+///   always `false` for anything but an attack; public information, no draw is read. Always
+///   serialized.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ActionPreview {
     pub action: Action,
@@ -33,6 +37,7 @@ pub struct ActionPreview {
     pub hands_over: bool,
     pub budget_after: Option<u32>,
     pub ends_game: Option<GameResult>,
+    pub attacker_destroyed: bool,
 }
 
 /// One preview per legal action, in the order of [`legal_actions`] (same length, `Concede`
@@ -72,6 +77,9 @@ pub(crate) fn preview_of(action: Action, events: Option<&[Event]>) -> ActionPrev
         hands_over: summary.hands_over,
         budget_after: summary.budget_after,
         ends_game: summary.ends_game,
+        attacker_destroyed: summary
+            .attacker
+            .is_some_and(|attacker| summary.died.contains(&attacker)),
     }
 }
 
@@ -81,6 +89,10 @@ struct Summary {
     hands_over: bool,
     budget_after: Option<u32>,
     ends_game: Option<GameResult>,
+    /// The creature that attacked, if the action is an attack.
+    attacker: Option<CardInstanceId>,
+    /// Every creature that died during the action.
+    died: Vec<CardInstanceId>,
 }
 
 /// Reads the preview's facts from the events of one action. The `match` has no `_` arm on
@@ -89,9 +101,14 @@ fn summarize(events: &[Event]) -> Summary {
     let mut summary = Summary::default();
     for event in events {
         match event {
-            Event::Played { cost, .. }
-            | Event::EffectActivated { cost, .. }
-            | Event::Attacked { cost, .. } => summary.cost = Some(*cost),
+            Event::Played { cost, .. } | Event::EffectActivated { cost, .. } => {
+                summary.cost = Some(*cost);
+            }
+            Event::Attacked { attacker, cost, .. } => {
+                summary.cost = Some(*cost);
+                summary.attacker = Some(*attacker);
+            }
+            Event::Died { creature, .. } => summary.died.push(*creature),
             Event::TokenMoved { budget, .. } => summary.budget_after = Some(*budget),
             Event::ActivePlayerChanged { .. } => summary.hands_over = true,
             Event::GameWon { winner, reason } => {
@@ -106,7 +123,7 @@ fn summarize(events: &[Event]) -> Summary {
             | Event::Damaged { .. }
             | Event::CreatureDamaged { .. }
             | Event::Riposted { .. }
-            | Event::Died { .. } => {}
+            | Event::HeroRiposted { .. } => {}
         }
     }
     summary
@@ -124,6 +141,11 @@ mod tests {
     fn the_worst_case_of_931_legal_actions_is_previewed_in_full() {
         let (mut state, _) =
             new_game(setup(hero(2, 8, 8, vec![]), hero(1, 2, 8, vec![])), 3).unwrap();
+        // Written out: a default board limit would make this case unreachable.
+        state.rules = crate::RuleSet {
+            hero_riposte: true,
+            board_limit: None,
+        };
         for side in [&mut state.one, &mut state.two] {
             side.board.append(&mut side.deck);
             side.board.append(&mut side.hand);
@@ -152,6 +174,13 @@ mod tests {
             });
             assert_eq!(preview.cost, expected_cost, "{preview:?}");
             assert_eq!(preview.hands_over, copy.active() != state.active());
+            let attacker_died = match action {
+                Action::Attack { attacker, .. } => events
+                    .iter()
+                    .any(|e| matches!(e, Event::Died { creature, .. } if creature == attacker)),
+                _ => false,
+            };
+            assert_eq!(preview.attacker_destroyed, attacker_died, "{preview:?}");
         }
     }
 }

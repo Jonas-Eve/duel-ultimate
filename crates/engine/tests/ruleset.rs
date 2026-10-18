@@ -456,14 +456,15 @@ fn the_state_exposes_the_rules_of_the_game() {
 
 // ---- Inert options and randomness -------------------------------------------------------------
 
-/// Holds only while the options do nothing (before #127): #127 removes or rewrites it on purpose.
+/// Holds only while `board_limit` does nothing (before #171): #171 removes it on purpose.
+/// `hero_riposte` acts since #170, so it stays off in these rules.
 mod while_inert {
     use super::*;
 
     fn inert_rules() -> RuleSet {
         RuleSet {
-            hero_riposte: true,
             board_limit: Some(5),
+            ..RuleSet::legacy()
         }
     }
 

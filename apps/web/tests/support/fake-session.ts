@@ -48,7 +48,7 @@ export function fakeSession(o: FakeOptions): { session: GameSession; state: Fake
       return playable[draw % playable.length];
     },
     legalActionsWithTime: () =>
-      legal().map((action) => ({ action, cost: 1, hands_over: false, budget_after: 1, ends_game: null })),
+      legal().map((action) => ({ action, cost: 1, hands_over: false, budget_after: 1, ends_game: null, attacker_destroyed: false })),
     view,
     apply: (): EngineEvent[] => {
       state.applied += 1;

@@ -116,10 +116,12 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
   `invalid_policy` et `computer_stuck` viennent du binding (`ENGINE_CODES`) ; `computer_chain_limit` est un code du client.
 - **Contrat JSON** : `EVENT_KINDS` doit égaler les variantes de `enum Event`
   (`crates/engine/src/rules.rs`) ; `tests/wasm.contract.test.ts` vérifie les clés exactes de chaque
-  événement, action et aperçu sur 80 parties réelles. Ajouter une variante côté Rust casse ce test.
-  `game_started.rules?: RuleSetJson` (#147) est additif et optionnel : le client ne passe pas de
-  règles (`rules_json` de `Game.from_data` reste absent), le formateur du journal l'ignore, et
-  `EVENT_KINDS` ne change pas.
+  événement, action et aperçu sur 160 parties réelles (80 par jeu de règles). Ajouter une variante côté Rust
+  casse ce test. `game_started.rules?: RuleSetJson` (#147) est additif et optionnel : le client ne passe pas de
+  règles (`rules_json` de `Game.from_data` reste absent), le formateur du journal l'ignore. Depuis #170,
+  `EVENT_KINDS` gagne `hero_riposted` (après `riposted`) et `ActionPreview.attacker_destroyed` est un
+  booléen toujours présent ; les tests qui ont besoin de l'option jouent le vrai moteur par
+  `rulesFactory(rulesJson)` (`tests/support/engine.ts`, 7e argument de `Game.from_data`).
 - **Graine** (`game/seed.ts`) : `parseSeed` (chiffres ASCII, 0 à 4294967295, le binding réduirait
   silencieusement une valeur hors `u32`), `randomSeed` (`crypto.getRandomValues`, seule entropie du
   client, jamais `Math.random`), `deriveAiSeed` (graine de l'ordinateur dérivée de celle de la partie) et
@@ -295,7 +297,8 @@ même, alimenté par `toScreenModel` :
 
 - **Formateur** (`ui/log-format.ts`, pur, sans React, textes dans `fr.ts`) : `formatRecords(records, ctx)`
   donne une `LogLine` française par événement (les `drew` consécutifs d'un joueur et `token_moved` +
-  `active_player_changed` fusionnent) ; `formatBlocks` les groupe en blocs titrés (« Début de partie »,
+  `active_player_changed` fusionnent ; `hero_riposted` (#170, riposte du héros, option `hero_riposte`) donne
+  « Le héros X riposte et détruit Y. » où X est le héros du camp attaqué, avant la ligne « Y meurt. ») ; `formatBlocks` les groupe en blocs titrés (« Début de partie »,
   « Ton tour », « Tour de l'ordinateur », « Camp 1 — Ruée »). Le contexte vient du snapshot
   (`logContext(snapshot)` : mode, `youSeat = snapshot.humanSeat`, libellés tirés des noms de deck, jamais
   `SideModel.label`, qui dépend de la position haut/bas). 2e personne pour le siège humain (« Tu
@@ -342,6 +345,13 @@ même, alimenté par `toScreenModel` :
   `aria-disabled`, focalisable, avec la raison en texte. Pendant le choix de la cible, un toucher sur
   une autre de ses créatures ouvre son détail (changer d'attaquant). Les cibles possibles sont des `<button>` avec bordure et texte « Cible possible » ;
   le héros adverse porte un bouton cible dans son bandeau.
+- **Avertissement de la feuille de confirmation (#170)** : quand l'aperçu dit `attacker_destroyed` (riposte du
+  héros avec l'option `hero_riposte`, ou riposte d'une créature qui tue l'attaquant), `describeWarnings`
+  (`ui/consequence.ts`, pur ; `describeConsequence` ne change pas) donne « La créature qui attaque sera
+  détruite. », rendu par `AttackSheet` (prop `warnings`) entre le résumé et les lignes de conséquence, avec
+  « Attention : » et une bordure épaisse (classe `.attack-warning`, jetons `:root`, jamais la couleur
+  seule). Le texte est neutre et sans chiffre (contre l'ordinateur comme en deux camps), le client ne
+  calcule rien : un coup létal n'a pas d'avertissement et dit qu'il met fin à la partie.
 - **Carte compacte (#92)** : `CardTile` est une carte de jeu de taille fixe. L'élément externe (`.card
   .card-compact` : `<button>` ou `div role="group"`) contient `.card-face` (exactement `--card-w` = 62 px sur
   112 px, quel que soit le contenu : nom tronqué par `text-overflow: ellipsis`, marques sans effet sur la

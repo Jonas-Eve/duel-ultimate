@@ -60,7 +60,9 @@ premières parties, le siège Two dans les 100 suivantes, graines fixes). Seuil 
 - La pioche est non évaluable (constante `draw_value`).
 - Poids provisoires, à revoir avec la valeur de carte (#133) ; l'effet de la riposte du héros
   sera re-mesuré par #127 (une attaque dont l'attaquant meurt est déjà mal notée : la créature
-  disparaît de la vue).
+  disparaît de la vue). Depuis #170 (option `hero_riposte`, aucun poids retouché) c'est testé dans
+  `crates/ai/tests/greedy.rs` : face au héros, la gloutonne refuse le coup non létal (un sacrifice) et
+  garde le coup létal.
 
 ## Brancher une autre politique
 

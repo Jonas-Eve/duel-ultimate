@@ -182,7 +182,7 @@ describe("submit", () => {
     try {
       c.start();
       expect(c.getSnapshot().phase).toBe("computer-turn");
-      const fake: ActionPreview = { action: { play: { card: 1 } }, cost: 1, hands_over: false, budget_after: 1, ends_game: null };
+      const fake: ActionPreview = { action: { play: { card: 1 } }, cost: 1, hands_over: false, budget_after: 1, ends_game: null, attacker_destroyed: false };
       expect(c.submit(fake)).toEqual({ ok: false, reason: "not-your-turn" });
       expect(c.concede()).toEqual({ ok: false, reason: "not-your-turn" });
       expect(probe.calls.apply).toBe(0);
@@ -193,7 +193,7 @@ describe("submit", () => {
   });
 
   test("the safety net: an illegal action reaching the list is refused by the engine and changes nothing", () => {
-    const illegal: ActionPreview = { action: { play: { card: 999999 } }, cost: 1, hands_over: false, budget_after: 1, ends_game: null };
+    const illegal: ActionPreview = { action: { play: { card: 999999 } }, cost: 1, hands_over: false, budget_after: 1, ends_game: null, attacker_destroyed: false };
     const { session, probe } = decorateSession(newSession("rush", "bulwark", 3), { injectPreview: illegal });
     const c = GameController.create(config("computer", "rush", "bulwark", 3), realDeps({ createSession: () => session }));
     try {
@@ -235,7 +235,7 @@ describe("concede and the end of the game", () => {
       expect(s.phase).toBe("over");
       expect(s.views.One?.result).toEqual({ winner: "Two", reason: "concede" });
       expect(s.legal).toEqual([]);
-      expect(c.submit({ action: "concede", cost: null, hands_over: false, budget_after: null, ends_game: null })).toEqual({
+      expect(c.submit({ action: "concede", cost: null, hands_over: false, budget_after: null, ends_game: null, attacker_destroyed: false })).toEqual({
         ok: false,
         reason: "not-your-turn",
       });

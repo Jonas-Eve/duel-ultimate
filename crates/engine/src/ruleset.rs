@@ -3,8 +3,9 @@
 //! generic list. Not versioned data (`duel-cards` holds cards and decks): the options of a game
 //! travel in `GameSetup.rules` and are recorded in `Event::GameStarted`.
 //!
-//! **Both options have no effect yet** (until #127): no rule, no `validate`, no `apply`, no
-//! potential formula reads them, and they never touch the generator.
+//! `hero_riposte` acts since #170 (`combat.rs`: a non-lethal hit on the hero destroys the
+//! attacker); `board_limit` **has no effect yet** (until #171): no rule reads it. Neither is
+//! read by a potential formula, and neither touches the generator.
 
 use duel_cards::DECK_SIZE;
 use serde::{Deserialize, Serialize};
@@ -17,19 +18,21 @@ pub const MAX_BOARD_LIMIT: u32 = DECK_SIZE as u32;
 /// "no limit" whatever the default is); the output is always the complete object, in
 /// declaration order. Unknown fields are refused: the value may come from an untrusted client.
 ///
-/// No effect before #127.
+/// `board_limit` has no effect before #171.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RuleSet {
-    /// Whether a hero hits back when attacked. No effect before #127.
+    /// Whether a hero hits back when attacked: a hit on the hero that does not kill it (hero
+    /// health greater than the attacker's force) destroys the attacker, whatever its health
+    /// (`Event::HeroRiposted`); a lethal hit is `HeroDown` as ever, with no riposte.
     pub hero_riposte: bool,
     /// Largest number of creatures a board may hold; `None` means no limit, `Some(n)` needs
-    /// `1 <= n <=` [`MAX_BOARD_LIMIT`]. No effect before #127.
+    /// `1 <= n <=` [`MAX_BOARD_LIMIT`]. No effect before #171.
     pub board_limit: Option<u32>,
 }
 
 impl Default for RuleSet {
-    /// The engine default. Written by hand, not derived: #127 changes this body (and only it).
+    /// The engine default. Written by hand, not derived: the switch of the default changes this body (and only it).
     fn default() -> Self {
         Self::legacy()
     }

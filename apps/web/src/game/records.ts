@@ -55,6 +55,7 @@ export function citedCardIds(event: EngineEvent): number[] {
   if ("damaged" in e) return [];
   if ("creature_damaged" in e) return [e.creature_damaged.creature];
   if ("riposted" in e) return [e.riposted.creature];
+  if ("hero_riposted" in e) return [e.hero_riposted.creature];
   if ("died" in e) return [e.died.creature];
   if ("token_moved" in e) return [];
   if ("active_player_changed" in e) return [];

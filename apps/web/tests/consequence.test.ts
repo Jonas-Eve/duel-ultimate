@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { ActionPreview } from "../src/engine/types";
-import { describeConsequence, type ConsequenceLabels } from "../src/ui/consequence";
+import { describeConsequence, describeWarnings, type ConsequenceLabels } from "../src/ui/consequence";
 
 const labels: ConsequenceLabels = {
   winner: (seat) => (seat === "One" ? "Tu gagnes" : "L'ordinateur gagne"),
@@ -14,6 +14,7 @@ const preview = (over: Partial<ActionPreview>): ActionPreview => ({
   hands_over: false,
   budget_after: 1,
   ends_game: null,
+  attacker_destroyed: false,
   ...over,
 });
 
@@ -99,5 +100,28 @@ describe("describeConsequence for an attack", () => {
   test("the other actions keep 'Coût'", () => {
     expect(describeConsequence(preview({ action: { play: { card: 1 } } }), labels)[0]).toBe("Coût : 2");
     expect(describeConsequence(preview({ action: { activate: { effect: 0 } } }), labels)[0]).toBe("Coût : 2");
+  });
+});
+
+describe("describeWarnings, from the engine preview only (#170)", () => {
+  test("a preview that destroys the attacker warns, in neutral words and without a number", () => {
+    const warnings = describeWarnings(preview({ action: { attack: { attacker: 3, target: "hero" } }, attacker_destroyed: true }));
+    expect(warnings).toEqual(["La créature qui attaque sera détruite."]);
+    expect(warnings.join(" ")).not.toMatch(/\d/);
+  });
+
+  test("anything else warns of nothing", () => {
+    expect(describeWarnings(preview({ attacker_destroyed: false }))).toEqual([]);
+    expect(describeWarnings(preview({ action: "concede", cost: null, budget_after: null }))).toEqual([]);
+    expect(
+      describeWarnings(
+        preview({ action: { attack: { attacker: 3, target: "hero" } }, cost: 1, budget_after: null, ends_game: { winner: "One", reason: "hero_down" } }),
+      ),
+    ).toEqual([]);
+  });
+
+  test("describeConsequence does not carry the warning: the lines stay the cost and the time", () => {
+    const lines = describeConsequence(preview({ action: { attack: { attacker: 3, target: "hero" } }, cost: 2, budget_after: 1, attacker_destroyed: true }), labels);
+    expect(lines).toEqual(["Coût d'attaque : 2", "Il te restera 1 de temps"]);
   });
 });

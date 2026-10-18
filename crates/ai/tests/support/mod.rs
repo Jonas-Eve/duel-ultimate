@@ -115,12 +115,30 @@ pub fn side(hero: &Hero, cards: &[Card], starting_hand: usize) -> Value {
     })
 }
 
-/// A game whose whole decks are in the hands (`starting_hand = 30`).
+/// A game whose whole decks are in the hands (`starting_hand = 30`), under the engine default
+/// rules.
 pub fn scenario(one: (Hero, Vec<Card>), two: (Hero, Vec<Card>)) -> GameState {
     let setup: GameSetup = serde_json::from_value(json!({
         "one": side(&one.0, &one.1, 30),
         "two": side(&two.0, &two.1, 30),
         "data_versions": [],
+    }))
+    .expect("a valid scenario setup");
+    let (state, _) = new_game(setup, 1).expect("a valid scenario game");
+    state
+}
+
+/// [`scenario`] with the rules written out (`{"hero_riposte": ..., "board_limit": ...}`).
+pub fn scenario_with_rules(
+    one: (Hero, Vec<Card>),
+    two: (Hero, Vec<Card>),
+    rules: Value,
+) -> GameState {
+    let setup: GameSetup = serde_json::from_value(json!({
+        "one": side(&one.0, &one.1, 30),
+        "two": side(&two.0, &two.1, 30),
+        "data_versions": [],
+        "rules": rules,
     }))
     .expect("a valid scenario setup");
     let (state, _) = new_game(setup, 1).expect("a valid scenario game");
@@ -190,7 +208,10 @@ pub fn opening(
     mine: &[&str],
     theirs: &[&str],
 ) -> GameState {
-    let mut state = scenario(one, two);
+    opened(scenario(one, two), mine, theirs)
+}
+
+fn opened(mut state: GameState, mine: &[&str], theirs: &[&str]) -> GameState {
     assert_eq!(state.active(), PlayerId::One);
     for name in mine {
         play(&mut state, name);

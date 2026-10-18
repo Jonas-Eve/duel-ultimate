@@ -19,6 +19,7 @@ function citedIds(e: EngineEvent): number[] {
   if ("attacked" in e) return [e.attacked.attacker];
   if ("creature_damaged" in e) return [e.creature_damaged.creature];
   if ("riposted" in e) return [e.riposted.creature];
+  if ("hero_riposted" in e) return [e.hero_riposted.creature];
   if ("died" in e) return [e.died.creature];
   return [];
 }
@@ -249,6 +250,7 @@ describe("exhaustive on event kinds", () => {
         { damaged: { player: "One", amount: 1 } },
         { creature_damaged: { player: "One", creature: id, amount: 1 } },
         { riposted: { player: "One", creature: id, amount: 1 } },
+        { hero_riposted: { player: "One", creature: id } },
         { died: { player: "One", creature: id } },
         { token_moved: { player: "One", budget: 1 } },
         { active_player_changed: { player: "Two" } },

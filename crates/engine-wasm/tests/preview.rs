@@ -53,7 +53,7 @@ fn the_preview_lists_the_legal_actions_in_the_same_order() {
 }
 
 #[test]
-fn an_entry_carries_the_five_fields_and_nothing_else() {
+fn an_entry_carries_the_six_fields_and_nothing_else() {
     let game = game(3);
     let previews = preview(&game);
     assert!(previews.len() > 1);
@@ -67,8 +67,16 @@ fn an_entry_carries_the_five_fields_and_nothing_else() {
         keys.sort_unstable();
         assert_eq!(
             keys,
-            ["action", "budget_after", "cost", "ends_game", "hands_over"]
+            [
+                "action",
+                "attacker_destroyed",
+                "budget_after",
+                "cost",
+                "ends_game",
+                "hands_over"
+            ]
         );
+        assert!(entry["attacker_destroyed"].is_boolean(), "{entry}");
     }
     assert!(
         !game
@@ -96,7 +104,8 @@ fn the_costs_and_the_handover_come_from_the_engine() {
             "cost": null,
             "hands_over": false,
             "budget_after": null,
-            "ends_game": {"winner": "Two", "reason": "concede"}
+            "ends_game": {"winner": "Two", "reason": "concede"},
+            "attacker_destroyed": false
         })
     );
 }

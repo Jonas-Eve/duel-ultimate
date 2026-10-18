@@ -117,6 +117,12 @@ function format(record: StepRecord, ctx: LogContext): LogLine[] {
         push(i, fr.log.riposted(cardName(p.creature), p.amount, cardHealth(p.creature)), "damage");
         break;
       }
+      case "hero_riposted": {
+        // `player` owns the attacker: the hero that hits back is the one of the other side.
+        const p = body(e, kind);
+        push(i, fr.log.heroRiposted(record.hero[p.player === "One" ? "Two" : "One"].name, cardName(p.creature)), "damage");
+        break;
+      }
       case "died": {
         push(i, fr.log.died(cardName(body(e, kind).creature)), "death");
         break;

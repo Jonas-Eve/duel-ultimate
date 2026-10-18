@@ -437,10 +437,17 @@ fn without_rules_key(events: &str) -> Value {
     value
 }
 
+/// `board_limit` has no effect yet (#171 gives it one and removes this test); `hero_riposte`
+/// is written out `false` on both sides so that the comparison does not depend on the default.
 #[test]
-fn the_rules_are_inert_before_127() {
-    let mut plain = with_rules(None, VERSIONS).unwrap();
-    let mut ruled = with_rules(Some(&rules_text(&non_default())), VERSIONS).unwrap();
+fn board_limit_is_still_inert() {
+    let off = RuleSet::legacy();
+    let limited = RuleSet {
+        board_limit: Some(5),
+        ..RuleSet::legacy()
+    };
+    let mut plain = with_rules(Some(&rules_text(&off)), VERSIONS).unwrap();
+    let mut ruled = with_rules(Some(&rules_text(&limited)), VERSIONS).unwrap();
     assert_eq!(
         without_rules_key(&start_events(&plain)),
         without_rules_key(&start_events(&ruled))
@@ -459,4 +466,54 @@ fn the_rules_are_inert_before_127() {
             "step {step}"
         );
     }
+}
+
+/// #170: with `hero_riposte` a non-lethal hit on the hero destroys the attacker: the
+/// `hero_riposted` event comes through `apply`, and the attacker is in the discard of `view`.
+#[test]
+fn the_hero_riposte_reaches_apply_and_the_view() {
+    let mut game = with_rules(
+        Some(r#"{"hero_riposte":true,"board_limit":null}"#),
+        VERSIONS,
+    )
+    .unwrap();
+    let mut slain = None;
+    for _ in 0..200 {
+        let list: Vec<Value> = serde_json::from_str(&game.legal_actions_json().unwrap()).unwrap();
+        let hit = list
+            .iter()
+            .find(|a| a["attack"]["target"] == "hero")
+            .cloned();
+        let Some(action) = hit.or_else(|| list.iter().find(|a| **a != "concede").cloned()) else {
+            break; // the game is over
+        };
+        let seat = {
+            let view: Value = serde_json::from_str(&game.view_json("One").unwrap()).unwrap();
+            view["active"].as_str().unwrap().to_owned()
+        };
+        let events: Vec<Value> =
+            serde_json::from_str(&game.apply_json(&action.to_string()).unwrap()).unwrap();
+        if let Some(event) = events.iter().find_map(|e| e.get("hero_riposted")) {
+            assert_eq!(event["player"], seat.as_str());
+            assert!(
+                events
+                    .iter()
+                    .any(|e| e["died"]["creature"] == event["creature"]),
+                "{events:?}"
+            );
+            slain = Some((seat, event["creature"].clone()));
+            break;
+        }
+    }
+    let (seat, creature) = slain.expect("a hero hit was riposted");
+    let view: Value = serde_json::from_str(&game.view_json(&seat).unwrap()).unwrap();
+    let discard = view["you"]["discard"].as_array().unwrap();
+    assert!(discard.iter().any(|c| c["id"] == creature), "{view}");
+    assert!(
+        !view["you"]["board"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["id"] == creature)
+    );
 }

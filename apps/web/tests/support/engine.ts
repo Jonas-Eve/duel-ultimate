@@ -26,6 +26,17 @@ export const testFactory: GameFactory = (...args) => {
   return binding.Game.from_data(...args);
 };
 
+/**
+ * `Game.from_data` of the real package with the rule options of the 7th argument (`rules_json`, #147):
+ * a real engine under chosen rules, never a mock. The production client sends no rules.
+ */
+export const rulesFactory =
+  (rulesJson: string): GameFactory =>
+  (...args) => {
+    if (binding === null) throw new Error("call initTestEngine() first");
+    return binding.Game.from_data(...args, rulesJson);
+  };
+
 export interface Counters {
   creations: number;
   frees: number;
