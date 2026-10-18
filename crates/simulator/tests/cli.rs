@@ -379,3 +379,155 @@ fn against_never_reads_a_path() {
         assert!(message.contains(path), "{message}");
     }
 }
+
+// --- #160: `--policy` and `--noise` ---
+
+/// The lines of the section of policy `name`: from its `policy: <name>` line to the next
+/// `policy: ` line (or the end).
+fn section(text: &str, name: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let start = lines
+        .iter()
+        .position(|line| *line == format!("policy: {name}"))
+        .unwrap_or_else(|| panic!("a section {name} in {text:?}"));
+    let end = lines[start + 1..]
+        .iter()
+        .position(|line| line.starts_with("policy: "))
+        .map_or(lines.len(), |offset| start + 1 + offset);
+    lines[start..end].join("\n")
+}
+
+fn section_names(text: &str) -> Vec<&str> {
+    text.lines()
+        .filter_map(|line| line.strip_prefix("policy: "))
+        .collect()
+}
+
+#[test]
+fn policy_flag_default_is_random_byte_for_byte() {
+    let plain = run(&["20"]);
+    let explicit = run(&["20", "--policy", "random"]);
+    assert!(plain.status.success() && explicit.status.success());
+    assert_eq!(explicit.stdout, plain.stdout);
+    assert!(explicit.stderr.is_empty());
+}
+
+#[test]
+fn policy_greedy_prints_a_greedy_section_and_is_deterministic() {
+    let args = ["10", "--seed", "3", "--policy", "greedy"];
+    let output = run(&args);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let text = stdout(&output);
+    assert_eq!(output.stdout, run(&args).stdout);
+    assert!(text.contains("policies: greedy"), "{text:?}");
+    assert_eq!(section_names(&text), ["greedy"]);
+    assert_eq!(matchup_lines(&text).len(), 3, "{text:?}");
+}
+
+#[test]
+fn policy_list_prints_one_section_per_policy_in_the_given_order() {
+    let both = stdout(&run(&["10", "--seed", "4", "--policy", "greedy,random"]));
+    assert_eq!(section_names(&both), ["greedy", "random"]);
+    assert!(both.contains("policies: greedy,random"), "{both:?}");
+    let random_alone = stdout(&run(&["10", "--seed", "4", "--policy", "random"]));
+    let greedy_alone = stdout(&run(&["10", "--seed", "4", "--policy", "greedy"]));
+    assert_eq!(section(&both, "random"), section(&random_alone, "random"));
+    assert_eq!(section(&both, "greedy"), section(&greedy_alone, "greedy"));
+}
+
+#[test]
+fn noise_wraps_greedy_and_names_the_section() {
+    let args = ["10", "--seed", "2", "--policy", "greedy", "--noise", "20"];
+    let output = run(&args);
+    assert_eq!(output.status.code(), Some(0));
+    let text = stdout(&output);
+    assert_eq!(section_names(&text), ["greedy-noise20"]);
+    assert!(text.contains("policies: greedy-noise20"), "{text:?}");
+    assert_eq!(output.stdout, run(&args).stdout);
+
+    let zero = run(&["10", "--seed", "2", "--policy", "greedy", "--noise", "0"]);
+    let plain = run(&["10", "--seed", "2", "--policy", "greedy"]);
+    assert_eq!(zero.stdout, plain.stdout);
+
+    let full = run(&["10", "--seed", "2", "--policy", "greedy", "--noise", "100"]);
+    assert_eq!(full.status.code(), Some(0));
+    assert_eq!(section_names(&stdout(&full)), ["greedy-noise100"]);
+}
+
+#[test]
+fn noise_never_wraps_random() {
+    let text = stdout(&run(&[
+        "10",
+        "--seed",
+        "2",
+        "--policy",
+        "random,greedy",
+        "--noise",
+        "30",
+    ]));
+    assert_eq!(section_names(&text), ["random", "greedy-noise30"]);
+    let random_alone = stdout(&run(&["10", "--seed", "2", "--policy", "random"]));
+    assert_eq!(section(&text, "random"), section(&random_alone, "random"));
+}
+
+#[test]
+fn bad_policy_arguments_exit_2() {
+    let cases: [&[&str]; 13] = [
+        &["--policy", "nope"],
+        &["--policy", "greedy,greedy"],
+        &["--policy", ""],
+        &["--policy", "random,"],
+        &["--policy"],
+        &["--policy", "random", "--policy", "greedy"],
+        &["--noise", "101"],
+        &["--noise", "-1"],
+        &["--noise", "1.5"],
+        &["--noise", "abc"],
+        &["--noise"],
+        &["--noise", "5", "--noise", "5"],
+        &["--policy", "random", "--noise", "10"],
+    ];
+    for case in cases {
+        let mut args = vec!["5"];
+        args.extend_from_slice(case);
+        let output = run(&args);
+        assert_eq!(output.status.code(), Some(2), "{case:?}");
+        assert!(output.stdout.is_empty(), "{case:?}");
+        let stderr = String::from_utf8(output.stderr).expect("utf-8");
+        assert!(stderr.starts_with("duel-simulator: "), "{case:?}: {stderr}");
+        assert!(!stderr.contains("panicked"), "{case:?}: {stderr}");
+    }
+    // The unknown name lists the registry.
+    let stderr = String::from_utf8(run(&["--policy", "nope"]).stderr).expect("utf-8");
+    assert!(
+        stderr.contains("random") && stderr.contains("greedy"),
+        "{stderr}"
+    );
+    // `--noise` alone applies to the default `random`: nothing to wrap.
+    assert_eq!(run(&["5", "--noise", "10"]).status.code(), Some(2));
+}
+
+#[test]
+fn greedy_works_with_against_and_timing() {
+    let against = stdout(&run(&[
+        "6",
+        "--set",
+        "fixture",
+        "--against",
+        "fixture",
+        "--seed",
+        "3",
+        "--policy",
+        "greedy",
+    ]));
+    assert!(
+        against.starts_with("diff: fixture@1.0.0 -> fixture@1.0.0 | "),
+        "{against:?}"
+    );
+    assert!(!against.contains('+'), "{against:?}");
+    let plain = run(&["6", "--seed", "5", "--policy", "greedy"]);
+    let timed = run(&["6", "--seed", "5", "--policy", "greedy", "--timing"]);
+    assert!(plain.status.success() && timed.status.success());
+    assert_eq!(timed.stdout, plain.stdout);
+}
