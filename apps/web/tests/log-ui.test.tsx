@@ -2,6 +2,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
 import type { Snapshot } from "../src/game/controller";
 import { formatBlocks, formatRecords, logContext } from "../src/ui/log-format";
+import { legacyFactory } from "./support/engine";
 import { playHuman, playUntil, randomPreview, settle, stallPolicy, stallPreview } from "./support/policies";
 import { makeController, mountGame, useRealEngine } from "./support/ui";
 
@@ -232,7 +233,7 @@ describe("the end screen shows the whole log", () => {
   // 220 actions rendered through jsdom: ~3.5 s alone in the full suite, 7+ s under CPU contention;
   // the default 5 s timeout flaked in CI (#77).
   test("exhaustion (pinned: rush vs bulwark, seed 2, both stalling)", async () => {
-    const c = makeController("rush", "bulwark", 2, { chooseAction: stallPolicy });
+    const c = makeController("rush", "bulwark", 2, { chooseAction: stallPolicy }, legacyFactory);
     c.start();
     await playHuman(c, stallPreview);
     mountGame(c);

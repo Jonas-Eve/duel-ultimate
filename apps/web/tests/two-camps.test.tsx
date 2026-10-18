@@ -8,7 +8,7 @@ import type { CardView, Seat } from "../src/engine/types";
 import { isPlay } from "../src/engine/types";
 import type { Snapshot } from "../src/game/controller";
 import { expectedCardLabel } from "./support/card-label";
-import { newSession } from "./support/engine";
+import { legacyFactory, newSession } from "./support/engine";
 import { launch, renderApp, useAppEngine } from "./support/app";
 import { playHuman, playUntil, randomPreview, stallPreview } from "./support/policies";
 import { inAct, makeCampsController, mountGame, useRealEngine } from "./support/ui";
@@ -242,7 +242,7 @@ describe("the three ends of a two-camps game", () => {
   // 220 actions rendered through jsdom: ~3.5 s alone in the full suite, 7+ s under CPU contention;
   // the default 5 s timeout flaked in CI (#77).
   test("exhaustion: both camps in wear-down play, the pinned case of #63 (220 actions)", async () => {
-    const c = makeCampsController("rush", "bulwark", 2);
+    const c = makeCampsController("rush", "bulwark", 2, {}, legacyFactory);
     const { container } = mountGame(c);
     const { humanActions, snapshot } = await inAct(() => playHuman(c, stallPreview));
     expect(humanActions).toBe(220);

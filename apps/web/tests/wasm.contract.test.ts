@@ -122,13 +122,24 @@ describe("JSON shapes of real games", () => {
       expect(keys(v.you)).toEqual(["board", "deck_count", "discard", "hand", "hero"]);
       expect(keys(v.opponent)).toEqual(["board", "deck_count", "discard", "hand_count", "hero"]);
       expect(keys(v.you.hero)).toEqual(["effects", "health", "max_time", "name"]);
-      for (const c of [...v.you.hand, ...v.you.board, ...v.opponent.board, ...v.you.discard]) {
-        expect(keys(c)).toEqual(["attack_cost", "cost", "force", "health", "id", "name", "provocation", "riposte"]);
+      const cardKeys = ["attack_cost", "cost", "force", "health", "id", "name", "provocation", "riposte"];
+      for (const c of [...v.you.board, ...v.opponent.board, ...v.you.discard]) {
+        expect(keys(c)).toEqual(cardKeys);
+      }
+      // A card of the own hand carries `unavailable` only when it cannot be played (a full board
+      // under the standard rules, #171), and then the reason is the one the client knows.
+      for (const c of v.you.hand) {
+        if ("unavailable" in c) {
+          expect(keys(c)).toEqual([...cardKeys, "unavailable"].sort());
+          expect(c.unavailable).toBe("board_full");
+        } else {
+          expect(keys(c)).toEqual(cardKeys);
+        }
       }
     };
 
-    // Default rules, then the hero's riposte on (#170): `hero_riposted` only exists under the option.
-    for (const factory of [testFactory, rulesFactory('{"hero_riposte":true,"board_limit":null}')])
+    // The default rules (standard since #127), then the options off (legacy, the rules written out).
+    for (const factory of [testFactory, rulesFactory('{"hero_riposte":false,"board_limit":null}')])
     for (const [one, two] of PAIRS) {
       for (let seed = 0; seed < 20; seed++) {
         const s = newSession(one, two, seed * 7 + 1, factory);
@@ -175,14 +186,15 @@ describe("the optional rules of Game.from_data (#147)", () => {
   });
 
   test("non-default rules are recorded after data_versions, as the last key of game_started", () => {
-    // `{true, 5}` differs from the engine default until #127, which then rewrites this value.
-    const game = build('{"hero_riposte":true,"board_limit":5}');
+    // The options off (`legacy()`) differ from the engine default (standard since #127): the whole
+    // object is recorded, so that the game replays the same way whatever the default becomes.
+    const game = build('{"hero_riposte":false,"board_limit":null}');
     try {
       const raw = game.start_events();
-      expect(raw.endsWith('"rules":{"hero_riposte":true,"board_limit":5}}}]')).toBe(true);
+      expect(raw.endsWith('"rules":{"hero_riposte":false,"board_limit":null}}}]')).toBe(true);
       const started = (JSON.parse(raw)[0] as { game_started: Record<string, unknown> }).game_started;
       expect(Object.keys(started)).toEqual(["first", "budget", "data_versions", "rules"]);
-      expect(started.rules).toEqual({ hero_riposte: true, board_limit: 5 });
+      expect(started.rules).toEqual({ hero_riposte: false, board_limit: null });
       expect(raw.indexOf('"data_versions"')).toBeLessThan(raw.indexOf('"rules"'));
     } finally {
       game.free();
@@ -199,6 +211,15 @@ describe("the optional rules of Game.from_data (#147)", () => {
     });
     expect(new Set(texts).size).toBe(1);
     expect(texts[0]).not.toContain('"rules"');
+  });
+
+  test("spelling out the standard rules (the default since #127) records no rules key either", () => {
+    const standard = build('{"hero_riposte":true,"board_limit":5}');
+    try {
+      expect(standard.start_events()).not.toContain('"rules"');
+    } finally {
+      standard.free();
+    }
   });
 
   test("refusals are JSON {code, message} errors with codes the client knows", () => {

@@ -4,7 +4,7 @@ import type { ActionPreview, CardView } from "../src/engine/types";
 import { isActivate, isPlay } from "../src/engine/types";
 import type { Snapshot } from "../src/game/controller";
 import { messageFor } from "../src/ui/errors.fr";
-import { decorateSession, newSession } from "./support/engine";
+import { decorateSession, legacyFactory, newSession } from "./support/engine";
 import { faultyFactory } from "./support/faulty";
 import { playHuman, playUntil, randomPreview, seedWithQuietHumanAction, settle, stallPolicy, stallPreview } from "./support/policies";
 import { expectedCardLabel } from "./support/card-label";
@@ -94,7 +94,8 @@ describe("the permanent information", () => {
       s.legal.find((p) => isPlay(p.action)) ?? (s.legal.find((p) => p.action !== "concede") as ActionPreview);
     const wanted = (s: Snapshot) => {
       const v = s.views.One!;
-      return [...v.you.board, ...v.you.hand].some((x) => x.provocation) && v.opponent.board.some((x) => x.riposte >= 1);
+      // Still in play: a finished game also shows boards, but not the game screen under test.
+      return s.phase === "human-turn" && [...v.you.board, ...v.you.hand].some((x) => x.provocation) && v.opponent.board.some((x) => x.riposte >= 1);
     };
     let c = makeController("bulwark", "rush", 0);
     let found = false;
@@ -423,7 +424,7 @@ describe("the three ends of the game", () => {
   // 220 actions rendered through jsdom: ~3.5 s alone in the full suite, 7+ s under CPU contention;
   // the default 5 s timeout flaked in CI (#77).
   test("exhaustion (pinned case: rush against bulwark, seed 2, both sides stalling): the reason is not swapped", async () => {
-    const c = makeController("rush", "bulwark", 2, { chooseAction: stallPolicy });
+    const c = makeController("rush", "bulwark", 2, { chooseAction: stallPolicy }, legacyFactory);
     c.start();
     const { snapshot } = await playHuman(c, stallPreview);
     const result = snapshot.views.One!.result!;

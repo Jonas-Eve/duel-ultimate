@@ -37,6 +37,14 @@ export const rulesFactory =
     return binding.Game.from_data(...args, rulesJson);
   };
 
+/**
+ * The options off (`RuleSet::legacy()` written out): for a test that states a precise game of the
+ * rules before #127 (a hit on the hero costs the attacker nothing, a board has no limit), e.g. the
+ * pinned wear-down games that end by exhaustion, which the standard rules no longer reach with the
+ * test policy. The default of the engine, which the production client plays, is the standard rules.
+ */
+export const legacyFactory: GameFactory = (...args) => rulesFactory('{"hero_riposte":false,"board_limit":null}')(...args);
+
 export interface Counters {
   creations: number;
   frees: number;

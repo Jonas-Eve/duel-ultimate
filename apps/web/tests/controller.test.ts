@@ -3,7 +3,7 @@ import { EngineError } from "../src/engine/errors";
 import type { ActionPreview, Seat } from "../src/engine/types";
 import { GameController, type GameConfig, type Mode, type Snapshot } from "../src/game/controller";
 import { deriveAiSeed, mulberry32 } from "../src/game/seed";
-import { PAIRS, decorateSession, initTestEngine, newSession } from "./support/engine";
+import { PAIRS, decorateSession, initTestEngine, legacyFactory, newSession } from "./support/engine";
 import { faultyFactory } from "./support/faulty";
 import { fakeSession } from "./support/fake-session";
 import { immediateScheduler, instrumentedFactory, playHuman, randomPreview, realDeps, seedWithComputerOpening, settle, stallPolicy, stallPreview } from "./support/policies";
@@ -479,7 +479,9 @@ describe("two camps", () => {
   });
 
   test("exhaustion, pinned: rush vs bulwark, seed 2, both camps wear down -> exhaustion after 220 actions", async () => {
-    const c = GameController.create(config("two-camps", "rush", "bulwark", 2), realDeps());
+    // The options off: under the standard rules the wear-down play ends by `hero_down` (80 games
+    // over both decks and 40 seeds, none by exhaustion); the display of the reason is the same.
+    const c = GameController.create(config("two-camps", "rush", "bulwark", 2), realDeps({}, legacyFactory));
     try {
       c.start();
       const { snapshot, humanActions } = await playHuman(c, stallPreview);
@@ -509,7 +511,7 @@ describe("two camps", () => {
 
 describe("computer mode", () => {
   test("humanSeat One, and the same pinned exhaustion with human and computer both wearing down", async () => {
-    const c = GameController.create(config("computer", "rush", "bulwark", 2), realDeps({ chooseAction: stallPolicy }));
+    const c = GameController.create(config("computer", "rush", "bulwark", 2), realDeps({ chooseAction: stallPolicy }, legacyFactory));
     try {
       expect(c.getSnapshot().humanSeat).toBe("One");
       c.start();
