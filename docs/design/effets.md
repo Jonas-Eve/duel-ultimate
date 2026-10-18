@@ -8,18 +8,22 @@ critère de #137.
 
 ## Validation
 
-- [ ] Catalogue validé par le propriétaire (décision explicite, y compris les quatre décisions
-      de la section « Décisions à valider par le propriétaire » ci-dessous).
+- [x] Catalogue validé par le propriétaire (décision explicite, y compris les quatre décisions
+      de la section « Décisions du propriétaire » ci-dessous).
 
-Validé par le propriétaire le : _(à remplir après validation, lien du commentaire)_
+Validé par le propriétaire le : 2026-10-18, décisions relayées dans le commentaire du ticket #125 (https://github.com/Jonas-Eve/duel-ultimate/issues/125#issuecomment-6246571955).
 
-Cette case n'est jamais cochée par un agent. La validation est un prérequis de fusion, pas un
-test : le test de CI ne lit pas ce bloc.
+Case cochée ici sur décision explicite du propriétaire, qui a validé en session ; un agent ne la
+coche jamais de sa propre initiative. Le test de CI ne lit pas ce bloc.
 
-## Décisions à valider par le propriétaire
+## Décisions du propriétaire
 
-1. **Riposte unique du mode `simultaneous`** (section 7) : la riposte de la cible frappe celui
-   des attaquants, vivants avant l'action, dont l'identifiant d'instance est le plus petit.
+1. **Riposte unique du mode `simultaneous`** (section 7), modifiée par le propriétaire : la
+   riposte frappe **l'attaquant qu'elle peut tuer** (riposte nominale >= PV courants de
+   l'attaquant, sur l'état d'avant l'action) ; si elle peut tuer **les deux**, celui qui a le
+   **plus de PV** ; si elle n'en peut tuer **aucun**, celui qui a le **plus de PV**. Ajout
+   d'agent, à signaler : à égalité de PV, le plus petit identifiant d'instance (départage
+   déterministe).
 2. **`on_play` et `activated`** (section 4) : pour une créature ou un bâtiment, la pose est
    toujours utilisable et les opérations `on_play` non résolubles sont ignorées ; pour un
    sort, la pose exige qu'au moins une opération D de ses effets `on_play` se résolve ; un
@@ -81,7 +85,7 @@ ou N) et une condition d'usage.
 
 | élément | famille | déclencheur | sélecteur | durée | condition d'usage | classe Φ | vague |
 |---|---|---|---|---|---|---|---|
-| Attack | opération | activated, on_play | hero_or_creature(camp) | instant | au moins une cible légale résoluble (provocation comprise) et force effective >= 1 | D | 1 |
+| Attack | opération | activated, on_play | hero_or_creature(camp) | instant | au moins une cible légale résoluble (provocation comprise) ; pour l'attaque normale et `scales_with_force`, force effective >= 1 ; sinon `amount` >= 1 | D | 1 |
 | DealDamage | opération | on_play, activated | hero_or_creature(camp), creature(camp), all_creatures(camp) | instant | au moins une cible résoluble (héros ou créature en jeu), hors provocation | D | 1 |
 | Draw | opération | on_play, activated | hero(camp) | instant | pioche non vide : au moins une carte résoluble à piocher | D | 1 |
 | ModifyStat | opération | continuous | self, creature(camp), all_creatures(camp) | while_source_in_play | toujours résoluble tant que la source est en jeu (valeur lue, état inchangé) | S | 1 |
@@ -134,7 +138,7 @@ comme action pour l'épuisement (« échec et mat »).
 utilisable si **au moins une opération D se résout** ; les opérations non résolubles sont
 ignorées.
 
-**Distinction `on_play` et `activated`** (décision à valider, n° 2) :
+**Distinction `on_play` et `activated`** (décision validée, n° 2) :
 
 - Pour une **créature** ou un **bâtiment**, la pose est toujours utilisable (sous réserve de la
   limite de plateau, #127) et ses opérations `on_play` non résolubles sont ignorées : une
@@ -216,7 +220,7 @@ de carte, même aperçu). Une carte liste ses effets d'attaque.
   `Attack` porte ses propres paramètres. Une carte peut en porter en plus de l'attaque normale. Il
   n'y a **pas** de déclaration « remplacée ou conservée ».
 
-**Forme de l'opération `Attack` explicite** (`deny_unknown_fields`, décision à valider n° 4) :
+**Forme de l'opération `Attack` explicite** (`deny_unknown_fields`, décision validée n° 4) :
 
 ```json
 {
@@ -240,11 +244,11 @@ de carte, même aperçu). Une carte liste ses effets d'attaque.
 | `ignores_provocation` | booléen | Défaut faux ; lu par le filtre unique `provocation_allows`. |
 | `attackers` | entier | 1 à 2 en vague 1, défaut 1. |
 | `mode` | `simultaneous` ou `chained` | Exigé si `attackers` >= 2, refusé si `attackers` = 1. |
-| `scales_with_force` | booléen | Défaut faux (décision à valider n° 3). |
+| `scales_with_force` | booléen | Défaut faux (décision validée n° 3). |
 
 **`ModifyStat` sur la force.** Il s'applique aux effets d'attaque **dérivés du champ plat `force`**
 (l'attaque normale). Une attaque spéciale explicite utilise **son propre montant**, insensible à
-`ModifyStat`, sauf si elle déclare `scales_with_force` : `amount` s'**ajoute** alors à la force
+`ModifyStat`, sauf si elle déclare `scales_with_force` (une attaque spéciale a donc une valeur fixe ou évolue avec la force) : `amount` s'**ajoute** alors à la force
 effective de la source. Défaut écrit ici : montant propre.
 
 **Attaque à plusieurs attaquants.** Le **coût est payé une seule fois** dans les deux modes. Le
@@ -255,10 +259,12 @@ l'action**. Classe Φ : D (chaque attaquant retire `min(amount, vie) >= 1`).
   la cible meurt en cours de chaîne, les attaques suivantes deviennent non résolubles et sont
   **ignorées** (ce n'est pas une erreur).
 - **`simultaneous`** : les attaquants frappent ensemble et la cible n'inflige **qu'une seule
-  riposte**. Lecture déterministe de « sur la cible de son choix » (**décision à valider n° 1**) :
-  la riposte frappe celui des attaquants, **vivants avant l'action**, dont l'**identifiant
-  d'instance est le plus petit**. Les dégâts de tous les attaquants sont appliqués ensemble, calculés
-  sur l'état d'avant, comme `plan_damage` aujourd'hui.
+  riposte**. Lecture déterministe de « sur la cible de son choix » (**décision validée n° 1**) : la riposte
+  frappe **l'attaquant qu'elle peut tuer** (riposte nominale >= PV courants de l'attaquant, sur
+  l'état d'avant l'action) ; si elle peut tuer **les deux**, celui qui a le **plus de PV** ; si elle
+  n'en peut tuer **aucun**, celui qui a le **plus de PV** ; à égalité de PV, le plus petit
+  identifiant d'instance (départage déterministe ajouté). Les dégâts de tous les attaquants sont
+  appliqués ensemble, calculés sur l'état d'avant, comme `plan_damage` aujourd'hui.
 
 Lectures alternatives refusées :
 
@@ -266,6 +272,8 @@ Lectures alternatives refusées :
   du défenseur interromprait l'action de l'adversaire), l'essai à blanc de l'aperçu et l'IA.
 - « L'attaquant choisit » : la riposte deviendrait un malus qu'il dirige toujours vers sa
   créature la plus solide.
+- « Le plus petit identifiant d'instance » (première version de ce document) : arbitraire, sans
+  rapport avec l'état du combat.
 
 ## 8. Ciblage et provocation
 
