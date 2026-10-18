@@ -1,7 +1,8 @@
 //! Pins the structure of `docs/design/effets.md` (#125): the catalog table has a fixed format
 //! (eight columns, closed value lists, a Phi class and a usage condition for every operation).
-//! The lists below are copied on purpose, not imported: the Rust enums of the closed sets do not
-//! exist yet, and cross-checking table and enums is an acceptance criterion of #137.
+//! The lists below are copied on purpose, not imported: this file pins the format of the table
+//! alone. The cross-check of the table against the Rust enums of the closed sets (#137) is in
+//! `effects_enums_vs_catalog.rs`.
 use std::collections::BTreeSet;
 
 const CATALOG: &str = include_str!("../../../docs/design/effets.md");

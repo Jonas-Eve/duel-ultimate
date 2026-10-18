@@ -108,7 +108,7 @@ impl Tracker {
 
     fn stats(&self, id: CardInstanceId) -> duel_cards::CreatureStats {
         let (side, i) = self.side(id);
-        side.cards[i].creature().clone()
+        side.cards[i].creature().unwrap().clone()
     }
 
     fn name(&self, id: CardInstanceId) -> Option<String> {

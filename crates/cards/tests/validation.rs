@@ -118,8 +118,8 @@ fn resolve_deck_copies_the_stats_of_each_card_in_order() {
     let mut ids = vec!["b"; DECK_SIZE];
     ids[0] = "a";
     let resolved = resolve_deck(&deck_of(&ids), &cards).unwrap();
-    assert_eq!(resolved[0].creature(), &stats_with(2, 3, 4, 5, false, 0));
-    assert_eq!(resolved[1].creature(), &stats());
+    assert_eq!(resolved[0].creature().unwrap(), &stats_with(2, 3, 4, 5, false, 0));
+    assert_eq!(resolved[1].creature().unwrap(), &stats());
 }
 
 #[test]
@@ -506,4 +506,22 @@ fn card_names_differing_by_case_are_distinct() {
         {"kind":"creature","id":"b","name":"same","cost":1,"force":1,"attack_cost":1,"health":1}
     ]"#;
     assert!(parse_cards(json).is_ok());
+}
+
+#[test]
+fn existing_unit_cards_are_unchanged_by_the_effects_and_the_spell_kind() {
+    // The three frozen data sets are read, validated and written back as before.
+    for json in [
+        include_str!("../../../data/fixture/1.0.0/cards.json"),
+        include_str!("../../../data/starter/1.0.0/cards.json"),
+        include_str!("../../../data/starter/1.1.0/cards.json"),
+    ] {
+        let cards = parse_cards(json).unwrap();
+        for card in &cards {
+            assert!(matches!(card, duel_cards::Card::Creature { effects, .. } if effects.is_empty()));
+            assert!(card.spec().is_plain_unit());
+        }
+        let again = parse_cards(&serde_json::to_string(&cards).unwrap()).unwrap();
+        assert_eq!(cards, again);
+    }
 }

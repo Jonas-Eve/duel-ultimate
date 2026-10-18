@@ -53,7 +53,7 @@ fn the_frozen_sets_are_read_unchanged() {
         for card in &cards {
             let spec = card.spec();
             assert!(spec.is_plain_unit(), "{}", card.id());
-            assert_eq!(spec.creature(), &card.stats(), "{}", card.id());
+            assert_eq!(spec.creature().unwrap(), &card.stats(), "{}", card.id());
         }
     }
 }
@@ -73,7 +73,7 @@ fn a_spec_with_kind_unit_or_creature_is_read() {
             r#"{{"kind":"{kind}","cost":1,"force":2,"attack_cost":3,"health":4,"riposte":2}}"#
         );
         let spec: CardSpec = serde_json::from_str(&json).unwrap();
-        assert_eq!(spec.creature().riposte, 2, "{kind}");
+        assert_eq!(spec.creature().unwrap().riposte, 2, "{kind}");
         let written = serde_json::to_string(&spec).unwrap();
         assert!(!written.contains("kind"), "{written}");
     }

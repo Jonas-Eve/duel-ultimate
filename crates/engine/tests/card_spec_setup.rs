@@ -182,3 +182,62 @@ fn new_game_refuses_what_it_cannot_play_yet() {
         SetupError::Invalid(CardsError::ImmobileWithAttackStat { field: "force" })
     );
 }
+
+fn on_play_draw() -> duel_cards::CardEffect {
+    serde_json::from_str(
+        r#"{"trigger":"on_play","ops":[{"op":"draw","target":{"select":"hero","side":"own"},"count":1}]}"#,
+    )
+    .unwrap()
+}
+
+#[test]
+fn new_game_refuses_spells_and_effects_for_now() {
+    // Temporary guard (#206, extended by #207, lifted by task 3 of #137): a valid spell or a
+    // valid unit with effects is refused, and only by the guard (code `invalid_setup`).
+    let mut spell = setup();
+    spell.one.cards[3] = CardSpec::Spell(duel_cards::SpellSpec {
+        cost: 2,
+        tags: vec![],
+        effects: vec![on_play_draw()],
+    });
+    let error = new_game(spell, 1).unwrap_err();
+    assert!(matches!(error, SetupError::Unsupported(_)), "{error:?}");
+    assert_eq!(error.code(), "invalid_setup");
+
+    let mut with_effects = setup();
+    unit_mut(&mut with_effects, 3).effects = vec![on_play_draw()];
+    let error = new_game(with_effects, 1).unwrap_err();
+    assert!(matches!(error, SetupError::Unsupported(_)), "{error:?}");
+    assert_eq!(error.code(), "invalid_setup");
+
+    // On the second side too, in its last card.
+    let mut second = setup();
+    second.two.cards[29] = CardSpec::Spell(duel_cards::SpellSpec {
+        cost: 2,
+        tags: vec![],
+        effects: vec![on_play_draw()],
+    });
+    assert!(matches!(
+        new_game(second, 1).unwrap_err(),
+        SetupError::Unsupported(_)
+    ));
+
+    // An invalid spell keeps its `CardsError`: the guard runs after validation.
+    let mut invalid = setup();
+    invalid.one.cards[0] = CardSpec::Spell(duel_cards::SpellSpec {
+        cost: 2,
+        tags: vec![],
+        effects: vec![],
+    });
+    assert_eq!(
+        new_game(invalid, 1).unwrap_err(),
+        SetupError::Invalid(CardsError::SpellWithoutEffects)
+    );
+    assert!(new_game(setup(), 1).is_ok());
+}
+
+#[test]
+fn max_effect_picks_fits_the_action_bound() {
+    // `duel-cards` cannot depend on the engine, so it carries its own copy of the bound.
+    assert!(duel_cards::MAX_EFFECT_PICKS <= duel_engine::MAX_PICKS);
+}

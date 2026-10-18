@@ -69,7 +69,7 @@ fn a_tag_outside_the_list_is_refused() {
 fn a_tag_in_the_list_is_accepted() {
     let cards = parse_card_set(&card_with(r#"["bâtiment"]"#), &list(&["bâtiment", "x"])).unwrap();
     assert_eq!(cards.len(), 1);
-    assert_eq!(cards[0].spec().creature(), &cards[0].stats());
+    assert_eq!(cards[0].spec().creature().unwrap(), &cards[0].stats());
 }
 
 #[test]

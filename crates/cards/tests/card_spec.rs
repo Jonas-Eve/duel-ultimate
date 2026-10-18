@@ -42,7 +42,7 @@ fn card_spec_reads_four_or_six_keys() {
     let four = r#"{"cost":1,"force":2,"attack_cost":3,"health":4}"#;
     let spec: CardSpec = serde_json::from_str(four).unwrap();
     assert_eq!(
-        spec.creature(),
+        spec.creature().unwrap(),
         &CreatureStats {
             cost: 1,
             force: 2,
@@ -54,8 +54,8 @@ fn card_spec_reads_four_or_six_keys() {
     );
     let six = r#"{"cost":1,"force":2,"attack_cost":3,"health":4,"provocation":true,"riposte":2}"#;
     let spec: CardSpec = serde_json::from_str(six).unwrap();
-    assert!(spec.creature().provocation);
-    assert_eq!(spec.creature().riposte, 2);
+    assert!(spec.creature().unwrap().provocation);
+    assert_eq!(spec.creature().unwrap().riposte, 2);
 }
 
 #[test]
@@ -64,7 +64,6 @@ fn card_spec_errors_are_the_creature_stats_errors() {
     // `unknown field` error, which lists the expected keys, is pinned in full below).
     let bad = [
         r#"{"cost":"1","force":1,"attack_cost":1,"health":1}"#,
-        r#"{"cost":1,"force":1,"attack_cost":1}"#,
         r#"{"cost":1,"force":1,"attack_cost":1,"health":1,"riposte":-1}"#,
     ];
     for json in bad {
@@ -72,6 +71,13 @@ fn card_spec_errors_are_the_creature_stats_errors() {
         let got = serde_json::from_str::<CardSpec>(json).unwrap_err();
         assert_eq!(got.to_string(), expected.to_string(), "{json}");
     }
+    // A missing `health` is the same cause (without the position, see the pinned order below).
+    let json = r#"{"cost":1,"force":1,"attack_cost":1}"#;
+    let expected = serde_json::from_str::<CreatureStats>(json)
+        .unwrap_err()
+        .to_string();
+    let got = serde_json::from_str::<CardSpec>(json).unwrap_err().to_string();
+    assert!(expected.starts_with(&got), "{expected} / {got}");
     // `null` has the same cause (the struct name is that of the wire form, `CardSpec`).
     let got = serde_json::from_str::<CardSpec>("null")
         .unwrap_err()
@@ -88,20 +94,18 @@ fn card_spec_pins_the_text_of_its_unknown_field_error() {
             .unwrap_err()
             .to_string(),
         "unknown field `bonus`, expected one of `kind`, `cost`, `force`, `attack_cost`, `health`, \
-         `provocation`, `riposte`, `immobile`, `tags` at line 1 column 54"
+         `provocation`, `riposte`, `immobile`, `tags`, `effects` at line 1 column 54"
     );
 }
 
 #[test]
 fn card_spec_reports_the_first_missing_field_in_a_pinned_order() {
-    // Required fields of the flat form first (`cost`, `health`, with a position), then `force`,
-    // then `attack_cost` (checked after the struct is read, so without a position).
+    // The flat form reads every field as optional (#207: `cost` and `health` too, a spell has no
+    // `health`), so the check comes after the struct is read: no position in the message. Order:
+    // `cost`, `health`, then `force`, then `attack_cost`.
     for (json, expected) in [
-        (r#"{}"#, "missing field `cost` at line 1 column 2"),
-        (
-            r#"{"cost":1}"#,
-            "missing field `health` at line 1 column 10",
-        ),
+        (r#"{}"#, "missing field `cost`"),
+        (r#"{"cost":1}"#, "missing field `health`"),
         (r#"{"cost":1,"health":1}"#, "missing field `force`"),
         (
             r#"{"cost":1,"force":1,"health":1}"#,
@@ -152,4 +156,41 @@ fn validate_card_spec_gives_the_same_errors_as_validate_creature() {
             ..
         })
     ));
+}
+
+#[test]
+fn a_plain_unit_spec_is_still_exactly_the_creature_stats_json() {
+    // The wire form of a unit without effects is unchanged byte for byte (#207): no `kind`, no
+    // `effects`, whatever the new variants.
+    let spec = CardSpec::from(stats());
+    assert_eq!(
+        serde_json::to_string(&spec).unwrap(),
+        serde_json::to_string(&stats()).unwrap()
+    );
+    assert_eq!(spec.creature(), Some(&stats()));
+    assert!(spec.is_plain_unit());
+}
+
+#[test]
+fn is_plain_unit_is_false_for_a_spell_and_for_a_unit_with_effects() {
+    use duel_cards::{CardEffect, SpellSpec, UnitSpec};
+    let draw: CardEffect = serde_json::from_str(
+        r#"{"trigger":"on_play","ops":[{"op":"draw","target":{"select":"hero","side":"own"},"count":1}]}"#,
+    )
+    .unwrap();
+    let spell = CardSpec::Spell(SpellSpec {
+        cost: 2,
+        tags: vec![],
+        effects: vec![draw.clone()],
+    });
+    assert!(!spell.is_plain_unit());
+    assert!(spell.creature().is_none());
+    let unit = CardSpec::Unit(UnitSpec {
+        stats: stats(),
+        immobile: false,
+        tags: vec![],
+        effects: vec![draw],
+    });
+    assert!(!unit.is_plain_unit());
+    assert_eq!(unit.creature(), Some(&stats()));
 }
