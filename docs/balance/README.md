@@ -73,6 +73,40 @@ parties terminées ; les seuils sont des constantes publiques de `duel_simulator
   le programme sort avec le code 0. Seul un rapport qui contredit ses propres invariants sort avec
   le code 1, sans rien écrire sur stdout.
 
+### Confrontation de deux politiques (`--versus`)
+
+`duel-simulator 2000 --versus greedy,random --seed 1` fait jouer deux politiques **l'une contre
+l'autre** (la candidate d'abord, la référence ensuite, deux noms distincts du registre), là où
+`--policy a,b` joue chaque politique en auto-jeu dans sa propre section. C'est l'outil des mesures
+de confrontation (borne basse de Wilson face à la gloutonne, taux contre `random`, part d'attaques
+sur le héros) ; #132 le réutilisera. Compatible avec `--set`, `--seed`, `--hero-riposte`,
+`--board-limit` et `--timing` ; incompatible avec `--policy`, `--noise` et `--against` (code 2).
+
+- **Forme du rapport.** Un en-tête (`versus | set | seed | games per matchup | action cap |
+  candidate | reference | rules`), puis deux tableaux avec une ligne par matchup et une ligne
+  `total` : les résultats (parties, victoires de la candidate avec son intervalle de Wilson,
+  victoires de la référence, interrompues, victoires du siège One, victoires du deck A) et le
+  comportement (durée moyenne des parties terminées, attaques de chaque politique et part sur le
+  héros, passations de la main, victoires de chaque politique au siège One).
+- **Croisement des sièges (modulo 4).** Dans un matchup, la partie `i` met le deck A au siège One si
+  `i` est pair (en miroir, A est toujours One) et la **candidate au siège One si `(i / 2)` est
+  pair** : les quatre combinaisons (deck, politique) se répètent tous les 4 indices, d'où un nombre
+  de parties **multiple de 4** (sinon refus, code 2). Ni l'avantage d'un siège, ni celui d'un deck
+  ne se confondent donc avec celui d'une politique.
+- **Appariement des graines.** La graine de partie est celle de `run_batch` (`game_seed`) et ne dépend
+  jamais d'une politique : deux lots (ou la même confrontation avec les rôles échangés) rejouent
+  les mêmes graines moteur. Chaque siège donne son générateur à sa politique, jamais par nom ;
+  avec la même politique des deux côtés, les parties sont celles de `run_batch`.
+- **Part d'attaques sur le héros.** Une attaque sur le héros est un `Attacked` suivi, dans les
+  événements de la même action, d'un `Damaged` (l'événement `Attacked` ne porte pas de cible) ;
+  la part est attaques sur le héros / attaques de la politique, avec son intervalle de Wilson. Les
+  passations comptent les `ActivePlayerChanged` suivant une action de la politique.
+- **Lire Wilson.** L'intervalle de la candidate porte sur **toutes** les parties, interrompues
+  comprises (une partie interrompue n'est jamais une victoire, et le `interrupted` de la ligne la
+  rend visible). Une borne basse au-dessus de 50 % dit que la candidate bat la référence ; un
+  intervalle qui chevauche 50 % ne démontre rien. Lire d'abord la ligne `total`, puis les matchups
+  (chacun a moins de parties, donc un intervalle plus large).
+
 ### Lire un diff (`--against`)
 
 `duel-simulator 2000 --set starter@2.0.0 --against starter@1.1.0 --seed 1` imprime le diff seul,
