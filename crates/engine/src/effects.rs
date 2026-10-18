@@ -15,8 +15,33 @@ use crate::rules::{
     Action, Event, Pick, RuleError, Target, board_position, hand_position, hero_effect,
     opposing_board_position, play_blocker, provocation_allows,
 };
-use crate::state::{CardInstanceId, GameState, PlayerId, WinReason};
+use crate::state::{CardInstance, CardInstanceId, GameState, PlayerId, WinReason};
 use duel_cards::Effect;
+
+/// The values of a card the rules read: cost, force, attack cost, riposte and provocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EffectiveStats {
+    pub(crate) cost: u32,
+    pub(crate) force: u32,
+    pub(crate) attack_cost: u32,
+    pub(crate) riposte: u32,
+    pub(crate) provocation: bool,
+}
+
+/// The only reader of the effective values of `card` (guarded by the source scan of
+/// `tests/effective_is_the_only_reader.rs`). The identity at this slice: the five printed
+/// values; #131 folds modifiers (from `state` and the card) in here, without touching a caller.
+/// The current health is not an effective value and stays read as `card.stats.health`.
+#[inline]
+pub(crate) fn effective(_state: &GameState, card: &CardInstance) -> EffectiveStats {
+    EffectiveStats {
+        cost: card.stats.cost,
+        force: card.stats.force,
+        attack_cost: card.stats.attack_cost,
+        riposte: card.stats.riposte,
+        provocation: card.stats.provocation,
+    }
+}
 
 /// Where an effect comes from: a card of the active hand, a creature of the active board, or the
 /// active hero.
@@ -375,7 +400,7 @@ pub(crate) fn resolve(state: &mut GameState, used: &Use<'_>, events: &mut Vec<Ev
                 return Settled::Ended;
             };
             let creature = state.player_mut(player).hand.remove(index);
-            let cost = creature.stats.cost;
+            let cost = effective(state, &creature).cost;
             state.player_mut(player).board.push(creature);
             events.push(Event::Played { player, card, cost });
             Settled::Spent(cost)
@@ -396,7 +421,7 @@ pub(crate) fn resolve(state: &mut GameState, used: &Use<'_>, events: &mut Vec<Ev
                 .board
                 .iter()
                 .find(|c| c.id == attacker)
-                .map(|c| c.stats.attack_cost)
+                .map(|c| effective(state, c).attack_cost)
             else {
                 debug_assert!(false, "validated attacker on the board");
                 return Settled::Ended;
@@ -561,6 +586,61 @@ mod tests {
         }
         actions.extend(legal_actions(state));
         actions
+    }
+
+    const FIXTURE_CARDS: &str = include_str!("../../../data/fixture/1.0.0/cards.json");
+    const FIXTURE_DECKS: &str = include_str!("../../../data/fixture/1.0.0/decks.json");
+
+    fn fixture_game(seed: u64, rules: RuleSet) -> GameState {
+        let mut s: GameSetup =
+            game_setup_from_data(FIXTURE_CARDS, FIXTURE_DECKS, "aggro", "control", Vec::new())
+                .unwrap();
+        s.rules = rules;
+        new_game(s, seed).unwrap().0
+    }
+
+    /// Every state of one random game of `state`, the initial one included.
+    fn play_out(mut state: GameState, seed: u64, into: &mut Vec<GameState>) {
+        let mut policy = ChaCha8Rng::seed_from_u64(seed ^ 0x185);
+        while state.winner.is_none() {
+            into.push(state.clone());
+            let playable: Vec<Action> = legal_actions(&state)
+                .into_iter()
+                .filter(|a| *a != Action::Concede)
+                .collect();
+            let action = playable[policy.random_range(0..playable.len())].clone();
+            apply(&mut state, action).unwrap();
+        }
+        into.push(state);
+    }
+
+    #[test]
+    fn effective_is_the_identity_in_this_slice() {
+        let mut all = states(250);
+        for seed in 0..250u64 {
+            play_out(fixture_game(seed, rules_of(seed)), seed, &mut all);
+        }
+        let mut checked = 0;
+        for state in &all {
+            for side in [&state.one, &state.two] {
+                let zones = [&side.deck, &side.hand, &side.board, &side.discard];
+                for card in zones.into_iter().flatten() {
+                    let got = effective(state, card);
+                    assert_eq!(
+                        got,
+                        EffectiveStats {
+                            cost: card.stats.cost,
+                            force: card.stats.force,
+                            attack_cost: card.stats.attack_cost,
+                            riposte: card.stats.riposte,
+                            provocation: card.stats.provocation,
+                        }
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 100_000, "{checked} cards checked");
     }
 
     #[test]
