@@ -11,6 +11,8 @@ n'est pas une mesure : il ne se compare à rien et ne se reproduit pas.
 - [`reports/`](reports/) : les rapports d'équilibrage consignés, un fichier par mesure
   (`<AAAA-MM-JJ>-<jeu>-<version>-<politique>-<variante>.md`). Le premier est la ligne de base du
   comportement historique : [`2026-10-17-starter-1.1.0-random-legacy.md`](reports/2026-10-17-starter-1.1.0-random-legacy.md).
+  Politique gloutonne appariée à `random` (mêmes graines, #160) :
+  [`2026-10-18-starter-1.1.0-greedy.md`](reports/2026-10-18-starter-1.1.0-greedy.md).
 
 ## Lire le rapport du simulateur
 
