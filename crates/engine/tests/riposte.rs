@@ -80,10 +80,10 @@ fn arena_with(
     )
     .unwrap();
     for n in 0..n {
-        apply(&mut state, Action::Play { card: id(n) }).unwrap();
+        apply(&mut state, Action::play(id(n))).unwrap();
     }
     for n in 0..m {
-        apply(&mut state, Action::Play { card: id(30 + n) }).unwrap();
+        apply(&mut state, Action::play(id(30 + n))).unwrap();
     }
     assert_eq!((state.active(), state.budget()), (PlayerId::One, k));
     state

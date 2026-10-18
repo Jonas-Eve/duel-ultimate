@@ -159,7 +159,7 @@ fn hitter_ready(two_health: u32, force: u32, rules: serde_json::Value) -> GameSt
 fn with_the_hero_riposte_a_non_lethal_hit_on_the_hero_is_a_sacrifice_greedy_refuses() {
     let state = hitter_ready(30, 3, riposting());
     let recruit = in_hand(&state, PlayerId::One, "recruit");
-    assert_eq!(pick(&state), Action::Play { card: recruit });
+    assert_eq!(pick(&state), Action::play(recruit));
 }
 
 #[test]
@@ -231,7 +231,7 @@ fn plays_the_best_payable_card() {
         (Hero::second(20), vec![]),
     );
     let strong = in_hand(&state, PlayerId::One, "strong");
-    assert_eq!(pick(&state), Action::Play { card: strong });
+    assert_eq!(pick(&state), Action::play(strong));
 }
 
 // Story line: the pile cannot be evaluated; drawing is chosen on the counts.
@@ -243,7 +243,7 @@ fn draws_when_the_hand_is_empty() {
     let two = clones(&Hero::second(20), &card("d", 1, 1, 1), 5);
     let state = game_from(one, two);
     assert_eq!(state.active(), PlayerId::One);
-    assert_eq!(pick(&state), Action::Activate { effect: 1 });
+    assert_eq!(pick(&state), Action::activate(1));
 }
 
 // Story line: never walks into a loss that the preview announces, when another action exists.
@@ -300,7 +300,7 @@ fn greedy_is_deterministic_and_leaves_the_generator_alone() {
             let first = greedy_policy(&obs, &mut used);
             assert_eq!(first, greedy_policy(&obs, &mut used), "seed {seed}");
             assert_eq!(used, untouched, "seed {seed} step {step}");
-            let action = obs.actions().get(first).copied().expect("in range");
+            let action = obs.actions().get(first).cloned().expect("in range");
             apply(&mut state, action).unwrap();
         }
     }
@@ -339,8 +339,8 @@ fn greedy_sees_nothing_hidden() {
                 greedy_policy(&ob, &mut rng()),
             );
             assert_eq!(ia, ib, "seed {seed}");
-            let action = oa.actions()[ia];
-            apply(&mut sa, action).unwrap();
+            let action = oa.actions()[ia].clone();
+            apply(&mut sa, action.clone()).unwrap();
             apply(&mut sb, action).unwrap();
         }
     }

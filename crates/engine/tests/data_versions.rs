@@ -185,7 +185,7 @@ fn the_versions_influence_neither_the_rng_nor_the_rules() {
                 .into_iter()
                 .rfind(|a| *a != Action::Concede)
                 .unwrap_or(Action::Concede);
-            let a = apply(&mut with, action).unwrap();
+            let a = apply(&mut with, action.clone()).unwrap();
             let b = apply(&mut without, action).unwrap();
             assert_eq!(a, b, "seed {seed}");
             assert_eq!(snapshot(&with), snapshot(&without), "seed {seed}");

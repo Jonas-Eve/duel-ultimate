@@ -134,8 +134,8 @@ pub fn play_game(
             obs.actions().len()
         );
         // The observation borrows the state: keep the list it offered, then let go of it.
-        let offered = obs.actions().to_vec();
-        let Some(&action) = offered.get(chosen) else {
+        let offered = obs.into_actions();
+        let Some(action) = offered.get(chosen).cloned() else {
             break;
         };
         let Ok(events) = apply(&mut state, action) else {

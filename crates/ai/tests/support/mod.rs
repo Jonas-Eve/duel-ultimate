@@ -199,7 +199,7 @@ pub fn on_board(state: &GameState, seat: PlayerId, name: &str) -> CardInstanceId
 pub fn play(state: &mut GameState, name: &str) {
     let seat = state.active();
     let card = in_hand(state, seat, name);
-    apply(state, Action::Play { card }).expect("a legal play");
+    apply(state, Action::play(card)).expect("a legal play");
 }
 
 /// The active seat hands the token over by playing a pad.

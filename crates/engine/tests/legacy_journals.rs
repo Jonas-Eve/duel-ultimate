@@ -36,7 +36,7 @@ fn play_scripted(setup: duel_engine::GameSetup, seed: u64) -> (GameState, Vec<Ev
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1_442_695_040_888_963_407);
         let pick = usize::try_from((rng >> 33) % actions.len() as u64).unwrap();
-        log.extend(apply(&mut state, actions[pick]).unwrap());
+        log.extend(apply(&mut state, actions[pick].clone()).unwrap());
     }
     (state, log)
 }

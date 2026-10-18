@@ -37,7 +37,7 @@ fn id(n: u32) -> CardInstanceId {
 }
 
 fn play(n: u32) -> Action {
-    Action::Play { card: id(n) }
+    Action::play(id(n))
 }
 
 /// A creature of summoning cost 1.
@@ -152,7 +152,7 @@ fn the_order_of_the_checks_keeps_card_not_in_hand_first() {
     // Four cards in hand, the rest in the pile: every kind of id that is not in the hand.
     let mut state = arena(limited(1), 4, false);
     let on_board = state.hand(PlayerId::One)[0];
-    apply(&mut state, Action::Play { card: on_board }).unwrap();
+    apply(&mut state, Action::play(on_board)).unwrap();
     assert_eq!(state.board(PlayerId::One), vec![on_board]);
     let in_hand = state.hand(PlayerId::One)[0];
     let in_pile = (0..30)
@@ -162,7 +162,7 @@ fn the_order_of_the_checks_keeps_card_not_in_hand_first() {
 
     // Control: a card of the hand meets the full board.
     assert_eq!(
-        apply(&mut state.clone(), Action::Play { card: in_hand }),
+        apply(&mut state.clone(), Action::play(in_hand)),
         Err(RuleError::BoardFull)
     );
     for (what, card) in [
@@ -173,7 +173,7 @@ fn the_order_of_the_checks_keeps_card_not_in_hand_first() {
     ] {
         let before = state.clone();
         assert_eq!(
-            apply(&mut state, Action::Play { card }),
+            apply(&mut state, Action::play(card)),
             Err(RuleError::CardNotInHand),
             "{what}"
         );
@@ -186,7 +186,7 @@ fn a_card_that_cannot_be_played_is_not_listed_previewed_or_offered_to_the_ai() {
     let mut state = arena(limited(2), 20, true);
     // Control: with a free place, the summonings are listed, previewed and offered.
     let first = state.hand(PlayerId::One)[0];
-    apply(&mut state, Action::Play { card: first }).unwrap();
+    apply(&mut state, Action::play(first)).unwrap();
     let observation = Observation::of(&state).unwrap();
     assert!(legal_actions(&state).iter().any(is_play));
     assert!(
@@ -198,7 +198,7 @@ fn a_card_that_cannot_be_played_is_not_listed_previewed_or_offered_to_the_ai() {
     drop(observation);
 
     let second = state.hand(PlayerId::One)[0];
-    apply(&mut state, Action::Play { card: second }).unwrap();
+    apply(&mut state, Action::play(second)).unwrap();
     assert!(!legal_actions(&state).iter().any(is_play));
     assert!(
         !preview_legal_actions(&state)
@@ -268,7 +268,7 @@ fn journal(rules: RuleSet, seed: u64) -> (GameState, Vec<Value>) {
             .collect();
         let action = actions
             .get(rng.below(actions.len().max(1)))
-            .copied()
+            .cloned()
             .unwrap_or(Action::Concede);
         log.extend(apply(&mut state, action).unwrap());
     }
@@ -347,7 +347,7 @@ fn the_limit_alone_never_exhausts_a_player() {
                         !playable.is_empty(),
                         "{rules:?}, seed {seed}: exhausted yet not over"
                     );
-                    apply(&mut state, playable[rng.below(playable.len())]).unwrap();
+                    apply(&mut state, playable[rng.below(playable.len())].clone()).unwrap();
                     steps += 1;
                     assert!(
                         steps < 3000,
@@ -377,17 +377,17 @@ fn no_randomness_is_consumed_by_a_full_board() {
     let run = |rules: RuleSet, refused: bool| {
         let mut state = arena(rules, 4, true);
         let first = state.hand(PlayerId::One)[0];
-        apply(&mut state, Action::Play { card: first }).unwrap();
+        apply(&mut state, Action::play(first)).unwrap();
         if refused {
             let other = state.hand(PlayerId::One)[0];
             assert_eq!(
-                apply(&mut state, Action::Play { card: other }),
+                apply(&mut state, Action::play(other)),
                 Err(RuleError::BoardFull)
             );
         }
         let mut drawn = Vec::new();
         for _ in 0..6 {
-            let effect = Action::Activate { effect: 0 };
+            let effect = Action::activate(0);
             drawn.extend(apply(&mut state, effect).unwrap());
         }
         drawn

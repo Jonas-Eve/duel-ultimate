@@ -141,7 +141,7 @@ fn for_every_state(seed: u64, mut check: impl FnMut(&GameState)) {
             .into_iter()
             .filter(|a| *a != Action::Concede)
             .collect();
-        apply(&mut state, playable[rng.below(playable.len())]).unwrap();
+        apply(&mut state, playable[rng.below(playable.len())].clone()).unwrap();
     }
 }
 
@@ -196,7 +196,7 @@ fn states_differing_only_by_the_top_of_the_pile_give_equal_outcomes_and_previews
         let mut top: BTreeSet<CardInstanceId> = BTreeSet::new();
         for action in obs.actions() {
             if matches!(action, Action::Activate { .. }) {
-                top.extend(drawn_by(&state_a, *action));
+                top.extend(drawn_by(&state_a, action.clone()));
             }
         }
         assert!(!top.is_empty(), "seed {seed}: no draw to compare");
@@ -212,11 +212,11 @@ fn states_differing_only_by_the_top_of_the_pile_give_equal_outcomes_and_previews
         let draw_action = obs
             .actions()
             .iter()
-            .copied()
-            .find(|a| matches!(a, Action::Activate { effect: 0 }))
+            .find(|a| matches!(a, Action::Activate { effect: 0, .. }))
+            .cloned()
             .expect("the first effect draws one card");
         let (mut real_a, mut real_b) = (state_a.clone(), state_b.clone());
-        apply(&mut real_a, draw_action).unwrap();
+        apply(&mut real_a, draw_action.clone()).unwrap();
         apply(&mut real_b, draw_action).unwrap();
         assert_ne!(
             format!("{:?}", player_view(&real_a, seat)),
@@ -267,7 +267,7 @@ fn the_outcome_preview_is_the_preview_is_the_entry_of_preview_legal_actions() {
             let all = preview_legal_actions(state);
             let n = obs.actions().len();
             assert_eq!(all.len(), n + 1, "Concede comes last");
-            assert_eq!(all.last().map(|p| p.action), Some(Action::Concede));
+            assert_eq!(all.last().map(|p| p.action.clone()), Some(Action::Concede));
             for (i, (action, expected)) in obs.actions().iter().zip(&all).enumerate() {
                 let preview = obs.preview(i).unwrap();
                 assert_eq!(preview.action, *action);
@@ -302,7 +302,7 @@ fn the_hand_after_an_action_splits_into_what_was_there_and_what_was_drawn() {
             for (i, action) in obs.actions().iter().enumerate() {
                 let after = obs.outcome(i).unwrap().view_after;
                 let mut real = state.clone();
-                apply(&mut real, *action).unwrap();
+                apply(&mut real, action.clone()).unwrap();
                 let real_hand: Vec<u32> = real.hand(seat).iter().map(|c| c.0).collect();
                 let known: Vec<u32> = after.you.hand_known.iter().map(|c| c.id.0).collect();
                 // The two parts always account for the real hand, in order.
@@ -312,7 +312,7 @@ fn the_hand_after_an_action_splits_into_what_was_there_and_what_was_drawn() {
                 );
                 assert_eq!(known[..], real_hand[..known.len()]);
                 match action {
-                    Action::Play { card } => {
+                    Action::Play { card, .. } => {
                         plays += 1;
                         assert!(!known.contains(&card.0));
                         assert_eq!(after.you.hand_unseen, 0);
@@ -412,7 +412,7 @@ fn a_suicidal_hit_on_the_hero_reveals_nothing_hidden_in_the_outcome() {
                 .into_iter()
                 .filter(|a| *a != Action::Concede)
                 .collect();
-            apply(&mut state, playable[rng.below(playable.len())]).unwrap();
+            apply(&mut state, playable[rng.below(playable.len())].clone()).unwrap();
         }
     }
     assert!(suicides > 20, "suicidal hits seen: {suicides}");

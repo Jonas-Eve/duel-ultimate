@@ -8,7 +8,7 @@ use crate::time::{self, Spend};
 use duel_cards::HeroEffect;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
     /// Summons a creature of the active player's hand (untrusted id, validated by the engine).
@@ -25,6 +25,18 @@ pub enum Action {
         target: Target,
     },
     Concede,
+}
+
+impl Action {
+    /// `Play { card }`: summons a creature of the active player's hand.
+    pub fn play(card: CardInstanceId) -> Action {
+        Action::Play { card }
+    }
+
+    /// `Activate { effect }`: activates the active hero's effect at this index.
+    pub fn activate(effect: u32) -> Action {
+        Action::Activate { effect }
+    }
 }
 
 /// What an attack aims at: the opposing hero or a creature of the opposing board.
@@ -232,7 +244,7 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
     }
     match action {
         Action::Concede => Ok(()),
-        Action::Play { card } => {
+        Action::Play { card, .. } => {
             // The hand first: an id that is not in it gets `CardNotInHand` whatever the board.
             hand_position(state, *card).ok_or(RuleError::CardNotInHand)?;
             play_blocker(state, state.active).map_or(Ok(()), Err)
@@ -252,7 +264,7 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
                 Err(RuleError::TargetForbiddenByProvocation)
             }
         }
-        Action::Activate { effect } => {
+        Action::Activate { effect, .. } => {
             let hero_effect = hero_effect(state, *effect).ok_or(RuleError::UnknownEffect)?;
             if effects::applicable(state, state.active, &hero_effect.effect) {
                 Ok(())
@@ -273,10 +285,10 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
 fn candidates(state: &GameState) -> Vec<Action> {
     let side = state.player(state.active);
     let opposing = state.player(state.active.opponent());
-    let plays = side.hand.iter().map(|c| Action::Play { card: c.id });
+    let plays = side.hand.iter().map(|c| Action::play(c.id));
     let effects = (0..side.hero.effects.len())
         .filter_map(|i| u32::try_from(i).ok())
-        .map(|effect| Action::Activate { effect });
+        .map(Action::activate);
     let attacks = side.board.iter().flat_map(|attacker| {
         std::iter::once(Target::Hero)
             .chain(opposing.board.iter().map(|c| Target::Creature(c.id)))
@@ -357,7 +369,7 @@ pub fn apply(state: &mut GameState, action: Action) -> Result<Vec<Event>, RuleEr
             check_exhaustion(state, &mut events);
             Ok(events)
         }
-        Action::Play { card } => {
+        Action::Play { card, .. } => {
             let index = hand_position(state, card).ok_or(RuleError::CardNotInHand)?;
             let creature = state.player_mut(player).hand.remove(index);
             let cost = creature.stats.cost;
@@ -367,7 +379,7 @@ pub fn apply(state: &mut GameState, action: Action) -> Result<Vec<Event>, RuleEr
             check_exhaustion(state, &mut events);
             Ok(events)
         }
-        Action::Activate { effect } => {
+        Action::Activate { effect, .. } => {
             let hero_effect = hero_effect(state, effect)
                 .cloned()
                 .ok_or(RuleError::UnknownEffect)?;
@@ -490,7 +502,7 @@ mod tests {
                 let legal = legal_actions(&state);
                 for action in every_attack(&state) {
                     let mut clone = state.clone();
-                    match apply(&mut clone, action) {
+                    match apply(&mut clone, action.clone()) {
                         Ok(_) => assert!(
                             legal.contains(&action),
                             "seed {seed}: {action:?} applies but is not listed"
@@ -517,8 +529,8 @@ mod tests {
                 }
                 let playable: Vec<Action> = legal
                     .iter()
-                    .copied()
-                    .filter(|a| *a != Action::Concede)
+                    .filter(|a| **a != Action::Concede)
+                    .cloned()
                     .collect();
                 // A living creature always has a legal attack, even when only the opposing
                 // provocateurs may be targeted: provocation never exhausts a player.
@@ -529,7 +541,7 @@ mod tests {
                     );
                 }
                 assert!(!playable.is_empty(), "seed {seed}: exhausted yet not over");
-                let action = playable[policy.random_range(0..playable.len())];
+                let action = playable[policy.random_range(0..playable.len())].clone();
                 if let Action::Attack {
                     target: Target::Creature(victim),
                     ..
@@ -543,7 +555,7 @@ mod tests {
                     attacks_on_provocateurs += 1;
                 }
                 let before = potential(&state);
-                apply(&mut state, action).unwrap();
+                apply(&mut state, action.clone()).unwrap();
                 assert!(
                     potential(&state) < before,
                     "seed {seed}: Φ did not fall on {action:?}"

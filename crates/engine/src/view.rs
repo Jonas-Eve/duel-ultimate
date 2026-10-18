@@ -281,7 +281,7 @@ mod tests {
             if actions.is_empty() {
                 break;
             }
-            let action = actions[rng.below(actions.len())];
+            let action = actions[rng.below(actions.len())].clone();
             apply(&mut state, action).unwrap();
             check(&state);
         }

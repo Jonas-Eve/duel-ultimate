@@ -375,7 +375,7 @@ fn play(setup: GameSetup, seed: u32, mut after: impl FnMut(&GameState, &[Event])
         if actions.is_empty() {
             break;
         }
-        let events = apply(&mut state, actions[rng.below(actions.len())]).unwrap();
+        let events = apply(&mut state, actions[rng.below(actions.len())].clone()).unwrap();
         after(&state, &events);
     }
     state
@@ -500,8 +500,11 @@ fn a_view_never_changes_what_the_game_does_next() {
             }
             let actions = legal_actions(&blind);
             assert_eq!(actions, legal_actions(&watched));
-            let action = actions[rng.below(actions.len())];
-            assert_eq!(apply(&mut watched, action), apply(&mut blind, action));
+            let action = actions[rng.below(actions.len())].clone();
+            assert_eq!(
+                apply(&mut watched, action.clone()),
+                apply(&mut blind, action)
+            );
             assert_eq!(watched, blind);
             if blind.winner().is_some() {
                 break;
@@ -583,13 +586,7 @@ mod unavailable {
     }
 
     fn play(state: &mut GameState, n: u32) {
-        apply(
-            state,
-            Action::Play {
-                card: CardInstanceId(n),
-            },
-        )
-        .unwrap();
+        apply(state, Action::play(CardInstanceId(n))).unwrap();
     }
 
     fn json(state: &GameState, seat: PlayerId) -> Value {

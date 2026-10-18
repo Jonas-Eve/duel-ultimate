@@ -95,7 +95,7 @@ fn pile_order(seed: u64) -> Vec<u32> {
         seed,
     )
     .unwrap();
-    apply(&mut state, Action::Activate { effect: 0 })
+    apply(&mut state, Action::activate(0))
         .unwrap()
         .into_iter()
         .filter_map(|e| match e {
@@ -286,7 +286,7 @@ fn setup_parses_from_json_and_rejects_unknown_fields() {
 /// One (budget 3) activates a single effect of cost `cost` against a Two of `two_max`.
 fn after_cost(cost: u32, two_max: u32) -> (GameState, Vec<Event>) {
     let (mut state, _) = duel(vec![draw(cost, 1)], two_max);
-    let events = apply(&mut state, Action::Activate { effect: 0 }).unwrap();
+    let events = apply(&mut state, Action::activate(0)).unwrap();
     (state, events)
 }
 
@@ -336,7 +336,7 @@ fn a_cost_above_the_activators_own_max_time_is_legal() {
 #[test]
 fn drawing_moves_cards_from_the_pile_to_the_hand() {
     let (mut state, _) = duel(vec![draw(1, 2)], 8);
-    let events = apply(&mut state, Action::Activate { effect: 0 }).unwrap();
+    let events = apply(&mut state, Action::activate(0)).unwrap();
     assert_eq!(state.hand_len(PlayerId::One), 6);
     assert_eq!(state.deck_len(PlayerId::One), 24);
     assert_eq!(
@@ -350,7 +350,7 @@ fn a_draw_larger_than_the_pile_draws_what_is_left() {
     let mut one = hero(2, 8, 8, vec![draw(1, 5)]);
     one.starting_hand = 28; // 2 cards left in the pile
     let (mut state, _) = new_game(setup(one, hero(1, 1, 8, vec![draw(1, 1)])), 1).unwrap();
-    let events = apply(&mut state, Action::Activate { effect: 0 }).unwrap();
+    let events = apply(&mut state, Action::activate(0)).unwrap();
     assert_eq!(kinds(&events).iter().filter(|k| **k == "Drew").count(), 2);
     assert_eq!(state.hand_len(PlayerId::One), 30);
     assert_eq!(state.deck_len(PlayerId::One), 0);
@@ -362,7 +362,7 @@ fn an_unknown_effect_index_is_refused_and_changes_nothing() {
     let before = state.clone();
     for effect in [1, 8, 100, u32::MAX] {
         assert_eq!(
-            apply(&mut state, Action::Activate { effect }),
+            apply(&mut state, Action::activate(effect)),
             Err(RuleError::UnknownEffect)
         );
         assert_eq!(state, before);
@@ -384,16 +384,16 @@ fn a_hero_with_several_effects_can_activate_each_at_its_own_cost() {
     assert_eq!(
         effect_actions,
         vec![
-            Action::Activate { effect: 0 },
-            Action::Activate { effect: 1 },
-            Action::Activate { effect: 2 },
+            Action::activate(0),
+            Action::activate(1),
+            Action::activate(2),
             Action::Concede
         ]
     );
     for (i, (cost, count)) in [(1, 1), (2, 2), (3, 3)].into_iter().enumerate() {
         let mut s = state.clone();
         let effect = i as u32;
-        let events = apply(&mut s, Action::Activate { effect }).unwrap();
+        let events = apply(&mut s, Action::activate(effect)).unwrap();
         assert_eq!(
             events.first(),
             Some(&Event::EffectActivated {
@@ -413,7 +413,7 @@ fn a_hero_with_several_effects_can_activate_each_at_its_own_cost() {
 fn nothing_is_drawn_automatically_and_the_pile_only_shrinks_through_activations() {
     let (mut state, _) = duel(vec![draw(3, 2)], 8);
     // One activates (cost 3 = budget): hands over to Two.
-    apply(&mut state, Action::Activate { effect: 0 }).unwrap();
+    apply(&mut state, Action::activate(0)).unwrap();
     assert_eq!(state.active(), PlayerId::Two);
     assert_eq!(state.hand_len(PlayerId::One), 6, "only the activation drew");
     assert_eq!(state.deck_len(PlayerId::One), 24);
@@ -421,7 +421,7 @@ fn nothing_is_drawn_automatically_and_the_pile_only_shrinks_through_activations(
     assert_eq!(state.hand_len(PlayerId::Two), 4);
     assert_eq!(state.deck_len(PlayerId::Two), 26);
     // Two activates its own effect and stays active (cost 1 against budget 1 crosses back).
-    apply(&mut state, Action::Activate { effect: 0 }).unwrap();
+    apply(&mut state, Action::activate(0)).unwrap();
     assert_eq!(state.active(), PlayerId::One);
     assert_eq!(
         state.hand_len(PlayerId::One),
@@ -458,7 +458,7 @@ fn concede_records_the_winner_and_the_reason_and_ends_the_game() {
     assert_eq!(state.winner(), Some((PlayerId::Two, WinReason::Concede)));
     assert!(legal_actions(&state).is_empty());
     let after = state.clone();
-    for action in [Action::Concede, Action::Activate { effect: 0 }] {
+    for action in [Action::Concede, Action::activate(0)] {
         assert_eq!(apply(&mut state, action), Err(RuleError::GameOver));
         assert_eq!(state, after);
     }
@@ -511,20 +511,18 @@ fn legal_actions_agree_with_apply() {
                 })
                 .collect();
             let universe = (0..12)
-                .map(|effect| Action::Activate { effect })
-                .chain((0..64).map(|n| Action::Play {
-                    card: CardInstanceId(n),
-                }))
+                .map(Action::activate)
+                .chain((0..64).map(|n| Action::play(CardInstanceId(n))))
                 .chain((0..64).map(|n| Action::Attack {
                     attacker: CardInstanceId(n),
                     target: Target::Hero,
                 }))
                 .chain(creature_attacks)
-                .chain([Action::Concede, Action::Activate { effect: u32::MAX }]);
+                .chain([Action::Concede, Action::activate(u32::MAX)]);
             for action in universe {
                 let mut probe = state.clone();
                 assert_eq!(
-                    apply(&mut probe, action).is_ok(),
+                    apply(&mut probe, action.clone()).is_ok(),
                     legal.contains(&action),
                     "seed {seed}: {action:?}"
                 );
@@ -533,7 +531,9 @@ fn legal_actions_agree_with_apply() {
             // non-Concede action, to exercise both kinds.
             let playable: Vec<_> = legal.iter().filter(|a| **a != Action::Concede).collect();
             let pick = match (playable.first(), playable.last()) {
-                (Some(first), Some(last)) => **if state.budget() % 2 == 0 { first } else { last },
+                (Some(first), Some(last)) => {
+                    (*if state.budget() % 2 == 0 { first } else { last }).clone()
+                }
                 _ => Action::Concede,
             };
             apply(&mut state, pick).unwrap();
@@ -596,30 +596,25 @@ fn a_full_game_is_deterministic() {
 
 #[test]
 fn actions_travel_as_snake_case_json_and_reject_unknown_fields() {
-    let json = serde_json::to_string(&Action::Activate { effect: 2 }).unwrap();
+    let json = serde_json::to_string(&Action::activate(2)).unwrap();
     assert_eq!(json, r#"{"activate":{"effect":2}}"#);
     assert_eq!(
         serde_json::to_string(&Action::Concede).unwrap(),
         r#""concede""#
     );
     assert_eq!(
-        serde_json::to_string(&Action::Play {
-            card: CardInstanceId(5)
-        })
-        .unwrap(),
+        serde_json::to_string(&Action::play(CardInstanceId(5))).unwrap(),
         r#"{"play":{"card":5}}"#
     );
     assert_eq!(
         serde_json::from_str::<Action>(r#"{"play":{"card":5}}"#).unwrap(),
-        Action::Play {
-            card: CardInstanceId(5)
-        }
+        Action::play(CardInstanceId(5))
     );
     assert!(serde_json::from_str::<Action>(r#"{"play":{"card":5,"x":1}}"#).is_err());
     assert!(serde_json::from_str::<Action>(r#"{"play":{"card":-1}}"#).is_err());
     assert_eq!(
         serde_json::from_str::<Action>(r#"{"activate":{"effect":2}}"#).unwrap(),
-        Action::Activate { effect: 2 }
+        Action::activate(2)
     );
     assert!(serde_json::from_str::<Action>(r#"{"activate":{"effect":2,"x":1}}"#).is_err());
     assert!(serde_json::from_str::<Action>(r#"{"activate":{"effect":-1}}"#).is_err());
@@ -649,7 +644,7 @@ fn first_in_hand(state: &GameState, player: PlayerId) -> CardInstanceId {
 
 fn play_first(state: &mut GameState) -> Vec<Event> {
     let card = first_in_hand(state, state.active());
-    apply(state, Action::Play { card }).unwrap()
+    apply(state, Action::play(card)).unwrap()
 }
 
 #[test]
@@ -657,7 +652,7 @@ fn playing_moves_the_card_from_the_hand_to_the_board() {
     let mut state = flat_duel(1, 8);
     let card = first_in_hand(&state, PlayerId::One);
     assert!(state.board(PlayerId::One).is_empty());
-    apply(&mut state, Action::Play { card }).unwrap();
+    apply(&mut state, Action::play(card)).unwrap();
     assert_eq!(state.hand_len(PlayerId::One), 3);
     assert!(!state.hand(PlayerId::One).contains(&card));
     assert_eq!(state.board(PlayerId::One), vec![card]);
@@ -675,7 +670,7 @@ fn the_board_keeps_the_order_of_summoning() {
     let hand = state.hand(PlayerId::One);
     let order = [hand[2], hand[0], hand[3]];
     for card in order {
-        apply(&mut state, Action::Play { card }).unwrap();
+        apply(&mut state, Action::play(card)).unwrap();
     }
     assert_eq!(state.board(PlayerId::One), order);
     assert_eq!(state.hand(PlayerId::One), vec![hand[1]]);
@@ -721,7 +716,7 @@ fn play_is_capped_by_the_receivers_max_time_and_may_exceed_the_own_one() {
 fn a_play_logs_played_then_token_then_player_change() {
     let mut state = flat_duel(3, 8);
     let card = first_in_hand(&state, PlayerId::One);
-    let events = apply(&mut state, Action::Play { card }).unwrap();
+    let events = apply(&mut state, Action::play(card)).unwrap();
     assert_eq!(
         events,
         vec![
@@ -747,7 +742,7 @@ fn a_play_logs_played_then_token_then_player_change() {
 fn an_illegal_play_is_refused_and_changes_nothing() {
     let mut state = flat_duel(1, 8);
     let on_board = first_in_hand(&state, PlayerId::One);
-    apply(&mut state, Action::Play { card: on_board }).unwrap();
+    apply(&mut state, Action::play(on_board)).unwrap();
     // Ids 0..30 are One's cards, 30..60 Two's: find one still in One's pile.
     let in_pile = (0..30)
         .map(CardInstanceId)
@@ -762,7 +757,7 @@ fn an_illegal_play_is_refused_and_changes_nothing() {
     for (card, why) in cases {
         let before = state.clone();
         assert_eq!(
-            apply(&mut state, Action::Play { card }),
+            apply(&mut state, Action::play(card)),
             Err(RuleError::CardNotInHand),
             "{why}"
         );
@@ -777,7 +772,7 @@ fn play_is_refused_once_the_game_is_over() {
     apply(&mut state, Action::Concede).unwrap();
     let after = state.clone();
     assert_eq!(
-        apply(&mut state, Action::Play { card }),
+        apply(&mut state, Action::play(card)),
         Err(RuleError::GameOver)
     );
     assert_eq!(state, after);
@@ -789,9 +784,9 @@ fn legal_actions_list_the_hand_first_then_effects_then_concede() {
     let mut expected: Vec<Action> = state
         .hand(PlayerId::One)
         .into_iter()
-        .map(|card| Action::Play { card })
+        .map(Action::play)
         .collect();
-    expected.push(Action::Activate { effect: 0 });
+    expected.push(Action::activate(0));
     expected.push(Action::Concede);
     assert_eq!(legal_actions(&state), expected);
     assert_eq!(expected.len(), 6);
@@ -802,7 +797,7 @@ fn only_the_active_players_hand_is_playable() {
     let state = flat_duel(1, 8);
     let theirs = state.hand(PlayerId::Two);
     assert!(legal_actions(&state).iter().all(|a| match a {
-        Action::Play { card } => !theirs.contains(card),
+        Action::Play { card, .. } => !theirs.contains(card),
         _ => true,
     }));
 }
@@ -830,17 +825,17 @@ fn drawing_everything_then_activating_again_is_refused_as_not_applicable() {
         1,
     )
     .unwrap();
-    apply(&mut state, Action::Activate { effect: 0 }).unwrap();
+    apply(&mut state, Action::activate(0)).unwrap();
     assert_eq!(state.deck_len(PlayerId::One), 0);
     assert_eq!(state.winner(), None, "the hand keeps One alive");
     assert_eq!(state.active(), PlayerId::One);
     let before = state.clone();
     assert_eq!(
-        apply(&mut state, Action::Activate { effect: 0 }),
+        apply(&mut state, Action::activate(0)),
         Err(RuleError::EffectNotApplicable)
     );
     assert_eq!(state, before);
-    assert!(!legal_actions(&state).contains(&Action::Activate { effect: 0 }));
+    assert!(!legal_actions(&state).contains(&Action::activate(0)));
 }
 
 // ---- Attack ----------------------------------------------------------------------------------
@@ -1049,7 +1044,7 @@ fn a_lethal_attack_ends_the_game_without_handing_over() {
         );
         assert!(legal_actions(&state).is_empty());
         let after = state.clone();
-        for action in [hit(c), Action::Concede, Action::Activate { effect: 0 }] {
+        for action in [hit(c), Action::Concede, Action::activate(0)] {
             assert_eq!(apply(&mut state, action), Err(RuleError::GameOver));
             assert_eq!(state, after);
         }
@@ -1125,7 +1120,7 @@ fn expected_attacks(state: &GameState) -> Vec<Action> {
 fn legal_actions_list_hand_effects_attacks_then_concede() {
     let (mut state, mine, theirs) = both_armed();
     let second = state.hand(PlayerId::One)[0];
-    apply(&mut state, Action::Play { card: second }).unwrap();
+    apply(&mut state, Action::play(second)).unwrap();
     assert_eq!(
         state.active(),
         PlayerId::Two,
@@ -1136,8 +1131,8 @@ fn legal_actions_list_hand_effects_attacks_then_concede() {
     let expected: Vec<Action> = state
         .hand(PlayerId::Two)
         .into_iter()
-        .map(|card| Action::Play { card })
-        .chain([Action::Activate { effect: 0 }])
+        .map(Action::play)
+        .chain([Action::activate(0)])
         .chain([hit(theirs), strike(theirs, mine), strike(theirs, second)])
         .chain([Action::Concede])
         .collect();
@@ -1160,11 +1155,11 @@ fn attacks_are_listed_per_attacker_hero_first_then_the_opposing_board_in_order()
     let hand: Vec<Action> = state
         .hand(PlayerId::One)
         .into_iter()
-        .map(|card| Action::Play { card })
+        .map(Action::play)
         .collect();
     let expected: Vec<Action> = hand
         .into_iter()
-        .chain([Action::Activate { effect: 0 }])
+        .chain([Action::activate(0)])
         .chain([
             hit(ones[0]),
             strike(ones[0], twos[0]),
@@ -1221,7 +1216,7 @@ fn a_dead_creature_is_neither_an_attacker_nor_a_target_in_legal_actions() {
         legal
             .iter()
             .filter(|a| matches!(a, Action::Attack { .. }))
-            .copied()
+            .cloned()
             .collect::<Vec<_>>(),
         expected_attacks(&state)
     );
@@ -1245,7 +1240,7 @@ fn a_dead_creature_is_neither_an_attacker_nor_a_target_in_legal_actions() {
         legal
             .iter()
             .filter(|a| matches!(a, Action::Attack { .. }))
-            .copied()
+            .cloned()
             .collect::<Vec<_>>(),
         expected_attacks(&state)
     );
@@ -1435,7 +1430,7 @@ fn play_scripted_s2a_observed(
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1_442_695_040_888_963_407);
         let pick = usize::try_from((rng >> 33) % actions.len() as u64).unwrap();
-        log.extend(apply(&mut state, actions[pick]).unwrap());
+        log.extend(apply(&mut state, actions[pick].clone()).unwrap());
         after_step(&state);
     }
     (state, log)
@@ -2124,7 +2119,7 @@ fn a_player_with_a_living_creature_is_never_exhausted_even_without_hand_or_effec
             "a creature in play is always an action"
         );
         // The hero is the first target of the first attacker: the creatures all survive.
-        apply(&mut state, actions[0]).unwrap();
+        apply(&mut state, actions[0].clone()).unwrap();
         hits += 1;
         assert!(hits < 100, "the game does not end");
     }
@@ -2185,7 +2180,7 @@ fn random_game(seed: u64) -> (usize, usize, GameState) {
         let action = if playable.is_empty() {
             Action::Concede
         } else {
-            playable[policy.random_range(0..playable.len())]
+            playable[policy.random_range(0..playable.len())].clone()
         };
         if matches!(
             action,
