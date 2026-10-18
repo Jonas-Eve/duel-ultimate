@@ -87,3 +87,30 @@ fn starter_1_1_0_legacy_journals_are_unchanged() {
         .collect();
     assert_eq!(observed, STARTER_1_1_0_LEGACY_GOLDEN);
 }
+
+/// The same twenty games under `RuleSet::standard()` written out, recorded on the engine of
+/// #172 (the switch of the default, #127).
+const STARTER_1_1_0_STANDARD_GOLDEN: [(PlayerId, WinReason, usize, u64); 20] =
+    [(PlayerId::One, WinReason::HeroDown, 0, 0); 20];
+
+#[test]
+fn starter_1_1_0_standard_journals_have_their_golden() {
+    let observed: Vec<_> = (0..20)
+        .map(|seed| {
+            let mut setup = game_setup_from_data(
+                CARDS,
+                DECKS,
+                "rush",
+                "bulwark",
+                vec!["starter@1.1.0".to_string()],
+            )
+            .unwrap();
+            setup.rules = RuleSet::standard();
+            let (state, log) = play_scripted(setup, seed);
+            let (winner, reason) = state.winner().unwrap();
+            let json = serde_json::to_string(&log).unwrap();
+            (winner, reason, log.len(), fnv1a(json.as_bytes()))
+        })
+        .collect();
+    assert_eq!(observed, STARTER_1_1_0_STANDARD_GOLDEN);
+}

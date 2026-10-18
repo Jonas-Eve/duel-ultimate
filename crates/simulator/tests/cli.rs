@@ -201,6 +201,11 @@ fn the_header_names_the_default_rules_of_the_engine() {
             rules_label(&RuleSet::default())
         )
     );
+    // The literal: the default of the engine is the standard rules (#127).
+    assert_eq!(
+        header(&["20"]),
+        "set: starter@1.1.0 | seed: 0 | games per matchup: 20 | action cap: 10000 | policies: random | rules: hero_riposte=on board_limit=5"
+    );
 }
 
 #[test]

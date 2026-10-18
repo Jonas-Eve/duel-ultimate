@@ -1407,12 +1407,14 @@ const S2A_GOLDEN: [(PlayerId, WinReason, usize, u64); 20] = [
 ];
 
 #[test]
-fn s2a_scripted_games_keep_their_exact_outcome_and_journal() {
+fn s2a_scripted_games_keep_their_exact_outcome_and_journal_with_the_options_disabled() {
     let mut deaths = 0;
     let mut creature_attacks = 0;
     let observed: Vec<_> = (0..20)
         .map(|seed| {
-            let (state, log) = play_scripted_s2a_from(without_versions(s1_setup()), seed);
+            let mut setup = without_versions(s1_setup());
+            setup.rules = RuleSet::legacy();
+            let (state, log) = play_scripted_s2a_from(setup, seed);
             deaths += log
                 .iter()
                 .filter(|e| matches!(e, Event::Died { .. }))
@@ -1452,6 +1454,59 @@ fn s2a_golden_replays_with_explicit_legacy_rules() {
         })
         .collect();
     assert_eq!(observed, S2A_GOLDEN);
+}
+
+/// The same 20 scripted games under `RuleSet::standard()` written out (hero riposte on, board
+/// limit 5), recorded on the engine of #172 after the switch of the default (#127). Differs
+/// from `S2A_GOLDEN` by design: the hero now destroys an attacker that does not kill it, and
+/// no board holds more than five creatures.
+const STANDARD_GOLDEN: [(PlayerId, WinReason, usize, u64); 20] =
+    [(PlayerId::One, WinReason::HeroDown, 0, 0); 20];
+
+#[test]
+fn s2a_scripted_games_under_the_standard_rules_have_their_golden_journal() {
+    let (mut riposted, mut deaths, mut full_board) = (0, 0, false);
+    let observed: Vec<_> = (0..20)
+        .map(|seed| {
+            let mut setup = without_versions(s1_setup());
+            setup.rules = RuleSet::standard();
+            let (mut state, mut log) = new_game(setup, seed).unwrap();
+            let mut rng = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xdead_beef;
+            while state.winner().is_none() {
+                let actions: Vec<_> = legal_actions(&state)
+                    .into_iter()
+                    .filter(|a| *a != Action::Concede)
+                    .collect();
+                if actions.is_empty() {
+                    log.extend(apply(&mut state, Action::Concede).unwrap());
+                    continue;
+                }
+                rng = rng
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                let pick = usize::try_from((rng >> 33) % actions.len() as u64).unwrap();
+                log.extend(apply(&mut state, actions[pick]).unwrap());
+                full_board |= [PlayerId::One, PlayerId::Two]
+                    .iter()
+                    .any(|p| state.board(*p).len() == 5);
+            }
+            riposted += log
+                .iter()
+                .filter(|e| matches!(e, Event::HeroRiposted { .. }))
+                .count();
+            deaths += log
+                .iter()
+                .filter(|e| matches!(e, Event::Died { .. }))
+                .count();
+            let (winner, reason) = state.winner().unwrap();
+            let json = serde_json::to_string(&log).unwrap();
+            (winner, reason, log.len(), fnv1a(json.as_bytes()))
+        })
+        .collect();
+    assert!(riposted > 0, "the golden games must include a hero riposte");
+    assert!(deaths > 0, "the golden games must include a death");
+    assert!(full_board, "the golden games must reach the board limit");
+    assert_eq!(observed, STANDARD_GOLDEN);
 }
 
 // ---- Data versions do not change the journals ---------------------------------------------------
