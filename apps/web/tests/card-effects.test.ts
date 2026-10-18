@@ -2,18 +2,9 @@ import { describe, expect, test } from "vitest";
 import type { CardView } from "../src/engine/types";
 import { cardEffects, effectLineLabel, effectLineText } from "../src/ui/card-effects";
 import { KEYWORDS_FR } from "../src/ui/keywords.fr";
+import { cardView } from "./support/card-view";
 
-const card = (over: Partial<CardView> = {}): CardView => ({
-  id: 7,
-  name: "Garde du rempart",
-  cost: 3,
-  force: 1,
-  attack_cost: 2,
-  health: 6,
-  provocation: false,
-  riposte: 0,
-  ...over,
-});
+const card = cardView;
 
 describe("cardEffects: the card's fields arranged for the detail sheet, nothing computed", () => {
   test("the attack is one active effect line: its cost is attack_cost, its damage is force, as given", () => {

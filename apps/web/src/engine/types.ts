@@ -45,6 +45,58 @@ export interface HeroView {
   max_time: number;
   effects: HeroEffect[];
 }
+/** Which side of the board a selector designates, from the point of view of the owner of the card. */
+export type Side = "own" | "opposing" | "both";
+/** What an operation designates; `self` carries no side. */
+export type Selector =
+  | { select: "self" }
+  | { select: "hero"; side: Side }
+  | { select: "unit"; side: Side }
+  | { select: "hero_or_unit"; side: Side }
+  | { select: "all_units"; side: Side };
+export type Trigger = "on_play" | "activated" | "continuous";
+/** Who gains or loses from an operation, from the point of view of the owner of the card (derived by the engine). */
+export type Polarity = "bonus" | "malus" | "neutral";
+export type StatName = "force" | "riposte" | "cost" | "attack_cost";
+export type KeywordName = "ranged";
+export type AttackMode = "simultaneous" | "chained";
+/**
+ * An operation exactly as the data writes it (default values omitted), plus its `polarity`. A discriminated union
+ * on `op`; the client reads it, never interprets it (T5 of #137 writes the French text).
+ */
+export type OpLine =
+  | {
+      op: "attack";
+      target: Selector;
+      amount: number;
+      ignores_provocation?: boolean;
+      scales_with_force?: boolean;
+      attackers?: number;
+      mode?: AttackMode;
+      polarity: Polarity;
+    }
+  | { op: "deal_damage"; target: Selector; amount: number; polarity: Polarity }
+  | { op: "draw"; target: Selector; count: number; polarity: Polarity }
+  | { op: "modify_stat"; target: Selector; stat: StatName; delta: number; polarity: Polarity }
+  | { op: "grant_keyword"; target: Selector; keyword: KeywordName; polarity: Polarity };
+/** One choice an effect expects: who picks what, and of which kind of thing. */
+export interface PickSlot {
+  role: "attacker" | "target";
+  kind: "unit" | "hero_or_unit";
+  side: Side;
+}
+/**
+ * One line of effect of a card, the same shape for the normal attack and for any declared effect. `index` is the
+ * position in the DECLARED effects of the card (the `effect` of a future `activate`) and is absent for the normal
+ * attack, which the engine synthesises at read time; `cost` is present for an activated effect only.
+ */
+export interface EffectLine {
+  index?: number;
+  trigger: Trigger;
+  cost?: number;
+  ops: OpLine[];
+  picks: PickSlot[];
+}
 export interface CardView {
   id: number;
   name: string | null;
@@ -54,7 +106,15 @@ export interface CardView {
   health: number;
   provocation: boolean;
   riposte: number;
-  /** Why the card cannot be played now: an engine code (never interpreted here), only on a card of my own hand. */
+  /** The kind of the card (#209): always written. The numbers above are the effective values (0 for a spell's force, for instance). */
+  kind: "unit" | "spell";
+  /** `true`, absent when the unit is not immobile. */
+  immobile?: boolean;
+  /** Display text of the card, raw; absent when empty. Public for visible cards, never present for the hidden hand (it is not in the view). */
+  tags?: string[];
+  /** The lines of effect: the normal attack first (a unit that is not immobile, no `index`), then the declared ones; always present, possibly empty. */
+  effects: EffectLine[];
+  /** Why the card cannot be used now: an engine code (never interpreted here), only on a card of my own hand (to play) or my own board (to attack). */
   unavailable?: string;
 }
 export interface OwnSide {

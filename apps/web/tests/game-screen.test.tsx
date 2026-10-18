@@ -10,6 +10,7 @@ import { playHuman, playUntil, randomPreview, seedWithQuietHumanAction, settle, 
 import { expectedCardLabel } from "./support/card-label";
 import { inAct, makeController, mountGame, useRealEngine } from "./support/ui";
 import { playTile } from "./support/play";
+import { cardView } from "./support/card-view";
 
 useRealEngine();
 
@@ -467,7 +468,7 @@ describe("the three ends of the game", () => {
 
 describe("errors", () => {
   test("a refused action: French alert (never the English text), the game intact, Close clears it", async () => {
-    const phantom: CardView = { id: 999999, name: "Fantôme", cost: 1, force: 1, attack_cost: 1, health: 1, provocation: false, riposte: 0 };
+    const phantom: CardView = cardView({ id: 999999, name: "Fantôme", cost: 1, force: 1, attack_cost: 1, health: 1 });
     const injected: ActionPreview = { action: { play: { card: 999999 } }, cost: 1, hands_over: false, budget_after: 1, ends_game: null, attacker_destroyed: false };
     const { session } = decorateSession(newSession("rush", "bulwark", 3), {
       injectPreview: injected,

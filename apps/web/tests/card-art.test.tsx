@@ -7,21 +7,12 @@ import type { CardView } from "../src/engine/types";
 import { ArtProvider } from "../src/ui/ArtContext";
 import { CardDetailSheet } from "../src/ui/CardDetailSheet";
 import { CardTile } from "../src/ui/CardTile";
+import { cardView } from "./support/card-view";
 
 const info: ArtInfo = { url: "/art/garde.svg", author: "Équipe PILOT", license: "CC0-1.0", source: "dessin original" };
 const lookup: ArtLookup = (name) => (name === "Garde du rempart" ? info : undefined);
 
-const card = (over: Partial<CardView> = {}): CardView => ({
-  id: 7,
-  name: "Garde du rempart",
-  cost: 3,
-  force: 1,
-  attack_cost: 2,
-  health: 6,
-  provocation: false,
-  riposte: 0,
-  ...over,
-});
+const card = cardView;
 
 afterEach(cleanup);
 

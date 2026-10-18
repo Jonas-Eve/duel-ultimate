@@ -124,7 +124,8 @@ describe("JSON shapes of real games", () => {
       expect(keys(v.you)).toEqual(["board", "deck_count", "discard", "hand", "hero"]);
       expect(keys(v.opponent)).toEqual(["board", "deck_count", "discard", "hand_count", "hero"]);
       expect(keys(v.you.hero)).toEqual(["effects", "health", "max_time", "name"]);
-      const cardKeys = ["attack_cost", "cost", "force", "health", "id", "name", "provocation", "riposte"];
+      // The starter sets hold plain units only: `kind` and the attack line (`effects`) are the two keys #209 adds; `immobile` and `tags` never appear.
+      const cardKeys = ["attack_cost", "cost", "effects", "force", "health", "id", "kind", "name", "provocation", "riposte"];
       for (const c of [...v.you.board, ...v.opponent.board, ...v.you.discard]) {
         expect(keys(c)).toEqual(cardKeys);
       }

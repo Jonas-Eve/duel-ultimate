@@ -10,6 +10,7 @@ import { fr } from "../src/ui/fr";
 import { decorateSession, newSession, rulesFactory } from "./support/engine";
 import { playButton } from "./support/play";
 import { inAct, makeCampsController, makeController, mountGame, useRealEngine } from "./support/ui";
+import { cardView } from "./support/card-view";
 
 useRealEngine();
 
@@ -133,7 +134,7 @@ describe("Jouer", () => {
   });
 
   test("an end of game is read from the preview too", async () => {
-    const phantom: CardView = { id: 999999, name: "Fantôme", cost: 2, force: 1, attack_cost: 1, health: 1, provocation: false, riposte: 0 };
+    const phantom: CardView = cardView({ id: 999999, name: "Fantôme", cost: 2, force: 1, attack_cost: 1, health: 1 });
     const injected: ActionPreview = { action: { play: { card: 999999 } }, cost: 2, hands_over: true, budget_after: null, ends_game: { winner: "One", reason: "exhaustion" }, attacker_destroyed: false };
     const { session } = decorateSession(newSession("rush", "bulwark", 3), {
       injectPreview: injected,
