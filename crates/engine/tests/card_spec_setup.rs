@@ -145,38 +145,27 @@ fn unit_mut(setup: &mut GameSetup, index: usize) -> &mut UnitSpec {
 }
 
 #[test]
-fn new_game_refuses_what_it_cannot_play_yet() {
-    // Temporary guard (#206, lifted by task 3 of #137): fail-closed, code `invalid_setup`.
+fn new_game_accepts_immobile_units_and_tags_since_the_guard_is_lifted() {
+    // #208 lifted the temporary guard of #206: a valid immobile or tagged unit starts a game, on
+    // either side; an invalid spec keeps its `CardsError`.
     let mut immobile = setup();
     let unit = unit_mut(&mut immobile, 3);
     unit.immobile = true;
     unit.stats.force = 0;
     unit.stats.attack_cost = 0;
-    let error = new_game(immobile, 1).unwrap_err();
-    assert!(matches!(error, SetupError::Unsupported(_)), "{error:?}");
-    assert_eq!(error.code(), "invalid_setup");
+    assert!(new_game(immobile, 1).is_ok());
 
     let mut tagged = setup();
     unit_mut(&mut tagged, 3).tags = vec!["bâtiment".into()];
-    let error = new_game(tagged, 1).unwrap_err();
-    assert!(matches!(error, SetupError::Unsupported(_)), "{error:?}");
-    assert_eq!(error.code(), "invalid_setup");
+    assert!(new_game(tagged, 1).is_ok());
 
-    // On the second side too.
     let mut second = setup();
     match &mut second.two.cards[29] {
         CardSpec::Unit(unit) => unit.tags = vec!["x".into()],
         CardSpec::Spell(_) => panic!("a unit was expected"),
     }
-    assert!(matches!(
-        new_game(second, 1).unwrap_err(),
-        SetupError::Unsupported(_)
-    ));
+    assert!(new_game(second, 1).is_ok());
 
-    // A plain unit passes.
-    assert!(new_game(setup(), 1).is_ok());
-
-    // An invalid spec keeps its `CardsError`: the guard runs after validation.
     let mut invalid = setup();
     let unit = unit_mut(&mut invalid, 0);
     unit.immobile = true;
@@ -195,38 +184,29 @@ fn on_play_draw() -> duel_cards::CardEffect {
 }
 
 #[test]
-fn new_game_refuses_spells_and_effects_for_now() {
-    // Temporary guard (#206, extended by #207, lifted by task 3 of #137): a valid spell or a
-    // valid unit with effects is refused, and only by the guard (code `invalid_setup`).
+fn new_game_accepts_spells_and_effects_since_the_guard_is_lifted() {
+    // #208: a valid spell or a valid unit with effects starts a game; an invalid spell keeps its
+    // `CardsError` (no guard stands between the validation and the game any more).
     let mut spell = setup();
     spell.one.cards[3] = CardSpec::Spell(duel_cards::SpellSpec {
         cost: 2,
         tags: vec![],
         effects: vec![on_play_draw()],
     });
-    let error = new_game(spell, 1).unwrap_err();
-    assert!(matches!(error, SetupError::Unsupported(_)), "{error:?}");
-    assert_eq!(error.code(), "invalid_setup");
+    assert!(new_game(spell, 1).is_ok());
 
     let mut with_effects = setup();
     unit_mut(&mut with_effects, 3).effects = vec![on_play_draw()];
-    let error = new_game(with_effects, 1).unwrap_err();
-    assert!(matches!(error, SetupError::Unsupported(_)), "{error:?}");
-    assert_eq!(error.code(), "invalid_setup");
+    assert!(new_game(with_effects, 1).is_ok());
 
-    // On the second side too, in its last card.
     let mut second = setup();
     second.two.cards[29] = CardSpec::Spell(duel_cards::SpellSpec {
         cost: 2,
         tags: vec![],
         effects: vec![on_play_draw()],
     });
-    assert!(matches!(
-        new_game(second, 1).unwrap_err(),
-        SetupError::Unsupported(_)
-    ));
+    assert!(new_game(second, 1).is_ok());
 
-    // An invalid spell keeps its `CardsError`: the guard runs after validation.
     let mut invalid = setup();
     invalid.one.cards[0] = CardSpec::Spell(duel_cards::SpellSpec {
         cost: 2,
@@ -237,7 +217,6 @@ fn new_game_refuses_spells_and_effects_for_now() {
         new_game(invalid, 1).unwrap_err(),
         SetupError::Invalid(CardsError::SpellWithoutEffects)
     );
-    assert!(new_game(setup(), 1).is_ok());
 }
 
 #[test]

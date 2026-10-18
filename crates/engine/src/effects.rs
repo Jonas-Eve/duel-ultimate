@@ -1017,7 +1017,9 @@ mod tests {
     }
 
     #[test]
-    fn a_force_zero_attacker_is_still_legal() {
+    fn a_force_zero_attacker_is_refused_whatever_the_target() {
+        // #208: an effective force of 0 cannot attack (`attack_force_zero`, before the target
+        // checks). `validate` refuses it and `legal_actions` never lists it.
         for seed in 0..5u64 {
             let mut state = with_boards(seed, rules_of(seed), 2, 1);
             let active = state.active;
@@ -1026,26 +1028,90 @@ mod tests {
                 side.board[0].stats.force = 0;
                 side.board[0].id
             };
-            // Whatever the provocation, one target is legal: the hero, or a provocateur.
-            let legal = legal_actions(&state);
-            let zero_attacks: Vec<&Action> = legal
-                .iter()
-                .filter(|a| matches!(a, Action::Attack { attacker: id, .. } if *id == attacker))
-                .collect();
             assert!(
-                !zero_attacks.is_empty(),
-                "seed {seed}: the force-0 attacker is not listed"
+                !legal_actions(&state)
+                    .iter()
+                    .any(|a| matches!(a, Action::Attack { attacker: id, .. } if *id == attacker)),
+                "seed {seed}: the force-0 attacker is listed"
             );
-            // Accepted by `validate` (listed); applying one is out of reach until #131
-            // (`plan_damage` debug-asserts a force of 1).
-            for action in zero_attacks {
+            let unknown = Target::Creature(crate::CardInstanceId(9_999));
+            for target in [Target::Hero, unknown] {
                 assert_eq!(
-                    crate::rules::validate(&state, action),
-                    Ok(()),
+                    crate::rules::validate(&state, &Action::Attack { attacker, target }),
+                    Err(RuleError::AttackForceZero),
                     "seed {seed}"
                 );
             }
+            // The other creature of the board keeps attacking.
+            let other = state.player(active).board[1].id;
+            assert!(
+                legal_actions(&state)
+                    .iter()
+                    .any(|a| matches!(a, Action::Attack { attacker: id, .. } if *id == other))
+            );
         }
+    }
+
+    #[test]
+    fn the_declared_effects_of_a_board_unit() {
+        use crate::state::CardExtras;
+        let mut state = with_boards(3, rules_of(3), 1, 0);
+        let active = state.active;
+        let id = state.player(active).board[0].id;
+        let make = |trigger: &str| -> duel_cards::CardEffect {
+            let cost = if trigger == "activated" {
+                r#""cost":2,"#
+            } else {
+                ""
+            };
+            serde_json::from_str(&format!(
+                r#"{{"trigger":"{trigger}",{cost}"ops":[{{"op":"draw","target":{{"select":"hero","side":"own"}},"count":1}}]}}"#
+            ))
+            .unwrap()
+        };
+        let continuous: duel_cards::CardEffect = serde_json::from_str(
+            r#"{"trigger":"continuous","ops":[{"op":"grant_keyword","target":{"select":"self"},"keyword":"ranged"}]}"#,
+        )
+        .unwrap();
+        // Index 0 is `on_play`, 2 `continuous` and index 1 `activated`: the trigger is what makes it activable.
+        state.player_mut(active).board[0].extras = Some(std::sync::Arc::new(CardExtras {
+            kind: crate::state::CardKind::Unit,
+            immobile: false,
+            tags: Vec::new(),
+            effects: vec![make("on_play"), make("activated"), continuous],
+        }));
+        let activate = |index: u32| Action::Activate {
+            effect: index,
+            source: Some(id),
+            picks: Vec::new(),
+        };
+        let judged = |action: &Action| crate::rules::validate(&state, action);
+        // An `activated` effect is declared, not yet resolvable: the temporary code.
+        assert_eq!(judged(&activate(1)), Err(RuleError::UnsupportedEffect));
+        // An `on_play` or `continuous` effect is not activable, an index past the list is no
+        // effect at all.
+        assert_eq!(judged(&activate(0)), Err(RuleError::UnknownEffect));
+        assert_eq!(judged(&activate(2)), Err(RuleError::UnknownEffect));
+        assert_eq!(judged(&activate(3)), Err(RuleError::UnknownEffect));
+        assert_eq!(judged(&activate(u32::MAX)), Err(RuleError::UnknownEffect));
+        // A source that is not on the board: the same code whatever the zone, before the index.
+        let elsewhere = state.player(active).hand[0].id;
+        for source in [elsewhere, crate::CardInstanceId(9_999)] {
+            let action = Action::Activate {
+                effect: 1,
+                source: Some(source),
+                picks: Vec::new(),
+            };
+            assert_eq!(judged(&action), Err(RuleError::SourceNotOnBoard));
+        }
+        // None of it is a legal action.
+        assert!(!legal_actions(&state).iter().any(|a| matches!(
+            a,
+            Action::Activate {
+                source: Some(_),
+                ..
+            }
+        )));
     }
 
     #[test]

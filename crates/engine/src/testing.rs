@@ -2,7 +2,9 @@
 
 use crate::state::{CardInstance, GameState, PlayerState};
 use crate::{GameSetup, PlayerSetup, RuleSet};
-use duel_cards::{CardSpec, CreatureStats, Effect, Hero, HeroEffect};
+use duel_cards::{
+    CardEffect, CardSpec, CreatureStats, Effect, Hero, HeroEffect, SpellSpec, UnitSpec,
+};
 
 pub(crate) fn draw(cost: u32, count: u32) -> HeroEffect {
     HeroEffect {
@@ -51,6 +53,51 @@ pub(crate) fn stats_with(
         provocation,
         riposte,
     }
+}
+
+/// An `on_play` effect that draws a card for the own hero (valid on a unit or a spell).
+pub(crate) fn on_play_draw() -> CardEffect {
+    serde_json::from_str(
+        r#"{"trigger":"on_play","ops":[{"op":"draw","target":{"select":"hero","side":"own"},"count":1}]}"#,
+    )
+    .unwrap()
+}
+
+/// An `activated` effect of cost 2 that draws a card.
+pub(crate) fn activated_draw() -> CardEffect {
+    serde_json::from_str(
+        r#"{"trigger":"activated","cost":2,"ops":[{"op":"draw","target":{"select":"hero","side":"own"},"count":1}]}"#,
+    )
+    .unwrap()
+}
+
+/// A spell of this cost, with one `on_play` effect.
+pub(crate) fn spell(cost: u32) -> CardSpec {
+    CardSpec::Spell(SpellSpec {
+        cost,
+        tags: Vec::new(),
+        effects: vec![on_play_draw()],
+    })
+}
+
+/// An `immobile` unit: force and attack cost are 0 by construction.
+pub(crate) fn immobile(cost: u32, health: u32) -> CardSpec {
+    CardSpec::Unit(UnitSpec {
+        stats: stats(cost, 0, 0, health),
+        immobile: true,
+        tags: Vec::new(),
+        effects: Vec::new(),
+    })
+}
+
+/// A unit that declares `effects` (and nothing else).
+pub(crate) fn unit_with_effects(stats: CreatureStats, effects: Vec<CardEffect>) -> CardSpec {
+    CardSpec::Unit(UnitSpec {
+        stats,
+        immobile: false,
+        tags: Vec::new(),
+        effects,
+    })
 }
 
 /// 30 distinguishable cards.

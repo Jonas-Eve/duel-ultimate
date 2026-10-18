@@ -523,3 +523,219 @@ mod tests {
         assert!(forbidden_hero_attacks > 100, "{forbidden_hero_attacks}");
     }
 }
+
+/// The two predicates `usable` reads for the new kinds (#208): `attack_blocker` and
+/// `play_blocker_of`, on a mixed game of spells, immobile units and plain units.
+#[cfg(test)]
+mod predicate_tests {
+    use super::*;
+    use crate::effects::{Choice, EffectRef, Source, Use, usable};
+    use crate::new_game;
+    use crate::state::CardInstance;
+    use crate::testing::{
+        draw, hero, immobile, potential, setup, spell, stats_with, unit_with_effects,
+    };
+    use rand::{RngExt, SeedableRng};
+    use rand_chacha::ChaCha8Rng;
+
+    /// A third spells, a third immobile units, a third units (a few with a declared effect),
+    /// both sides, a board limit that sometimes binds.
+    fn mixed_game(seed: u64) -> GameState {
+        let mut s = setup(
+            hero(1 + (seed % 2) as u32, 3, 8, vec![draw(1, 1), draw(4, 3)]),
+            hero(1, 2, 6, vec![draw(2, 2)]),
+        );
+        s.rules.board_limit = Some(1 + (seed % 4) as u32);
+        let cards = |offset: u32| {
+            (0..30u32)
+                .map(|n| {
+                    let n = n + offset;
+                    match n % 3 {
+                        0 => spell(1 + n % 3),
+                        1 => immobile(1 + n % 2, 1 + n % 4),
+                        _ => {
+                            let stats = stats_with(
+                                1 + n % 3,
+                                1 + n % 3,
+                                1 + n % 2,
+                                1 + n % 4,
+                                n % 4 == 0,
+                                0,
+                            );
+                            if n % 5 == 0 {
+                                unit_with_effects(stats, vec![crate::testing::activated_draw()])
+                            } else {
+                                stats.into()
+                            }
+                        }
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        s.one.cards = cards(0);
+        s.two.cards = cards(1);
+        new_game(s, seed).unwrap().0
+    }
+
+    fn card_of(state: &GameState, id: CardInstanceId) -> &CardInstance {
+        let side = state.player(state.active);
+        side.hand
+            .iter()
+            .chain(&side.board)
+            .find(|c| c.id == id)
+            .unwrap()
+    }
+
+    #[test]
+    fn attack_blocker_and_play_blocker_of_are_the_predicates_usable_uses() {
+        let (mut plays, mut refused_plays, mut attacks, mut refused_attacks) = (0, 0, 0, 0);
+        for seed in 0..60u64 {
+            let mut state = mixed_game(seed);
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            for _ in 0..300 {
+                if state.winner.is_some() {
+                    break;
+                }
+                let active = state.active;
+                for card in state.player(active).hand.clone() {
+                    let used = Use::Effect {
+                        source: Source::Hand(card.id),
+                        effect: EffectRef::Play,
+                        choice: Choice::Picks(&[]),
+                    };
+                    let expected = play_blocker_of(&state, active, &card).map_or(Ok(()), Err);
+                    assert_eq!(usable(&state, &used), expected, "seed {seed}");
+                    plays += 1;
+                    refused_plays += usize::from(expected.is_err());
+                }
+                for attacker in state.player(active).board.clone() {
+                    let targets = std::iter::once(Target::Hero).chain(
+                        state
+                            .player(active.opponent())
+                            .board
+                            .iter()
+                            .map(|c| Target::Creature(c.id)),
+                    );
+                    for target in targets.collect::<Vec<_>>() {
+                        let used = Use::Effect {
+                            source: Source::Board(attacker.id),
+                            effect: EffectRef::Attack,
+                            choice: Choice::Target(target),
+                        };
+                        let expected = match attack_blocker(&state, card_of(&state, attacker.id)) {
+                            Some(error) => Err(error),
+                            None if provocation_allows(&state, target) => Ok(()),
+                            None => Err(RuleError::TargetForbiddenByProvocation),
+                        };
+                        assert_eq!(usable(&state, &used), expected, "seed {seed}");
+                        attacks += 1;
+                        refused_attacks += usize::from(expected.is_err());
+                    }
+                }
+                let actions = legal_actions(&state);
+                let action = actions[rng.random_range(0..actions.len())].clone();
+                if action == Action::Concede {
+                    break;
+                }
+                apply(&mut state, action).unwrap();
+            }
+        }
+        // The mixed game exercises both answers of both predicates.
+        assert!(plays > refused_plays && refused_plays > 0);
+        assert!(attacks > refused_attacks && refused_attacks > 0);
+    }
+
+    #[test]
+    fn the_predicates_say_nothing_once_the_game_is_over() {
+        let mut state = mixed_game(1);
+        let spell_in_hand = state
+            .player(state.active)
+            .hand
+            .iter()
+            .find(|c| c.is_spell())
+            .cloned()
+            .expect("a spell in the opening hand");
+        assert_eq!(
+            play_blocker_of(&state, state.active, &spell_in_hand),
+            Some(RuleError::UnsupportedEffect)
+        );
+        state.winner = Some((state.active, WinReason::Concede));
+        assert_eq!(play_blocker_of(&state, state.active, &spell_in_hand), None);
+    }
+
+    #[test]
+    fn attack_blocker_is_the_zero_force_boundary() {
+        let mut state = mixed_game(2);
+        let mut card = state.player(state.active).hand[0].clone();
+        card.extras = None;
+        card.stats.force = 1;
+        assert_eq!(attack_blocker(&state, &card), None);
+        card.stats.force = 0;
+        assert_eq!(
+            attack_blocker(&state, &card),
+            Some(RuleError::AttackForceZero)
+        );
+        state.winner = Some((state.active, WinReason::Concede));
+        assert_eq!(attack_blocker(&state, &card), None);
+    }
+
+    #[test]
+    fn a_spell_costs_a_hand_slot_but_no_board_slot() {
+        // `board_limit` 1 with a full board: a unit is `board_full`, a spell is not blocked by
+        // the board (it is blocked as a spell, `unsupported_effect`, never `board_full`).
+        let mut state = mixed_game(4);
+        state.rules.board_limit = Some(1);
+        let active = state.active;
+        let taken = state
+            .player_mut(active)
+            .hand
+            .iter()
+            .position(|c| !c.is_spell())
+            .unwrap();
+        let unit = state.player_mut(active).hand.remove(taken);
+        state.player_mut(active).board.push(unit);
+        let hand = state.player(active).hand.clone();
+        let spell_card = hand.iter().find(|c| c.is_spell()).unwrap();
+        let unit_card = hand.iter().find(|c| !c.is_spell()).unwrap();
+        assert_eq!(
+            play_blocker_of(&state, active, spell_card),
+            Some(RuleError::UnsupportedEffect)
+        );
+        assert_eq!(
+            play_blocker_of(&state, active, unit_card),
+            Some(RuleError::BoardFull)
+        );
+    }
+
+    #[test]
+    fn phi_still_falls_with_the_new_kinds() {
+        let mut spells_seen = false;
+        for seed in 0..250u64 {
+            let mut state = mixed_game(seed);
+            let mut rng = ChaCha8Rng::seed_from_u64(seed ^ 0xABCD);
+            let mut phi = potential(&state);
+            for _ in 0..5_000 {
+                if state.winner.is_some() {
+                    break;
+                }
+                let actions = legal_actions(&state);
+                let playable: Vec<_> = actions.iter().filter(|a| **a != Action::Concede).collect();
+                if playable.is_empty() {
+                    break;
+                }
+                let action = playable[rng.random_range(0..playable.len())].clone();
+                apply(&mut state, action).unwrap();
+                let now = potential(&state);
+                assert!(now < phi, "seed {seed}: phi {phi} -> {now}");
+                phi = now;
+            }
+            spells_seen |= state
+                .player(PlayerId::One)
+                .hand
+                .iter()
+                .any(|c| c.is_spell());
+            assert!(state.winner.is_some(), "seed {seed}: the game terminates");
+        }
+        assert!(spells_seen, "spells were part of the games");
+    }
+}
