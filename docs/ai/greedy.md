@@ -59,12 +59,21 @@ premières parties, le siège Two dans les 100 suivantes, graines fixes). Seuil 
 - Un coup d'avance : aucune combinaison sur plusieurs actions, aucune anticipation du tour adverse.
 - La pioche est non évaluable (constante `draw_value`).
 - Poids provisoires, à revoir avec la valeur de carte (#133) ; l'effet de la riposte du héros
-  sera re-mesuré par #127 (une attaque dont l'attaquant meurt est déjà mal notée : la créature
+  est mesuré par #127 (#173 : voir plus bas ; une attaque dont l'attaquant meurt est déjà mal notée : la créature
   disparaît de la vue). Depuis #170 (option `hero_riposte`, aucun poids retouché) c'est testé dans
   `crates/ai/tests/greedy.rs` : face au héros, la gloutonne refuse le coup non létal (un sacrifice) et
   garde le coup létal. Depuis #172 la riposte du héros est **active par défaut** (`RuleSet::standard()`) :
   le sacrifice est pesé par l'essai à blanc (`attacker_destroyed` de l'aperçu, l'attaquant disparaît de la
-  vue après l'action), aucun poids n'est retouché ici ; la mesure de l'effet est celle de la tâche T4 de #127.
+  vue après l'action), aucun poids n'est retouché ici.
+  **Effet mesuré (#173)** : voir [`docs/balance/rules-options.md`](../balance/rules-options.md) et les rapports
+  de `docs/balance/reports/` (`starter@1.1.0`, graine 1, 2000 parties par matchup). Riposte seule contre
+  règles historiques : la durée de `rush vs bulwark` passe de 28,6 à 101,0 actions en moyenne et
+  l'épuisement de 2,2 à 60,5 % des fins ; sous `standard`, 92,5 actions et 61,0 % d'épuisement, 100 % en
+  miroir `bulwark`. La gloutonne **cesse donc de finir les parties au héros** quand la riposte est active,
+  ce qui est cohérent avec le refus des coups non létaux. La lecture est **indirecte** : le rapport ne
+  donne pas la part d'attaques sur le héros hors coup létal, seulement les durées et les fins de partie, et
+  aucune métrique n'a été ajoutée pour cela. La limite de plateau seule n'a pas d'effet mesurable sur la
+  gloutonne.
 
 ## Brancher une autre politique
 

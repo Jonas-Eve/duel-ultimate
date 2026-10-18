@@ -7,7 +7,7 @@ n'est pas une mesure : il ne se compare à rien et ne se reproduit pas.
 
 - [`throughput.md`](throughput.md) : le débit du simulateur (parties par seconde), son protocole,
   la règle de comparaison entre machines, le seuil de régression et le tableau daté des mesures
-  (#123).
+  (#123) ; la ligne `aa1fdbc` est la référence gardante sous les règles par défaut (#173).
 - [`duree.md`](duree.md) : le protocole et la feuille de relevé de la durée d'une partie jouée à la
   main (cible de 15 minutes humain contre humain, convertie en actions comparables au rapport du
   simulateur ; résultats consignés par la tâche suivante de #124).
@@ -16,6 +16,13 @@ n'est pas une mesure : il ne se compare à rien et ne se reproduit pas.
   comportement historique : [`2026-10-17-starter-1.1.0-random-legacy.md`](reports/2026-10-17-starter-1.1.0-random-legacy.md).
   Politique gloutonne appariée à `random` (mêmes graines, #160) :
   [`2026-10-18-starter-1.1.0-greedy.md`](reports/2026-10-18-starter-1.1.0-greedy.md).
+  Effet des options de règles de #127 (#173), `random` et `greedy` appariées :
+  [`riposte-seule`](reports/2026-10-18-starter-1.1.0-riposte-seule.md),
+  [`limite-seule`](reports/2026-10-18-starter-1.1.0-limite-seule.md),
+  [`standard`](reports/2026-10-18-starter-1.1.0-standard.md) (le défaut du moteur).
+- [`rules-options.md`](rules-options.md) : la synthèse de l'effet de chaque option de règles, isolément puis
+  combinées (taux, durées, fins de partie), avec la mention que l'équilibre n'est garanti que sur les
+  règles par défaut (#173).
 
 **Règles historiques et règles par défaut (#127, #172).** Depuis #172 le défaut du moteur est
 `RuleSet::standard()` (riposte du héros active, limite de plateau 5) : un lot sans option affiche
@@ -23,7 +30,9 @@ n'est pas une mesure : il ne se compare à rien et ne se reproduit pas.
 `random-legacy`) restent des mesures des **règles historiques** : ils ont été produits avec des options
 **explicites** (`--hero-riposte off --board-limit none`, en-tête `rules: hero_riposte=off board_limit=none`) et
 se rejouent à l'identique avec elles ; ils ne se comparent pas à un lot aux règles par défaut sans le dire.
-Les rapports et `throughput.md` ne sont pas réécrits ici : les mesures aux nouvelles règles sont la tâche T4 de #127.
+Les rapports historiques ne sont pas réécrits : les mesures aux nouvelles règles sont dans les rapports
+`standard`, `riposte-seule` et `limite-seule`, et la ligne de débit `aa1fdbc` de `throughput.md` (référence
+gardante sous les règles par défaut, #173).
 
 ## Lire le rapport du simulateur
 
