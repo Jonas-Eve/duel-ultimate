@@ -1,12 +1,21 @@
 //! Plays seeded AI-vs-AI games between the decks of an embedded data set and prints the
 //! balance report. Usage: `duel-simulator [games] [--set <name>[@<version>]] [--seed <u64>]
-//! [--hero-riposte <on|off>] [--board-limit <none|N>] [--timing] [--against <name>[@<version>]]`, in any order: `games` per matchup (1000
+//! [--hero-riposte <on|off>] [--board-limit <none|N>] [--timing] [--against <name>[@<version>]]
+//! [--policy <name>[,<name>...]] [--noise <0..=100>]`, in any order: `games` per matchup (1000
 //! by default), the `starter` set (its latest version by default), seed 0 by default, and the
 //! engine's default rules for each rule option not given (the report names them in its header).
 //! The two rule options have no effect on the games before #127 gives them their behaviour. The
-//! batch itself is `duel_simulator::run_batch` (one policy, `random`: uniformly random among the
-//! legal actions other than `Concede`); this file only reads the command line, picks the data and
-//! prints the checked `Report::render()` ([`finish`]).
+//! batch itself is `duel_simulator::run_batch_observed`; this file only reads the command line,
+//! picks the data and the policies and prints the checked `Report::render()` ([`finish`]).
+//!
+//! `--policy a,b` (default `random`, whose output is byte-identical to the former single-policy
+//! binary) gives one report section per policy, in the order given; every name is resolved by
+//! `duel_ai::policy_named` (the registry `duel_ai::POLICIES`, the same one as the web client),
+//! this crate has no table of its own. Every policy replays the same engine seeds. `--noise N`
+//! (0 to 100) wraps every policy that is not `random` with `duel_ai::noisy(policy, N)` and
+//! names its section `<name>-noise<N>` (`greedy-noise20`; with `--noise 0`, plain `greedy`);
+//! `random` is never wrapped, and `--noise` with no policy to wrap is refused. The noise draws
+//! from the per-seat generator of `play_game`: no randomness outside the batch seed.
 //!
 //! `--against <B>` (same closed list as `--set`, never a path) plays the batch of `--set` (the
 //! candidate, "after") and the batch of `B` (the reference, "before") in this process, with the same
@@ -25,10 +34,11 @@
 //! never a path, so nothing is read from the disk or the network at run time. A huge number of
 //! games is merely slow.
 
+use duel_ai::{POLICIES, Policy, noisy, policy_named};
 use duel_engine::RuleSet;
 use duel_simulator::{
     BatchConfig, DEFAULT_MAX_ACTIONS, GameRecord, NamedPolicy, Report, contenders_from,
-    diff_reports, random_policy, run_batch_observed,
+    diff_reports, run_batch_observed,
 };
 use std::time::Instant;
 
@@ -67,7 +77,7 @@ const SETS: [Set; 3] = [
 const DEFAULT_GAMES: u64 = 1000;
 const DEFAULT_SEED: u64 = 0;
 const DEFAULT_SET: &str = "starter";
-const USAGE: &str = "[games] [--set <name>[@<version>]] [--seed <u64>] [--hero-riposte <on|off>] [--board-limit <none|N>] [--timing] [--against <name>[@<version>]]";
+const USAGE: &str = "[games] [--set <name>[@<version>]] [--seed <u64>] [--hero-riposte <on|off>] [--board-limit <none|N>] [--timing] [--against <name>[@<version>]] [--policy <name>[,<name>...]] [--noise <0..=100>]";
 
 /// What the command line asks for.
 #[derive(Debug, PartialEq, Eq)]
@@ -81,6 +91,79 @@ struct Config {
     rules: RuleSet,
     /// `--timing`: print one measurement line on stderr after the report.
     timing: bool,
+    /// `--policy` (default `random`), `--noise` applied: the sections of the report, in order.
+    policies: Vec<PolicySpec>,
+}
+
+/// One section of the report: a registry policy and the noise wrapped around it.
+#[derive(Debug, PartialEq, Eq)]
+struct PolicySpec {
+    /// The name in `duel_ai::POLICIES`.
+    base: &'static str,
+    /// Percent of random decisions (0: none, and the section keeps the plain name).
+    noise: u8,
+}
+
+impl PolicySpec {
+    /// The name of the section: `greedy`, or `greedy-noise20` when noise is applied.
+    fn label(&self) -> String {
+        if self.noise == 0 {
+            self.base.to_owned()
+        } else {
+            format!("{}-noise{}", self.base, self.noise)
+        }
+    }
+}
+
+/// The name of the policy that never takes noise (it is already random).
+const RANDOM: &str = "random";
+
+fn available_policies() -> String {
+    POLICIES
+        .iter()
+        .map(|(name, _)| *name)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The value of `--policy`: comma-separated registry names, in order, none empty or repeated.
+fn parse_policies(value: &str) -> Result<Vec<&'static str>, String> {
+    let mut names: Vec<&'static str> = Vec::new();
+    for item in value.split(',') {
+        let known = POLICIES
+            .iter()
+            .map(|(name, _)| *name)
+            .find(|name| *name == item);
+        let name = known.ok_or_else(|| {
+            if item.is_empty() {
+                format!(
+                    "--policy: empty policy name in \"{value}\" (available: {})",
+                    available_policies()
+                )
+            } else {
+                format!(
+                    "--policy: unknown policy \"{item}\" (available: {})",
+                    available_policies()
+                )
+            }
+        })?;
+        if names.contains(&name) {
+            return Err(format!("--policy: \"{name}\" given twice"));
+        }
+        names.push(name);
+    }
+    Ok(names)
+}
+
+/// The value of `--noise`: an integer from 0 to 100.
+fn parse_noise(value: &str) -> Result<u8, String> {
+    value
+        .parse::<u8>()
+        .ok()
+        .filter(|noise| *noise <= 100)
+        .ok_or_else(|| {
+            format!("--noise: invalid value \"{value}\" (expected an integer from 0 to 100)")
+        })
 }
 
 /// The distinct set names, in registry order, for messages.
@@ -163,6 +246,8 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
     let mut hero_riposte = None;
     let mut board_limit = None;
     let mut timing = false;
+    let mut policy_names = None;
+    let mut noise = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         if arg == "--set" {
@@ -206,6 +291,23 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
             if board_limit.replace(parse_board_limit(value)?).is_some() {
                 return Err("--board-limit given twice".to_owned());
             }
+        } else if arg == "--policy" {
+            let value = rest.next().ok_or_else(|| {
+                format!(
+                    "--policy needs a value (available: {})",
+                    available_policies()
+                )
+            })?;
+            if policy_names.replace(parse_policies(value)?).is_some() {
+                return Err("--policy given twice".to_owned());
+            }
+        } else if arg == "--noise" {
+            let value = rest
+                .next()
+                .ok_or_else(|| "--noise needs a value (an integer from 0 to 100)".to_owned())?;
+            if noise.replace(parse_noise(value)?).is_some() {
+                return Err("--noise given twice".to_owned());
+            }
         } else if arg == "--timing" {
             if std::mem::replace(&mut timing, true) {
                 return Err("--timing given twice".to_owned());
@@ -226,6 +328,23 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
             }
         }
     }
+    let policy_names = policy_names.unwrap_or_else(|| vec![RANDOM]);
+    if noise.is_some() && policy_names.iter().all(|name| *name == RANDOM) {
+        return Err(
+            "--noise needs a policy to wrap in --policy (random is never wrapped)".to_owned(),
+        );
+    }
+    let policies = policy_names
+        .into_iter()
+        .map(|base| PolicySpec {
+            base,
+            noise: if base == RANDOM {
+                0
+            } else {
+                noise.unwrap_or(0)
+            },
+        })
+        .collect();
     let default_set = resolve_set(&SETS, DEFAULT_SET).expect("the default set is registered");
     // A rule not given keeps the engine default (whatever it is), not "off".
     let default_rules = RuleSet::default();
@@ -239,6 +358,7 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
             board_limit: board_limit.unwrap_or(default_rules.board_limit),
         },
         timing,
+        policies,
     })
 }
 
@@ -251,10 +371,14 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let policies = [NamedPolicy {
-        name: "random",
-        policy: &random_policy,
-    }];
+    let owned = resolve_policies(&config.policies);
+    let policies: Vec<NamedPolicy> = owned
+        .iter()
+        .map(|(name, policy)| NamedPolicy {
+            name,
+            policy: policy.as_ref(),
+        })
+        .collect();
     // The clock is read around the batches only (`--timing`): the arguments and the contenders
     // are built before, and the reports are checked, rendered and printed after the last reading.
     let (mut games, mut actions) = (0u64, 0u64);
@@ -282,6 +406,24 @@ fn main() {
             std::process::exit(1);
         }
     }
+}
+
+/// The policies of `specs`, resolved by `duel_ai::policy_named` and wrapped by
+/// `duel_ai::noisy` when noise is asked, with their section names. A spec only holds registry
+/// names (checked by [`parse_policies`]), so the lookup cannot fail.
+fn resolve_policies(specs: &[PolicySpec]) -> Vec<(String, Box<dyn Policy>)> {
+    specs
+        .iter()
+        .map(|spec| {
+            let base = policy_named(spec.base).expect("the name comes from the registry");
+            let policy: Box<dyn Policy> = if spec.noise == 0 {
+                Box::new(base)
+            } else {
+                Box::new(noisy(base, spec.noise))
+            };
+            (spec.label(), policy)
+        })
+        .collect()
 }
 
 /// Plays the batch of `set` with the settings of `config`; `observe` sees every game.
@@ -339,7 +481,7 @@ fn timing_line(games: u64, actions: u64, secs: f64) -> String {
 mod tests {
     use super::*;
     use duel_engine::MAX_BOARD_LIMIT;
-    use duel_simulator::run_batch;
+    use duel_simulator::{random_policy, run_batch};
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|arg| (*arg).to_owned()).collect()

@@ -78,5 +78,35 @@ le débit varie. La médiane est à 99,9 % de celle de `e798210` (14 151,4), soi
 d'environ 9 % observée : le surcoût de l'histogramme n'est pas mesurable sur cette machine (charge
 moyenne d'environ 1 sur 4 coeurs).
 
+## Politique gloutonne (`--policy greedy`, #160)
+
+Série **distincte** de celle de `random` ci-dessus : même protocole, autre politique, autre ordre de
+grandeur. **Aucun seuil 0,8 x ici** : les gardes de #128 et #131 restent sur `random` ; la gloutonne
+n'est **jamais comparée** à ce seuil ni à la médiane de `random`. Chaque décision de la gloutonne
+clone l'état une fois par action légale (`dry_run`), d'où un débit bien plus bas.
+
+```
+target/release/duel-simulator 1000 --set starter@1.1.0 --seed 1 --hero-riposte off --board-limit none --policy greedy --timing > /dev/null
+```
+
+- Lot : 3 matchups x 1000 parties = 3000 parties (108 083 actions par passe, identiques d'une passe à
+  l'autre). 1 passe de chauffe écartée + 5 passes mesurées, valeur de référence = médiane.
+- **Plafond de plausibilité** : le rapport de référence (`2000` parties x 3 matchups, `--policy
+  random,greedy`, `docs/balance/reports/2026-10-18-starter-1.1.0-greedy.md`) doit tourner en **moins
+  de 10 minutes** sur la machine de mesure ; au-delà, ouvrir un ticket `type:tech` d'optimisation
+  (pistes : évaluation légère côté moteur, élagage des attaques) au lieu d'optimiser dans la
+  tâche. Mesuré : environ 13 s, plafond largement tenu.
+
+| Date | SHA | Règles (options explicites) | Machine | Parties/s (médiane, min-max) | Actions/s (médiane) | Seuil |
+|---|---|---|---|---|---|---|
+| 2026-10-18 | `7124e99` | `--hero-riposte off --board-limit none`, `starter@1.1.0`, graine 1, `--policy greedy`, 1000 parties/matchup | Intel Xeon 2,10 GHz, 4 coeurs (`nproc`), rustc 1.97.0 (2026-07-07), conteneur Linux | 454,7 (393,7 - 470,6) | 16 380,2 (14 184,3 - 16 953,6) | aucun |
+
+Détail : passe de chauffe écartée à 457,7 parties/s ; passes retenues en parties/s : 393,7 ; 456,0 ;
+435,4 ; 454,7 ; 470,6 ; en actions/s : 14 184,3 ; 16 427,2 ; 15 685,3 ; 16 380,2 ; 16 953,6. La
+gloutonne tourne à environ 1/49 des actions/s de `random` (810 000) : un peu moins de deux ordres de
+grandeur, dans l'attendu. Réserve : la machine n'était **pas inactive** (charge moyenne de 3,5 à 4,3
+sur 4 coeurs, une autre session compilait en parallèle) ; l'exécution est monocoeur, la dispersion
+observée est d'environ 18 % : lire la valeur comme un ordre de grandeur.
+
 La ligne « nouveaux défauts de #127 » est ajoutée par #127 avec le même protocole : c'est elle
 qui garde #128 puis #131.

@@ -3,8 +3,12 @@ import type { GameFactory, GameSession, SessionConfig, WasmGameLike } from "./se
 import type { Action, ActionPreview, EngineEvent, PlayerView, Seat } from "./types";
 
 const U32_MAX = 4294967295;
-/** The computer's policy, a closed name of the binding (never chosen by `game/` or `ui/`). */
-const COMPUTER_POLICY = "random";
+/**
+ * The computer's policy, a closed name of the binding (never chosen by `game/` or `ui/`): the
+ * engine's greedy policy, the same code as the simulator (#126). It ignores `draw`, which is still
+ * supplied and validated (contract of the binding, `"random"`, possible noise later).
+ */
+const COMPUTER_POLICY = "greedy";
 
 /** Runs a WASM call and turns whatever it throws into an `EngineError`. */
 function call<T>(fn: () => T): T {

@@ -121,12 +121,12 @@ describe("computerAction", () => {
     }
   });
 
-  test("the draw decides: over 300 draws several different actions come out", () => {
+  test("greedy does not depend on the draw: over 300 draws the same action comes out (#126)", () => {
     const s = newSession("rush", "bulwark", 4);
     try {
       const seen = new Set<string>();
       for (let draw = 0; draw < 300; draw++) seen.add(JSON.stringify(s.computerAction(active(s), draw)));
-      expect(seen.size).toBeGreaterThan(1);
+      expect(seen.size).toBe(1);
     } finally {
       s.dispose();
     }
@@ -202,7 +202,7 @@ describe("computerAction", () => {
     }
   });
 
-  test("the policy sent to the binding is the closed constant \"random\"", () => {
+  test("the policy sent to the binding is the closed constant \"greedy\"", () => {
     const seen: string[] = [];
     const spying: GameFactory = (...args) => {
       const game = testFactory(...args);
@@ -216,7 +216,7 @@ describe("computerAction", () => {
     const s = newSession("rush", "bulwark", 4, spying);
     try {
       s.computerAction(active(s), 1);
-      expect(seen).toEqual(["random"]);
+      expect(seen).toEqual(["greedy"]);
     } finally {
       s.dispose();
     }
