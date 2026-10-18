@@ -2,7 +2,7 @@
 
 use crate::effects::{self, effective};
 use crate::ruleset::RuleSet;
-use crate::state::{CardInstanceId, GameState, PlayerId, WinReason};
+use crate::state::{CardInstance, CardInstanceId, GameState, PlayerId, WinReason};
 use crate::time::{self, Spend};
 use duel_cards::HeroEffect;
 use serde::{Deserialize, Serialize};
@@ -199,6 +199,13 @@ pub enum RuleError {
     InvalidPicks,
     #[error("the source is not a creature of the active player's board")]
     SourceNotOnBoard,
+    #[error("this unit cannot attack: its force is zero")]
+    AttackForceZero,
+    /// **Temporary** (#208): a card whose effect the game cannot resolve yet, a spell to play or
+    /// a declared `activated` effect of a unit. Removed by #129 (effects of units), #130 (spells)
+    /// and #131 when they deliver the behavior.
+    #[error("this card uses an effect the game cannot resolve yet")]
+    UnsupportedEffect,
 }
 
 impl RuleError {
@@ -216,6 +223,8 @@ impl RuleError {
             Self::TooManyPicks => "too_many_picks",
             Self::InvalidPicks => "invalid_picks",
             Self::SourceNotOnBoard => "source_not_on_board",
+            Self::AttackForceZero => "attack_force_zero",
+            Self::UnsupportedEffect => "unsupported_effect",
         }
     }
 }
@@ -289,6 +298,37 @@ pub(crate) fn play_blocker(state: &GameState, seat: PlayerId) -> Option<RuleErro
         }
         _ => None,
     }
+}
+
+/// Why `card`, a card of `seat`'s hand, cannot be played right now, if it cannot: `None` once the
+/// game is over, `Some(UnsupportedEffect)` for a spell (temporary, until #130), otherwise the
+/// answer of [`play_blocker`] (`board_full`) for a unit. A spell takes no place on a board, so
+/// `board_full` is never its reason. The single answer for a card of a hand, called by
+/// `effects::usable`.
+pub(crate) fn play_blocker_of(
+    state: &GameState,
+    seat: PlayerId,
+    card: &CardInstance,
+) -> Option<RuleError> {
+    if state.winner.is_some() {
+        return None;
+    }
+    if card.is_spell() {
+        return Some(RuleError::UnsupportedEffect);
+    }
+    play_blocker(state, seat)
+}
+
+/// Why `card`, a creature of the active board, cannot attack right now, if it cannot: `None` once
+/// the game is over (as [`play_blocker`]), `Some(AttackForceZero)` when its effective force is 0
+/// (an immobile unit has none), read through `effective` alone. The single predicate of this
+/// reason, called by `effects::usable` and, later, by the view; the caller already holds the
+/// instance, so there is no second walk of the board.
+pub(crate) fn attack_blocker(state: &GameState, card: &CardInstance) -> Option<RuleError> {
+    if state.winner.is_some() {
+        return None;
+    }
+    (effective(state, card).force == 0).then_some(RuleError::AttackForceZero)
 }
 
 /// The single legality check, shared by [`apply`] and [`legal_actions`]: the game must be
@@ -559,10 +599,10 @@ mod predicate_tests {
                                 1 + n % 3,
                                 1 + n % 2,
                                 1 + n % 4,
-                                n % 4 == 0,
+                                n.is_multiple_of(4),
                                 0,
                             );
-                            if n % 5 == 0 {
+                            if n.is_multiple_of(5) {
                                 unit_with_effects(stats, vec![crate::testing::activated_draw()])
                             } else {
                                 stats.into()

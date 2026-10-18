@@ -12,11 +12,11 @@
 
 use crate::combat;
 use crate::rules::{
-    Action, Event, Pick, RuleError, Target, board_position, hand_position, hero_effect,
-    opposing_board_position, play_blocker, provocation_allows,
+    Action, Event, Pick, RuleError, Target, attack_blocker, board_position, hand_position,
+    hero_effect, opposing_board_position, play_blocker_of, provocation_allows,
 };
 use crate::state::{CardInstance, CardInstanceId, GameState, PlayerId, WinReason};
-use duel_cards::Effect;
+use duel_cards::{Effect, Trigger};
 
 /// The values of a card the rules read: cost, force, attack cost, riposte and provocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +101,10 @@ fn carried(source: Source, declared: usize) -> impl Iterator<Item = EffectRef> {
 /// The effects `source` carries for the active player: `Play` for a card of the hand, `Attack`
 /// for a creature of the board, `Declared(i)` for each effect of the hero's list, in order.
 /// Empty for a source that is not where it claims to be. The single accessor of this list.
+///
+/// Since #208 `usable` no longer asks it for the declared effects of a board unit (it reads the
+/// instance it already holds); #129 gives the units their listed effects back.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn effects_of(
     state: &GameState,
     source: Source,
@@ -277,19 +281,26 @@ pub(crate) fn usable(state: &GameState, used: &Use<'_>) -> Result<(), RuleError>
     match (source, effect, choice) {
         (Source::Hand(card), EffectRef::Play, Choice::Picks(picks)) => {
             // The hand first: an id that is not in it gets `CardNotInHand` whatever the board.
-            hand_position(state, card).ok_or(RuleError::CardNotInHand)?;
+            let card = hand_position(state, card)
+                .and_then(|i| state.player(state.active).hand.get(i))
+                .ok_or(RuleError::CardNotInHand)?;
             // No summoning takes a choice at this stage.
             if !picks.is_empty() {
                 return Err(RuleError::InvalidPicks);
             }
-            play_blocker(state, state.active).map_or(Ok(()), Err)
+            play_blocker_of(state, state.active, card).map_or(Ok(()), Err)
         }
         (Source::Board(attacker), EffectRef::Attack, Choice::Target(target)) => {
-            // Order of the checks: the attacker, then the target on the opposing board, then
-            // the provocation. Every id that is not an opposing creature gets `TargetNotOnBoard`
+            // Order of the checks: the attacker, its force, then the target on the opposing
+            // board, then the provocation. Every id that is not an opposing creature gets `TargetNotOnBoard`
             // whatever zone (hidden or not) it is in, even when a provocateur exists: the
             // provocation error only ever speaks of the public board.
-            board_position(state, attacker).ok_or(RuleError::AttackerNotOnBoard)?;
+            let attacker = board_position(state, attacker)
+                .and_then(|i| state.player(state.active).board.get(i))
+                .ok_or(RuleError::AttackerNotOnBoard)?;
+            if let Some(blocked) = attack_blocker(state, attacker) {
+                return Err(blocked);
+            }
             if let Target::Creature(creature) = target {
                 opposing_board_position(state, creature).ok_or(RuleError::TargetNotOnBoard)?;
             }
@@ -311,15 +322,23 @@ pub(crate) fn usable(state: &GameState, used: &Use<'_>) -> Result<(), RuleError>
                 Err(RuleError::EffectNotApplicable)
             }
         }
-        (Source::Board(creature), EffectRef::Declared(_), _) => {
+        (Source::Board(creature), EffectRef::Declared(index), _) => {
             // One code for every id that is not a creature of my board (hand, pile, discard,
             // opposing board, unknown): no hidden zone is told apart.
-            board_position(state, creature).ok_or(RuleError::SourceNotOnBoard)?;
-            // A creature declares no effect at this stage: the board carries none to find.
-            if effects_of(state, source).any(|carried| carried == effect) {
-                Ok(())
-            } else {
-                Err(RuleError::UnknownEffect)
+            let unit = board_position(state, creature)
+                .and_then(|i| state.player(state.active).board.get(i))
+                .ok_or(RuleError::SourceNotOnBoard)?;
+            // A declared `activated` effect exists but is not resolved yet (temporary code, until
+            // #129); any other index, or an effect that is not `activated`, is no effect to
+            // activate.
+            let declared = usize::try_from(index)
+                .ok()
+                .and_then(|i| unit.effects().get(i));
+            match declared {
+                Some(declared) if declared.trigger == Trigger::Activated => {
+                    Err(RuleError::UnsupportedEffect)
+                }
+                _ => Err(RuleError::UnknownEffect),
             }
         }
         // A combination `decode` never builds (a card of the hand that attacks, a hero that

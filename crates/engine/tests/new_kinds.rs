@@ -289,11 +289,20 @@ fn an_immobile_unit_never_attacks() {
 
 #[test]
 fn an_immobile_unit_takes_a_slot_of_the_board_like_any_unit() {
-    let mut setup = setup_of(side(hero(2, 30, 10), mixed), side(hero(1, 30, 10), mixed));
+    // A hero that can draw (the pile is not empty): once the only slot is taken the player is not
+    // "mat", the draw is still a usable action.
+    let mut one = hero(2, 25, 10);
+    one.effects = vec![duel_cards::HeroEffect {
+        name: "Rappel".into(),
+        cost: 1,
+        effect: duel_cards::Effect::Draw { count: 1 },
+    }];
+    let mut setup = setup_of(side(one, mixed), side(hero(1, 30, 10), mixed));
     setup.rules.board_limit = Some(1);
     let (mut state, _) = new_game(setup, 1).unwrap();
     let immobiles = hand_named(&state, PlayerId::One, "immobile");
     let mobiles = hand_named(&state, PlayerId::One, "unit");
+    assert!(!immobiles.is_empty() && mobiles.len() >= 2);
     apply(&mut state, Action::play(immobiles[0])).unwrap();
     // One slot, taken by the immobile unit: a second unit is refused, then allowed nowhere.
     assert_eq!(
@@ -301,7 +310,7 @@ fn an_immobile_unit_takes_a_slot_of_the_board_like_any_unit() {
         RuleError::BoardFull
     );
     assert_eq!(
-        apply(&mut state, Action::play(immobiles[1])).unwrap_err(),
+        apply(&mut state, Action::play(mobiles[1])).unwrap_err(),
         RuleError::BoardFull
     );
 }
