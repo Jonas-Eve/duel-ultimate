@@ -303,12 +303,18 @@ test.describe("6. Les trois fins", () => {
   });
 
   // Exhaustion never happens at random (fact V7): the wear-down robot drives the interface, both
-  // camps, reading the DOM only. Pinned: Ruée (camp 1) against Rempart (camp 2), seed EXHAUSTION_SEED.
-  const EXHAUSTION_SEED = 2;
+  // camps, reading the DOM only. Pinned since #172: Rempart against Rempart (camp 1 and camp 2
+  // both play Rempart), seed EXHAUSTION_SEED. Under the standard rules (hero riposte, board limit
+  // 5) Ruée and Rempart no longer end by exhaustion with this robot (the hero destroys the
+  // attackers that hit it, and the game ends on the hero first: 1200 games searched), while
+  // the Rempart mirror does, for every one of 150 seeds tried.
+  const EXHAUSTION_SEED = 125;
+  const REMPART_1 = "Camp 1 — Rempart";
+  const REMPART_2 = "Camp 2 — Rempart";
   test("exhaustion : le robot d'usure épuise un camp", async ({ page }) => {
     test.setTimeout(180_000);
     await openHome(page);
-    await twoCamps(page, EXHAUSTION_SEED);
+    await startGame(page, { mode: "two-camps", deck: "Rempart", deckTwo: "Rempart", seed: String(EXHAUSTION_SEED) });
     const started = Date.now();
     const steps = await playToEnd(page, wearDownStep, 700);
     const seconds = Math.round((Date.now() - started) / 1000);
@@ -316,9 +322,9 @@ test.describe("6. Les trois fins", () => {
     console.log(`exhaustion: ${steps} interface actions in ${seconds} s`);
 
     const title = (await endHeading(page).textContent()) ?? "";
-    const winner = [CAMP_1, CAMP_2].find((c) => title === `${c} a gagné.`);
+    const winner = [REMPART_1, REMPART_2].find((c) => title === `${c} a gagné.`);
     expect(winner, `the title names a camp: ${title}`).toBeDefined();
-    const loser = winner === CAMP_1 ? CAMP_2 : CAMP_1;
+    const loser = winner === REMPART_1 ? REMPART_2 : REMPART_1;
     await expect(page.getByText(`${loser} n'avait plus aucune action possible (épuisement).`, { exact: true })).toBeVisible();
     const blocks = await readBlocks(page.getByRole("region", { name: "Journal complet" }));
     expect(blocks.at(-1)!.lines.at(-1)).toBe(`${winner} gagne : ${loser} n'avait plus aucune action possible (épuisement).`);

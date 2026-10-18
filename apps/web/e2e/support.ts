@@ -202,15 +202,25 @@ export async function closeDetail(page: Page): Promise<void> {
  * otherwise closes the sheet and returns false. The state of the button is the only criterion.
  */
 export async function playFromDetail(page: Page, tileLocator: Locator): Promise<boolean> {
+  return (await playOrExplain(page, tileLocator)) === "played";
+}
+
+/**
+ * `playFromDetail` that also tells why nothing was played: "board-full" when the sheet says the board
+ * is full (the engine's reason, the same for every card of the hand: board limit of the standard rules,
+ * so a caller may stop looking at the other cards), "unavailable" otherwise.
+ */
+async function playOrExplain(page: Page, tileLocator: Locator): Promise<"played" | "board-full" | "unavailable"> {
   const sheet = await openDetail(page, tileLocator);
   const play = playButton(sheet);
   if (await isInactive(play)) {
+    const full = /Le plateau est plein/.test((await sheet.textContent()) ?? "");
     await closeDetail(page);
-    return false;
+    return full ? "board-full" : "unavailable";
   }
   await play.tap();
   await expect(sheet).toHaveCount(0);
-  return true;
+  return "played";
 }
 
 /**
@@ -389,7 +399,11 @@ export async function activeCamp(page: Page): Promise<string> {
 export async function tapCard(page: Page, name?: RegExp): Promise<boolean> {
   const tiles = handTiles(page).filter(name === undefined ? {} : { has: page.locator(".card-name").filter({ hasText: name }) });
   const n = await tiles.count();
-  for (let i = 0; i < n; i++) if (await playFromDetail(page, tiles.nth(i))) return true;
+  for (let i = 0; i < n; i++) {
+    const result = await playOrExplain(page, tiles.nth(i));
+    if (result === "played") return true;
+    if (result === "board-full") return false; // the same reason for every card: skip the others
+  }
   return false;
 }
 
