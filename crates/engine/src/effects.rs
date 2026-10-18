@@ -7,8 +7,8 @@
 //! every candidate [`Use`] in the order of the legal actions, [`usable`] is the only judge of
 //! legality (called by `validate`, `legal_actions` and `check_exhaustion`), and [`decode`] /
 //! [`encode`] turn the wire [`Action`] into a [`Use`] and back. The attack is an intrinsic
-//! effect, synthesized for every creature of the board (never a line of data); a creature
-//! declares no effect at this stage.
+//! effect, synthesized for every creature of the board (never a line of data); a unit may declare
+//! effects (#208), carried by its instance but never resolved yet (`unsupported_effect`).
 
 use crate::combat;
 use crate::rules::{
@@ -53,7 +53,7 @@ pub(crate) enum Source {
 }
 
 /// Which effect of a source: summoning a card, the intrinsic attack of a creature, or the effect
-/// of the hero's list at this index (a creature declares none).
+/// of the hero's list at this index (the effects a unit declares are not listed here yet).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EffectRef {
     Play,
@@ -83,7 +83,7 @@ pub(crate) enum Use<'a> {
 
 /// The effects a source of this kind carries, without looking for it in the state: `Play` for a
 /// card of the hand, `Attack` for a creature of the board, `Declared(i)` for the `declared`
-/// effects of the hero's list. A creature declares none.
+/// effects of the hero's list. The effects a unit declares are not listed here yet (#129).
 fn carried(source: Source, declared: usize) -> impl Iterator<Item = EffectRef> {
     let intrinsic = match source {
         Source::Hand(_) => Some(EffectRef::Play),
@@ -268,7 +268,7 @@ pub(crate) fn encode(used: &Use<'_>) -> Option<Action> {
 
 /// The single legality predicate: whether the active player may use this now. The checks and
 /// their order are those `validate` always had (the game being over and the size of the picks
-/// are judged before, by `validate`). An attack adds no check of the force of the attacker.
+/// are judged before, by `validate`). An attack checks the force of its attacker (`attack_blocker`) right after the attacker.
 pub(crate) fn usable(state: &GameState, used: &Use<'_>) -> Result<(), RuleError> {
     let Use::Effect {
         source,
