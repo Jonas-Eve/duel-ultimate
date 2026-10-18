@@ -1411,6 +1411,15 @@ fn s1_hero_only_games_keep_their_exact_outcome_and_journal() {
 /// by the test (a 64-bit LCG), so that the policy does not depend on the engine's own seed.
 /// Returns the final state and the journal.
 fn play_scripted_s2a_from(setup: GameSetup, seed: u64) -> (GameState, Vec<Event>) {
+    play_scripted_s2a_observed(setup, seed, |_| {})
+}
+
+/// `play_scripted_s2a_from`, calling `after_step` with the state after each real action.
+fn play_scripted_s2a_observed(
+    setup: GameSetup,
+    seed: u64,
+    mut after_step: impl FnMut(&GameState),
+) -> (GameState, Vec<Event>) {
     let (mut state, mut log) = new_game(setup, seed).unwrap();
     let mut rng = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xdead_beef;
     while state.winner().is_none() {
@@ -1427,6 +1436,7 @@ fn play_scripted_s2a_from(setup: GameSetup, seed: u64) -> (GameState, Vec<Event>
             .wrapping_add(1_442_695_040_888_963_407);
         let pick = usize::try_from((rng >> 33) % actions.len() as u64).unwrap();
         log.extend(apply(&mut state, actions[pick]).unwrap());
+        after_step(&state);
     }
     (state, log)
 }
@@ -1541,26 +1551,11 @@ fn s2a_scripted_games_under_the_standard_rules_have_their_golden_journal() {
         .map(|seed| {
             let mut setup = without_versions(s1_setup());
             setup.rules = RuleSet::standard();
-            let (mut state, mut log) = new_game(setup, seed).unwrap();
-            let mut rng = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xdead_beef;
-            while state.winner().is_none() {
-                let actions: Vec<_> = legal_actions(&state)
-                    .into_iter()
-                    .filter(|a| *a != Action::Concede)
-                    .collect();
-                if actions.is_empty() {
-                    log.extend(apply(&mut state, Action::Concede).unwrap());
-                    continue;
-                }
-                rng = rng
-                    .wrapping_mul(6_364_136_223_846_793_005)
-                    .wrapping_add(1_442_695_040_888_963_407);
-                let pick = usize::try_from((rng >> 33) % actions.len() as u64).unwrap();
-                log.extend(apply(&mut state, actions[pick]).unwrap());
+            let (state, log) = play_scripted_s2a_observed(setup, seed, |state| {
                 full_board |= [PlayerId::One, PlayerId::Two]
                     .iter()
                     .any(|p| state.board(*p).len() == 5);
-            }
+            });
             riposted += log
                 .iter()
                 .filter(|e| matches!(e, Event::HeroRiposted { .. }))

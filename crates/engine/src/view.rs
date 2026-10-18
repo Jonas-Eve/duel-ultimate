@@ -89,6 +89,11 @@ pub struct PlayerView {
 /// and still are; `hand_unseen` only counts the cards that came from the draw pile during the
 /// action. No field can carry a drawn card (id, name or stats), so the leak is impossible by
 /// construction.
+///
+/// `hand_known` cards never carry `unavailable` (always `None`, unlike `PlayerView::hand`): that
+/// reason is derived from the public board, so nothing leaks by leaving it out, and the AI that
+/// reads the outcome sees the playable actions from `Observation::actions`, never an unplayable
+/// card.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct OutcomeOwnSide {
     pub hero: HeroView,
