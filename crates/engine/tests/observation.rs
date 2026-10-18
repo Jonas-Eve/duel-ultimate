@@ -179,3 +179,16 @@ fn after_a_suicidal_hit_the_outcome_has_the_attacker_in_its_discard_not_on_its_b
     assert!(suicides > 20, "suicidal hits seen: {suicides}");
     assert!(safe_hits > 0, "lethal hits seen: {safe_hits}");
 }
+
+#[test]
+fn into_actions_is_actions_without_copy() {
+    for seed in 0..10 {
+        let mut states = Vec::new();
+        for_every_state(seed, |state| states.push(state.clone()));
+        for state in &states {
+            let observation = Observation::of(state).expect("a running game");
+            let expected = observation.actions().to_vec();
+            assert_eq!(observation.into_actions(), expected, "seed {seed}");
+        }
+    }
+}
