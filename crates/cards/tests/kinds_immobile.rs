@@ -271,3 +271,44 @@ fn validate_card_spec_refuses_an_immobile_spec_with_a_force() {
         })
     );
 }
+
+#[test]
+fn an_immobile_unit_refuses_a_zero_force_or_attack_cost_too() {
+    // Presence is what is refused, never the value: `0` is not a sentinel of the data.
+    for (extra, field) in [
+        (r#","immobile":true,"force":0"#, "force"),
+        (r#","immobile":true,"attack_cost":0"#, "attack_cost"),
+        (r#","immobile":true,"force":0,"attack_cost":0"#, "force"),
+        (r#","immobile":true,"attack_cost":0,"force":0"#, "force"),
+    ] {
+        assert_eq!(
+            parse_one(&unit_json("unit", extra)).unwrap_err(),
+            invalid(CardsError::ImmobileWithAttackStat { field }),
+            "{extra}"
+        );
+    }
+}
+
+#[test]
+fn an_immobile_spec_with_a_zero_force_or_attack_cost_is_refused_by_serde() {
+    for (json, field) in [
+        (
+            r#"{"cost":2,"force":0,"health":5,"immobile":true}"#,
+            "force",
+        ),
+        (
+            r#"{"cost":2,"attack_cost":0,"health":5,"immobile":true}"#,
+            "attack_cost",
+        ),
+        (
+            r#"{"cost":2,"force":0,"attack_cost":0,"health":5,"immobile":true}"#,
+            "force",
+        ),
+    ] {
+        let error = serde_json::from_str::<CardSpec>(json)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(&format!("`{field}`")), "{json}: {error}");
+        assert!(error.contains("immobile"), "{json}: {error}");
+    }
+}
