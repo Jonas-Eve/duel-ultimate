@@ -29,11 +29,13 @@ fn card(id: &str, provocation: bool, riposte: u32) -> Card {
         id: id.into(),
         name: id.into(),
         cost: 1,
-        force: 1,
-        attack_cost: 1,
+        force: Some(1),
+        attack_cost: Some(1),
         health: 1,
         provocation,
         riposte,
+        immobile: false,
+        tags: vec![],
     }
 }
 
@@ -212,9 +214,9 @@ fn resolve_deck_passes_both_fields_through_in_deck_order() {
     ids[0] = "a";
     ids[1] = "c";
     let resolved = resolve_deck(&deck_of(&ids), &cards).unwrap();
-    assert_eq!(resolved[0], stats(true, 2));
-    assert_eq!(resolved[1], stats(false, 9));
-    assert_eq!(resolved[2], stats(false, 0));
+    assert_eq!(resolved[0].creature(), &stats(true, 2));
+    assert_eq!(resolved[1].creature(), &stats(false, 9));
+    assert_eq!(resolved[2].creature(), &stats(false, 0));
 }
 
 #[test]
@@ -228,8 +230,8 @@ fn the_fixture_has_no_provocation_and_no_riposte_anywhere() {
     }
     for deck in parse_decks(FIXTURE_DECKS).unwrap() {
         for s in resolve_deck(&deck, &cards).unwrap() {
-            assert!(!s.provocation);
-            assert_eq!(s.riposte, 0);
+            assert!(!s.creature().provocation);
+            assert_eq!(s.creature().riposte, 0);
         }
     }
 }

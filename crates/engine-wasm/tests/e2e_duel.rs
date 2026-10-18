@@ -55,11 +55,7 @@ fn fixture() -> Value {
     let decks = parse_decks(DECKS).unwrap();
     let side = |i: usize| PlayerSetup {
         hero: decks[i].hero.clone(),
-        cards: resolve_deck(&decks[i], &cards)
-            .unwrap()
-            .into_iter()
-            .map(Into::into)
-            .collect(),
+        cards: resolve_deck(&decks[i], &cards).unwrap(),
         card_names: Vec::new(),
     };
     serde_json::to_value(GameSetup {
@@ -3557,11 +3553,7 @@ fn starter_of(one: &str, two: &str) -> Value {
             .expect("a deck");
         PlayerSetup {
             hero: decks[index].hero.clone(),
-            cards: resolve_deck(&decks[index], &cards)
-                .unwrap()
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            cards: resolve_deck(&decks[index], &cards).unwrap(),
             card_names: Vec::new(),
         }
     };

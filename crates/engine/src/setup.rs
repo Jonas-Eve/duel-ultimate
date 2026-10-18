@@ -45,13 +45,17 @@ pub enum SetupError {
     Invalid(#[from] CardsError),
     #[error("invalid rules: {0}")]
     InvalidRules(#[from] RuleSetError),
+    /// Temporary guard (#206): a valid card the engine cannot play yet (`immobile`, tags).
+    /// Lifted by task 3 of #137.
+    #[error("unsupported card: {0}")]
+    Unsupported(&'static str),
 }
 
 impl SetupError {
     /// Stable machine-readable code.
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Invalid(_) | Self::InvalidRules(_) => "invalid_setup",
+            Self::Invalid(_) | Self::InvalidRules(_) | Self::Unsupported(_) => "invalid_setup",
         }
     }
 }
@@ -61,6 +65,18 @@ fn validate_side(side: &PlayerSetup) -> Result<(), CardsError> {
     validate_deck_shape(&side.hero, side.cards.len())?;
     validate_card_names(&side.card_names, side.cards.len())?;
     side.cards.iter().try_for_each(validate_card_spec)
+}
+
+/// Temporary fail-closed guard (#206, lifted by task 3 of #137): refuses a valid spec the engine
+/// cannot play properly yet. An `immobile` unit would still have its attack enumerated (force
+/// effective 0), and a tag has no meaning for the engine.
+fn ensure_playable(side: &PlayerSetup) -> Result<(), SetupError> {
+    match side.cards.iter().find(|spec| !spec.is_plain_unit()) {
+        Some(_) => Err(SetupError::Unsupported(
+            "only plain units (neither `immobile` nor tags) can be played for now",
+        )),
+        None => Ok(()),
+    }
 }
 
 /// Builds a player's pile in deck order; `next_id` runs on across both players so that ids
@@ -73,12 +89,12 @@ fn build_side(side: PlayerSetup, next_id: &mut u32) -> PlayerState {
         .cards
         .into_iter()
         .map(|spec| {
-            let CardSpec::Creature(stats) = spec;
+            let CardSpec::Unit(unit) = spec;
             let id = CardInstanceId(*next_id);
             *next_id += 1;
             CardInstance {
                 id,
-                stats,
+                stats: unit.stats,
                 name: names.next(),
             }
         })
@@ -128,6 +144,8 @@ fn deal(state: &mut GameState, player: PlayerId) {
 pub fn new_game(setup: GameSetup, seed: u64) -> Result<(GameState, Vec<Event>), SetupError> {
     validate_side(&setup.one)?;
     validate_side(&setup.two)?;
+    ensure_playable(&setup.one)?;
+    ensure_playable(&setup.two)?;
     setup.rules.validate()?;
     let mut next_id = 0;
     let one = build_side(setup.one, &mut next_id);

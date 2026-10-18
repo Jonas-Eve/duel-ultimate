@@ -32,3 +32,23 @@ fn an_out_of_bounds_card_is_invalid_setup_at_the_binding() {
     let error = Duel::from_json(&value.to_string(), 1).err().unwrap();
     assert_eq!(code(&error), "invalid_setup");
 }
+
+#[test]
+fn an_immobile_card_in_a_setup_is_invalid_setup_for_now() {
+    // Temporary (#206, lifted by task 3 of #137): the engine refuses what it cannot play yet.
+    let mut value: Value = serde_json::from_str(GOLDEN).unwrap();
+    let card = value["one"]["cards"][0].as_object_mut().unwrap();
+    card.remove("force");
+    card.remove("attack_cost");
+    card.insert("immobile".into(), Value::Bool(true));
+    let error = Duel::from_json(&value.to_string(), 1).err().unwrap();
+    assert_eq!(code(&error), "invalid_setup");
+}
+
+#[test]
+fn a_tagged_card_in_a_setup_is_invalid_setup_for_now() {
+    let mut value: Value = serde_json::from_str(GOLDEN).unwrap();
+    value["one"]["cards"][0]["tags"] = serde_json::json!(["bâtiment"]);
+    let error = Duel::from_json(&value.to_string(), 1).err().unwrap();
+    assert_eq!(code(&error), "invalid_setup");
+}

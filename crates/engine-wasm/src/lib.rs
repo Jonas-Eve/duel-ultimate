@@ -335,11 +335,7 @@ mod tests {
         let decks = parse_decks(include_str!("../../../data/fixture/1.0.0/decks.json")).unwrap();
         let side = |i: usize| PlayerSetup {
             hero: decks[i].hero.clone(),
-            cards: resolve_deck(&decks[i], &cards)
-                .unwrap()
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            cards: resolve_deck(&decks[i], &cards).unwrap(),
             card_names: Vec::new(),
         };
         serde_json::to_value(GameSetup {

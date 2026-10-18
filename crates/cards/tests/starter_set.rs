@@ -24,7 +24,11 @@ fn deck<'a>(decks: &'a [Deck], id: &str) -> &'a Deck {
 /// Resolved stats of the 30 cards of a deck.
 fn resolved(id: &str) -> Vec<CreatureStats> {
     let decks = decks();
-    resolve_deck(deck(&decks, id), &cards()).expect("deck resolves")
+    resolve_deck(deck(&decks, id), &cards())
+        .expect("deck resolves")
+        .iter()
+        .map(|spec| spec.creature().clone())
+        .collect()
 }
 
 fn sum(stats: &[CreatureStats], f: fn(&CreatureStats) -> u32) -> u32 {

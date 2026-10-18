@@ -54,11 +54,13 @@ fn card(id: &str) -> Card {
         id: id.into(),
         name: id.into(),
         cost: 1,
-        force: 1,
-        attack_cost: 1,
+        force: Some(1),
+        attack_cost: Some(1),
         health: 1,
         provocation: false,
         riposte: 0,
+        immobile: false,
+        tags: vec![],
     }
 }
 
@@ -103,19 +105,21 @@ fn resolve_deck_copies_the_stats_of_each_card_in_order() {
             id: "a".into(),
             name: "A".into(),
             cost: 2,
-            force: 3,
-            attack_cost: 4,
+            force: Some(3),
+            attack_cost: Some(4),
             health: 5,
             provocation: false,
             riposte: 0,
+            immobile: false,
+            tags: vec![],
         },
         card("b"),
     ];
     let mut ids = vec!["b"; DECK_SIZE];
     ids[0] = "a";
     let resolved = resolve_deck(&deck_of(&ids), &cards).unwrap();
-    assert_eq!(resolved[0], stats_with(2, 3, 4, 5, false, 0));
-    assert_eq!(resolved[1], stats());
+    assert_eq!(resolved[0].creature(), &stats_with(2, 3, 4, 5, false, 0));
+    assert_eq!(resolved[1].creature(), &stats());
 }
 
 #[test]
@@ -439,8 +443,14 @@ fn rejects_unknown_field() {
 
 #[test]
 fn rejects_unknown_kind() {
-    let json = r#"[{"kind":"spell","id":"a","name":"A"}]"#;
-    assert!(matches!(parse_cards(json), Err(CardsError::Json(_))));
+    // `spell` becomes a valid kind in #137 (task 2): the unknown kinds used here are others.
+    for kind in ["building", "equipment"] {
+        let json = format!(r#"[{{"kind":"{kind}","id":"a","name":"A"}}]"#);
+        assert!(
+            matches!(parse_cards(&json), Err(CardsError::Json(_))),
+            "{kind}"
+        );
+    }
 }
 
 #[test]
