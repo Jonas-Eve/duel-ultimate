@@ -1,8 +1,8 @@
 //! `Observation` through the public API (#140): the active seat's window on a running game.
 
 use duel_engine::{
-    Action, GameSetup, GameState, Observation, PlayerId, apply, game_setup_from_data,
-    legal_actions, new_game, player_view,
+    Action, Event, GameSetup, GameState, Observation, PlayerId, RuleSet, Target, apply,
+    game_setup_from_data, legal_actions, new_game, player_view,
 };
 
 const FIXTURE_CARDS: &str = include_str!("../../../data/fixture/1.0.0/cards.json");
@@ -131,4 +131,51 @@ fn observing_does_not_change_what_follows() {
         }
         assert_eq!(watched, plain);
     }
+}
+
+#[test]
+fn after_a_suicidal_hit_the_outcome_has_the_attacker_in_its_discard_not_on_its_board() {
+    let (mut suicides, mut safe_hits) = (0, 0);
+    for seed in 0..40 {
+        let mut setup = setups().remove(usize::try_from(seed).unwrap() % 3);
+        setup.rules = RuleSet {
+            hero_riposte: true,
+            ..RuleSet::legacy()
+        };
+        let (mut state, _) = new_game(setup, seed).unwrap();
+        let mut rng = Xorshift(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+        while state.winner().is_none() {
+            let obs = Observation::of(&state).unwrap();
+            for (i, action) in obs.actions().iter().enumerate() {
+                let Action::Attack {
+                    attacker,
+                    target: Target::Hero,
+                } = action
+                else {
+                    continue;
+                };
+                let mut real = state.clone();
+                let dies = apply(&mut real, *action)
+                    .unwrap()
+                    .iter()
+                    .any(|e| matches!(e, Event::Died { creature, .. } if creature == attacker));
+                let outcome = obs.outcome(i).unwrap();
+                let after = outcome.view_after;
+                let on_board = after.you.board.iter().any(|c| c.id == *attacker);
+                let in_discard = after.you.discard.iter().any(|c| c.id == *attacker);
+                assert_eq!((on_board, in_discard), (!dies, dies), "seed {seed}");
+                let preview = serde_json::to_value(&outcome.preview).unwrap();
+                assert_eq!(preview["attacker_destroyed"].as_bool(), Some(dies));
+                if dies {
+                    suicides += 1;
+                } else {
+                    safe_hits += 1;
+                }
+            }
+            let playable = obs.actions().to_vec();
+            apply(&mut state, playable[rng.below(playable.len())]).unwrap();
+        }
+    }
+    assert!(suicides > 20, "suicidal hits seen: {suicides}");
+    assert!(safe_hits > 0, "lethal hits seen: {safe_hits}");
 }

@@ -446,7 +446,7 @@ fn json_of(state: &GameState) -> Value {
 }
 
 #[test]
-fn an_entry_has_exactly_five_fields_and_no_draw_appears() {
+fn an_entry_has_exactly_six_fields_and_no_draw_appears() {
     for setup in matchups() {
         for seed in 0..20 {
             let (state, _) = new_game(setup.clone(), seed).unwrap();
@@ -461,7 +461,14 @@ fn an_entry_has_exactly_five_fields_and_no_draw_appears() {
                 keys.sort_unstable();
                 assert_eq!(
                     keys,
-                    ["action", "budget_after", "cost", "ends_game", "hands_over"]
+                    [
+                        "action",
+                        "attacker_destroyed",
+                        "budget_after",
+                        "cost",
+                        "ends_game",
+                        "hands_over"
+                    ]
                 );
             }
             assert!(!value.to_string().contains("drew"), "{value}");
@@ -523,4 +530,198 @@ fn previewing_does_not_change_how_the_game_continues() {
             assert_eq!(plain, observed);
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// 5. `attacker_destroyed` (#170): read from the facts of the dry run (a `Died` of the attacker)
+// ---------------------------------------------------------------------------------------
+
+const HERO_RIPOSTE: RuleSet = RuleSet {
+    hero_riposte: true,
+    ..RuleSet::legacy()
+};
+
+/// `built` with explicit rules.
+fn built_with(rules: RuleSet, one: PlayerSetup, two: PlayerSetup) -> GameState {
+    new_game(
+        GameSetup {
+            one,
+            two,
+            data_versions: vec![],
+            rules,
+        },
+        7,
+    )
+    .unwrap()
+    .0
+}
+
+/// The `attacker_destroyed` key of the JSON of the preview of `action`: the contract the
+/// clients read (a boolean, always present).
+fn destroyed(state: &GameState, action: Action) -> bool {
+    let value = serde_json::to_value(preview_of(state, action)).unwrap();
+    value["attacker_destroyed"]
+        .as_bool()
+        .unwrap_or_else(|| panic!("no boolean attacker_destroyed in {value}"))
+}
+
+/// One summons a creature (cost 1, force 1, attack cost 1, health 3) against a hero of
+/// `two_health`, budget 5 -> 4, under `rules`.
+fn hitting_state(rules: RuleSet, two_health: u32) -> (GameState, Action) {
+    let mut state = built_with(
+        rules,
+        side(one_hero(5, 8, vec![draw(1, 1)]), creature(1, 1, 1, 3, 0)),
+        side(
+            hero(1, 1, 8, 4, two_health, vec![draw(1, 1)]),
+            creature(1, 1, 1, 3, 0),
+        ),
+    );
+    let Action::Play { card } = first_play(&state) else {
+        unreachable!()
+    };
+    apply(&mut state, Action::Play { card }).unwrap();
+    (
+        state,
+        Action::Attack {
+            attacker: card,
+            target: Target::Hero,
+        },
+    )
+}
+
+#[test]
+fn a_non_lethal_hit_on_the_hero_destroys_the_attacker_when_the_option_is_on() {
+    let (state, attack) = hitting_state(HERO_RIPOSTE, 2);
+    assert!(destroyed(&state, attack));
+}
+
+#[test]
+fn a_lethal_hit_on_the_hero_destroys_nothing() {
+    let (state, attack) = hitting_state(HERO_RIPOSTE, 1);
+    assert!(!destroyed(&state, attack));
+}
+
+#[test]
+fn with_the_option_off_a_hit_on_the_hero_destroys_nothing() {
+    let (state, attack) = hitting_state(RuleSet::legacy(), 2);
+    assert!(!destroyed(&state, attack));
+}
+
+/// One's creature (cost 3, force 1, attack cost 2, `health`) attacks Two's (health 5, riposte
+/// 2) with One holding 1 time unit.
+fn creature_duel(health: u32) -> (GameState, Action) {
+    let mut state = built(
+        side(
+            one_hero(3, 8, vec![draw(1, 1)]),
+            creature(3, 1, 2, health, 0),
+        ),
+        side(two_hero(8), creature(1, 1, 1, 5, 2)),
+    );
+    for _ in 0..2 {
+        let play = first_play(&state);
+        apply(&mut state, play).unwrap();
+    }
+    let attack = Action::Attack {
+        attacker: state.board(PlayerId::One)[0],
+        target: Target::Creature(state.board(PlayerId::Two)[0]),
+    };
+    (state, attack)
+}
+
+#[test]
+fn an_attacker_killed_by_the_riposte_of_a_creature_is_destroyed() {
+    let (state, attack) = creature_duel(1);
+    assert!(destroyed(&state, attack));
+}
+
+#[test]
+fn an_attacker_that_survives_the_riposte_is_not_destroyed() {
+    let (state, attack) = creature_duel(3);
+    assert!(!destroyed(&state, attack));
+}
+
+#[test]
+fn only_attacks_can_destroy_the_attacker() {
+    let (state, _) = hitting_state(HERO_RIPOSTE, 2);
+    for preview in preview_legal_actions(&state) {
+        let value = serde_json::to_value(&preview).unwrap();
+        let expected = matches!(preview.action, Action::Attack { .. });
+        assert!(value["attacker_destroyed"].is_boolean(), "{value}");
+        if !expected {
+            assert_eq!(value["attacker_destroyed"], false, "{value}");
+        }
+    }
+    let fresh = built_with(
+        HERO_RIPOSTE,
+        side(one_hero(3, 8, vec![draw(1, 1)]), creature(1, 1, 1, 3, 0)),
+        side(two_hero(8), creature(1, 1, 1, 3, 0)),
+    );
+    for preview in preview_legal_actions(&fresh) {
+        assert_eq!(
+            serde_json::to_value(&preview).unwrap()["attacker_destroyed"],
+            false,
+            "{preview:?}"
+        );
+    }
+}
+
+#[test]
+fn attacker_destroyed_is_the_death_of_the_attacker_in_the_real_journal() {
+    let mut destroyed_seen = 0_usize;
+    let mut survived_seen = 0_usize;
+    for hero_riposte in [false, true] {
+        for board_limit in [None, Some(5)] {
+            let rules = RuleSet {
+                hero_riposte,
+                board_limit,
+            };
+            for (m, setup) in matchups().into_iter().enumerate() {
+                for seed in 0..30_u64 {
+                    let mut setup = setup.clone();
+                    setup.rules = rules;
+                    let (mut state, _) = new_game(setup, seed).unwrap();
+                    let mut rng =
+                        Xorshift(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (m as u64 + 9));
+                    for _ in 0..400 {
+                        for preview in preview_legal_actions(&state) {
+                            let mut copy = state.clone();
+                            let events = apply(&mut copy, preview.action).unwrap();
+                            let expected = match preview.action {
+                                Action::Attack { attacker, .. } => events.iter().any(|e| {
+                                    matches!(e, Event::Died { creature, .. } if *creature == attacker)
+                                }),
+                                _ => false,
+                            };
+                            let value = serde_json::to_value(&preview).unwrap();
+                            assert_eq!(
+                                value["attacker_destroyed"].as_bool(),
+                                Some(expected),
+                                "{rules:?}, seed {seed}: {preview:?}"
+                            );
+                            if matches!(preview.action, Action::Attack { .. }) {
+                                if expected {
+                                    destroyed_seen += 1;
+                                } else {
+                                    survived_seen += 1;
+                                }
+                            }
+                        }
+                        let actions: Vec<Action> = legal_actions(&state)
+                            .into_iter()
+                            .filter(|a| *a != Action::Concede)
+                            .collect();
+                        if actions.is_empty() {
+                            break;
+                        }
+                        apply(&mut state, actions[rng.below(actions.len())]).unwrap();
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        destroyed_seen > 100,
+        "destroyed attackers: {destroyed_seen}"
+    );
+    assert!(survived_seen > 100, "surviving attackers: {survived_seen}");
 }

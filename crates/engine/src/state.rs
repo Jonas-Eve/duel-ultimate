@@ -635,6 +635,126 @@ mod tests {
     }
 
     #[test]
+    fn the_potential_strictly_decreases_under_every_combination_of_options() {
+        // `board_limit: Some(5)` is still inert here (#171 makes it real); the combinations are
+        // played now so that the proof is re-checked, unchanged, the day it acts.
+        let combinations = [false, true].into_iter().flat_map(|hero_riposte| {
+            [None, Some(5)].map(|board_limit| RuleSet {
+                hero_riposte,
+                board_limit,
+            })
+        });
+        for rules in combinations {
+            let (mut hero_hits, mut hero_deaths, mut deaths, mut games) = (0, 0, 0, 0);
+            for seed in 0..250u64 {
+                let mut game = setup(
+                    hero(1 + (seed % 2) as u32, 3, 8, vec![draw(1, 1), draw(4, 3)]),
+                    hero(1, 2, 6, vec![draw(2, 2)]),
+                );
+                game.rules = rules;
+                let (mut state, _) = new_game(game, seed).unwrap();
+                let mut policy = ChaCha8Rng::seed_from_u64(seed ^ 0x5A5A);
+                let mut steps = 0;
+                while state.winner().is_none() {
+                    let playable: Vec<Action> = legal_actions(&state)
+                        .into_iter()
+                        .filter(|a| *a != Action::Concede)
+                        .collect();
+                    let pick = playable
+                        .get(policy.next_u32() as usize % playable.len().max(1))
+                        .copied()
+                        .unwrap_or(Action::Concede);
+                    if matches!(
+                        pick,
+                        Action::Attack {
+                            target: crate::Target::Hero,
+                            ..
+                        }
+                    ) {
+                        hero_hits += 1;
+                    }
+                    let before = potential(&state);
+                    let events = apply(&mut state, pick).unwrap();
+                    deaths += events
+                        .iter()
+                        .filter(|e| matches!(e, Event::Died { .. }))
+                        .count();
+                    hero_deaths += events
+                        .iter()
+                        .filter(|e| {
+                            serde_json::to_value(e).is_ok_and(|v| v.get("hero_riposted").is_some())
+                        })
+                        .count();
+                    if pick != Action::Concede {
+                        assert!(
+                            potential(&state) < before,
+                            "{rules:?}, seed {seed}: {pick:?} did not decrease the potential"
+                        );
+                    }
+                    steps += 1;
+                    assert!(
+                        steps < 2000,
+                        "{rules:?}, seed {seed}: the game does not end"
+                    );
+                }
+                games += 1;
+            }
+            // Not vacuous, under each combination.
+            assert!(games >= 200, "{rules:?}: {games} games");
+            assert!(hero_hits > 200, "{rules:?}: attacks on heroes: {hero_hits}");
+            assert!(deaths > 200, "{rules:?}: deaths: {deaths}");
+            if rules.hero_riposte {
+                assert!(
+                    hero_deaths > 0,
+                    "{rules:?}: riposted attackers: {hero_deaths}"
+                );
+            } else {
+                assert_eq!(hero_deaths, 0, "{rules:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_riposte_of_the_hero_can_exhaust_the_owner() {
+        // One keeps the token (1 < 8), has no card, no other creature and an effect that
+        // cannot be activated: the attacker's death leaves nothing to do.
+        let mut state = riposte_scene(riposter(100, 1, 1, 0, 1), riposter(101, 1, 5, 0, 1));
+        state.rules = RuleSet {
+            hero_riposte: true,
+            ..RuleSet::legacy()
+        };
+        let events = apply(
+            &mut state,
+            Action::Attack {
+                attacker: CardInstanceId(100),
+                target: crate::Target::Hero,
+            },
+        )
+        .unwrap();
+        let kinds: Vec<String> = serde_json::to_value(&events)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e.as_object().unwrap().keys().next().unwrap().clone())
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                "attacked",
+                "damaged",
+                "hero_riposted",
+                "died",
+                "token_moved",
+                "game_won"
+            ]
+        );
+        assert_eq!(state.winner(), Some((PlayerId::Two, WinReason::Exhaustion)));
+        assert_eq!((state.active(), state.budget()), (PlayerId::One, 7));
+        assert_eq!(state.discard(PlayerId::One), vec![CardInstanceId(100)]);
+    }
+
+    #[test]
     fn a_summoning_that_hands_over_to_an_exhausted_receiver_ends_the_game() {
         // One's summoning costs 8 against a budget of 8: the token crosses to Two, who has
         // neither card nor creature to act with.

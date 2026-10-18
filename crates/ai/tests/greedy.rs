@@ -131,6 +131,75 @@ fn kills_a_creature_without_losing_its_own_before_a_trade_that_loses_it() {
     );
 }
 
+// #170: with the hero's riposte, a hit on the hero that does not kill it costs the attacker.
+// The sacrifice is already weighed by `Observation::outcome` (the own board goes down), so no
+// weight of the evaluation changes: the greedy policy simply stops finding the hit free.
+fn riposting() -> serde_json::Value {
+    serde_json::json!({"hero_riposte": true, "board_limit": null})
+}
+
+#[test]
+fn with_the_hero_riposte_a_non_lethal_hit_on_the_hero_is_a_sacrifice_greedy_refuses() {
+    let state = opening_with_rules(
+        (
+            Hero::first(30),
+            vec![card("hitter", 1, 3, 5), card("recruit", 1, 1, 1)],
+        ),
+        (Hero::second(30), vec![]),
+        &["hitter"],
+        &[],
+        riposting(),
+    );
+    let recruit = in_hand(&state, PlayerId::One, "recruit");
+    assert_eq!(pick(&state), Action::Play { card: recruit });
+}
+
+#[test]
+fn without_the_hero_riposte_the_same_hit_is_taken() {
+    // The control of the test above: the very same position, the option written off.
+    let state = opening_with_rules(
+        (
+            Hero::first(30),
+            vec![card("hitter", 1, 3, 5), card("recruit", 1, 1, 1)],
+        ),
+        (Hero::second(30), vec![]),
+        &["hitter"],
+        &[],
+        serde_json::json!({"hero_riposte": false, "board_limit": null}),
+    );
+    let hitter = on_board(&state, PlayerId::One, "hitter");
+    assert_eq!(
+        pick(&state),
+        Action::Attack {
+            attacker: hitter,
+            target: Target::Hero
+        }
+    );
+}
+
+#[test]
+fn with_the_hero_riposte_greedy_still_takes_a_lethal_hit() {
+    // Hero health <= force: no riposte, the game is won, whatever the other options.
+    let state = opening_with_rules(
+        (
+            Hero::first(30),
+            vec![card("hitter", 1, 5, 5), card("recruit", 1, 1, 1)],
+        ),
+        (Hero::second(5), vec![]),
+        &["hitter"],
+        &[],
+        riposting(),
+    );
+    let hitter = on_board(&state, PlayerId::One, "hitter");
+    assert_eq!(
+        pick(&state),
+        Action::Attack {
+            attacker: hitter,
+            target: Target::Hero
+        }
+    );
+}
+
 // Story line: hitting the hero is a term like another, not a rule.
 #[test]
 fn hitting_the_hero_is_not_a_coded_priority() {
