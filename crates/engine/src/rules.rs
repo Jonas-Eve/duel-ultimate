@@ -1,6 +1,6 @@
 //! Actions, events and the rules that apply them.
 
-use crate::effects;
+use crate::effects::{self, effective};
 use crate::ruleset::RuleSet;
 use crate::state::{CardInstanceId, GameState, PlayerId, WinReason};
 use crate::time::{self, Spend};
@@ -259,7 +259,10 @@ pub(crate) fn opposing_board_position(state: &GameState, card: CardInstanceId) -
 /// of those creatures. The single implementation of the filter, called by `effects::usable` alone.
 pub(crate) fn provocation_allows(state: &GameState, target: Target) -> bool {
     let opposing = &state.player(state.active.opponent()).board;
-    let mut provocateurs = opposing.iter().filter(|c| c.stats.provocation).peekable();
+    let mut provocateurs = opposing
+        .iter()
+        .filter(|c| effective(state, c).provocation)
+        .peekable();
     if provocateurs.peek().is_none() {
         return true;
     }

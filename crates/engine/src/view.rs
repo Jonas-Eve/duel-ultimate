@@ -14,6 +14,7 @@
 //! as `"One"` / `"Two"` (as [`PlayerId`] serializes everywhere else), reasons as
 //! `hero_down`, `exhaustion`, `concede`.
 
+use crate::effects::effective;
 use crate::rules;
 use crate::state::{CardInstance, CardInstanceId, GameState, PlayerId, PlayerState, WinReason};
 use duel_cards::HeroEffect;
@@ -129,8 +130,8 @@ pub fn player_view(state: &GameState, seat: PlayerId) -> PlayerView {
             hero: hero_view(you),
             hand: hand_views(state, seat),
             deck_count: you.deck.len(),
-            board: card_views(&you.board),
-            discard: card_views(&you.discard),
+            board: card_views(state, &you.board),
+            discard: card_views(state, &you.discard),
         },
         opponent: opponent_side(state, seat),
     }
@@ -146,7 +147,7 @@ fn hand_views(state: &GameState, seat: PlayerId) -> Vec<CardView> {
         .iter()
         .map(|card| CardView {
             unavailable,
-            ..card_view(card)
+            ..card_view(state, card)
         })
         .collect()
 }
@@ -171,11 +172,14 @@ pub(crate) fn outcome_view(
         result: result_of(state_after),
         you: OutcomeOwnSide {
             hero: hero_view(you),
-            hand_known: known.into_iter().map(card_view).collect(),
+            hand_known: known
+                .into_iter()
+                .map(|card| card_view(state_after, card))
+                .collect(),
             hand_unseen: unseen.len(),
             deck_count: you.deck.len(),
-            board: card_views(&you.board),
-            discard: card_views(&you.discard),
+            board: card_views(state_after, &you.board),
+            discard: card_views(state_after, &you.discard),
         },
         opponent: opponent_side(state_after, seat),
     }
@@ -193,8 +197,8 @@ fn opponent_side(state: &GameState, seat: PlayerId) -> OpponentSide {
         hero: hero_view(opponent),
         hand_count: opponent.hand.len(),
         deck_count: opponent.deck.len(),
-        board: card_views(&opponent.board),
-        discard: card_views(&opponent.discard),
+        board: card_views(state, &opponent.board),
+        discard: card_views(state, &opponent.discard),
     }
 }
 
@@ -207,20 +211,21 @@ fn hero_view(side: &PlayerState) -> HeroView {
     }
 }
 
-fn card_views(cards: &[CardInstance]) -> Vec<CardView> {
-    cards.iter().map(card_view).collect()
+fn card_views(state: &GameState, cards: &[CardInstance]) -> Vec<CardView> {
+    cards.iter().map(|card| card_view(state, card)).collect()
 }
 
-fn card_view(card: &CardInstance) -> CardView {
+fn card_view(state: &GameState, card: &CardInstance) -> CardView {
+    let values = effective(state, card);
     CardView {
         id: card.id,
         name: card.name.clone(),
-        cost: card.stats.cost,
-        force: card.stats.force,
-        attack_cost: card.stats.attack_cost,
+        cost: values.cost,
+        force: values.force,
+        attack_cost: values.attack_cost,
         health: card.stats.health,
-        provocation: card.stats.provocation,
-        riposte: card.stats.riposte,
+        provocation: values.provocation,
+        riposte: values.riposte,
         unavailable: None,
     }
 }

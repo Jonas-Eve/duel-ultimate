@@ -40,6 +40,7 @@
 //! and no card leaving a discard pile or returning to a pile, a hand or a board. Any rule
 //! adding one of those (a heal, a return to hand, a recycling) must re-examine this.
 
+use crate::effects::effective;
 use crate::rules::{Event, Target};
 use crate::state::{CardInstance, CardInstanceId, GameState, PlayerId};
 
@@ -73,7 +74,7 @@ pub(crate) fn plan_damage(
         .board
         .iter()
         .find(|c| c.id == attacker)
-        .map_or(0, |c| c.stats.force);
+        .map_or(0, |c| effective(state, c).force);
     debug_assert!(on_target >= 1, "validated attacker with force >= 1");
     // A hero has no riposte; a creature hits back with its own, even if this attack kills it.
     let on_attacker = match target {
@@ -83,7 +84,7 @@ pub(crate) fn plan_damage(
             .board
             .iter()
             .find(|c| c.id == creature)
-            .map_or(0, |c| c.stats.riposte),
+            .map_or(0, |c| effective(state, c).riposte),
     };
     // The one place that decides "lethal" (`health <= force`): a lethal hit has no riposte.
     let attacker_slain = matches!(target, Target::Hero)
