@@ -390,7 +390,10 @@ même, alimenté par `toScreenModel` :
   « Fermer ». « Jouer » appelle `controller.submit(aperçu)`, ferme la feuille et incrémente `focusToken` (la tuile
   a quitté la main : le focus va à la région de partie) ; un double appui ne joue qu'une fois (feuille fermée,
   aperçu périmé ignoré par le contrôleur). Sans aperçu (tour de l'ordinateur), « Jouer » est `aria-disabled` mais
-  focalisable, un appui ne fait rien et la raison est un texte visible (`fr.playUnavailableComputer`). Échap et
+  focalisable, un appui ne fait rien et la raison est un texte visible : celle du moteur d'abord (#171,
+  `card.unavailable`, par exemple `board_full` : « Le plateau est plein : aucune créature de plus ne peut y être
+  posée. », sans le nombre de la limite, valable en deux camps ; le client ne compare jamais un plateau à une limite),
+  sinon `fr.playUnavailable` (mon tour) ou `fr.playUnavailableComputer` (tour de l'ordinateur). Échap et
   « Fermer » ne jouent rien. Écart de la revue de #92 corrigé : le nom de la tuile reprend le texte visible exact
   (« Reste N », `fr.keepsLegend`). Les e2e jouent désormais depuis le détail (#107, voir « Tests de bout en bout »).
 - **Détail de carte en lecture seule (#104)** : toucher une créature du plateau adverse ou une carte de la main

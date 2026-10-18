@@ -23,6 +23,10 @@ export interface CardEffects {
   values: { cost: number; attack: number; riposte: number; health: number };
 }
 
+/**
+ * `card.unavailable` (the engine's code for why a card of the hand cannot be played) is meta: never a value, never a
+ * keyword, so it is not arranged here. The play button of the sheet turns it into its French sentence (`messageFor`).
+ */
 export function cardEffects(card: CardView): CardEffects {
   const passive: KeywordLine[] = [];
   if (card.provocation) passive.push({ key: "provocation", ...KEYWORDS_FR.provocation });

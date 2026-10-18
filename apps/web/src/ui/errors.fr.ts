@@ -9,6 +9,8 @@ export const ERROR_TEXT: Record<ErrorCode, string> = {
   attacker_not_on_board: "Cette créature n'est pas sur votre plateau. Choisissez une créature en jeu pour attaquer.",
   target_not_on_board: "Cette cible n'est pas une créature du plateau adverse.",
   target_forbidden_by_provocation: "Une créature adverse avec provocation doit être attaquée en premier.",
+  // Neutral and without the number of the limit: valid in two camps, and for whatever limit a setting gives.
+  board_full: "Le plateau est plein : aucune créature de plus ne peut y être posée.",
   invalid_setup: "Les données de la partie sont invalides. Rechargez la page.",
   invalid_json: "La demande n'a pas pu être lue. Rechargez la page et recommencez.",
   unknown_deck: "Ce deck n'existe pas. Choisissez un deck de la liste.",

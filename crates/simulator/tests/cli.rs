@@ -236,40 +236,6 @@ fn a_rule_not_given_keeps_the_engine_default() {
     );
 }
 
-/// `board_limit` changes nothing yet: this module is deleted by #171, which gives it its
-/// behaviour. Until then a batch with a limit plays the batch without one (`hero_riposte` is
-/// written `off` on both sides: it is not what is compared here).
-mod while_inert {
-    use super::*;
-
-    #[test]
-    fn the_matchup_lines_of_a_batch_with_a_board_limit_are_those_of_the_batch_without() {
-        for set in ["starter", "fixture"] {
-            let base = stdout(&run(&[
-                "30",
-                "--set",
-                set,
-                "--seed",
-                "4",
-                "--hero-riposte",
-                "off",
-            ]));
-            let limited = stdout(&run(&[
-                "30",
-                "--set",
-                set,
-                "--seed",
-                "4",
-                "--hero-riposte",
-                "off",
-                "--board-limit",
-                "5",
-            ]));
-            assert_eq!(matchup_lines(&base), matchup_lines(&limited), "{set}");
-        }
-    }
-}
-
 /// #170: `hero_riposte` acts, so the batch is another one, and as reproducible as any.
 #[test]
 fn a_batch_with_the_hero_riposte_on_differs_from_the_default_batch_and_is_deterministic() {

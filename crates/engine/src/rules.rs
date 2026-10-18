@@ -210,9 +210,19 @@ fn provocation_allows(state: &GameState, target: Target) -> bool {
 /// (nothing is blocked by a rule of play then), `Some(BoardFull)` when the board limit is
 /// reached. Read from the seat's public board only, never from a hand. The single answer,
 /// called by [`validate`] (the active seat) and by `player_view` (the hand of the seat asked).
-// SKELETON (red commit of #171): the real body follows in the green commit.
-pub(crate) fn play_blocker(_state: &GameState, _seat: PlayerId) -> Option<RuleError> {
-    None
+pub(crate) fn play_blocker(state: &GameState, seat: PlayerId) -> Option<RuleError> {
+    if state.winner.is_some() {
+        return None;
+    }
+    // `>=`, not `==`: a state built by hand above the limit is still blocked.
+    match state.rules.board_limit {
+        Some(limit)
+            if state.player(seat).board.len() >= usize::try_from(limit).unwrap_or(usize::MAX) =>
+        {
+            Some(RuleError::BoardFull)
+        }
+        _ => None,
+    }
 }
 
 /// The single legality check, shared by [`apply`] and [`legal_actions`].
@@ -397,9 +407,9 @@ fn pay(state: &mut GameState, cost: u32, events: &mut Vec<Event>) {
     }
 }
 
-/// Every action the active player may take: one `Play` per card in hand, hero effects in the
-/// order of the hero's list, then one `Attack` per (attacker, valid target) pair, attackers in
-/// order of summoning and, for each, the opposing hero first and then every creature of the
+/// Every action the active player may take: one `Play` per card in hand (none while the board is
+/// full, `play_blocker`), hero effects in the order of the hero's list, then one
+/// `Attack` per (attacker, valid target) pair, attackers in order of summoning and, for each, the opposing hero first and then every creature of the
 /// opposing board in order (a dead creature is on no board, so it is neither listed as an
 /// attacker nor as a target; own creatures are never targets), then `Concede`. While the
 /// opponent has a creature with provocation, only those creatures are listed as targets (in

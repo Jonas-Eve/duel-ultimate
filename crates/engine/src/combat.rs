@@ -28,8 +28,9 @@
 //! - burying a dead creature, whichever side or role (target, attacker, both), removes
 //!   nothing, its health being 0.
 //!
-//! Provocation (S2b) only restricts the set of legal attacks: it adds no action and changes
-//! no effect, so every action that remains decreases Φ exactly as above.
+//! Provocation (S2b) and the board limit (#171) only restrict the set of legal actions (the
+//! attacks that may be aimed, the summonings that may be played): neither adds an action nor
+//! changes an effect, so every action that remains decreases Φ exactly as above.
 //!
 //! (The first potential of the Epic, `2·|piles| + |hands| + Σ health`, broke once creatures
 //! counted: a summoning added the creature's health, and "−force" ignored the lost excess.)

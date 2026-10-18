@@ -425,49 +425,6 @@ fn from_json_with_a_rules_key_equals_from_data_with_the_same_rules() {
     assert!(start_events(&json).contains("\"rules\""));
 }
 
-/// The events of a game without the `rules` key of `game_started`.
-fn without_rules_key(events: &str) -> Value {
-    let mut value: Value = serde_json::from_str(events).unwrap();
-    if let Some(started) = value
-        .as_array_mut()
-        .and_then(|a| a.iter_mut().find_map(|e| e.get_mut("game_started")))
-    {
-        started.as_object_mut().unwrap().remove("rules");
-    }
-    value
-}
-
-/// `board_limit` has no effect yet (#171 gives it one and removes this test); `hero_riposte`
-/// is written out `false` on both sides so that the comparison does not depend on the default.
-#[test]
-fn board_limit_is_still_inert() {
-    let off = RuleSet::legacy();
-    let limited = RuleSet {
-        board_limit: Some(5),
-        ..RuleSet::legacy()
-    };
-    let mut plain = with_rules(Some(&rules_text(&off)), VERSIONS).unwrap();
-    let mut ruled = with_rules(Some(&rules_text(&limited)), VERSIONS).unwrap();
-    assert_eq!(
-        without_rules_key(&start_events(&plain)),
-        without_rules_key(&start_events(&ruled))
-    );
-    for step in 0..200 {
-        let actions = plain.legal_actions_json().unwrap();
-        assert_eq!(actions, ruled.legal_actions_json().unwrap(), "step {step}");
-        let list: Vec<Value> = serde_json::from_str(&actions).unwrap();
-        if list.is_empty() {
-            break;
-        }
-        let action = list[(step * 7) % list.len()].to_string();
-        assert_eq!(
-            plain.apply_json(&action).unwrap(),
-            ruled.apply_json(&action).unwrap(),
-            "step {step}"
-        );
-    }
-}
-
 /// #170: with `hero_riposte` a non-lethal hit on the hero destroys the attacker: the
 /// `hero_riposted` event comes through `apply`, and the attacker is in the discard of `view`.
 #[test]

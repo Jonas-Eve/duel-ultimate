@@ -12,6 +12,7 @@ export const ENGINE_CODES = [
   "attacker_not_on_board",
   "target_not_on_board",
   "target_forbidden_by_provocation",
+  "board_full",
   "invalid_setup",
   "invalid_json",
   "unknown_deck",

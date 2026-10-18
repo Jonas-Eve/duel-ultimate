@@ -183,9 +183,10 @@ fn the_order_of_the_checks_keeps_card_not_in_hand_first() {
 
 #[test]
 fn a_card_that_cannot_be_played_is_not_listed_previewed_or_offered_to_the_ai() {
-    let mut state = arena(limited(2), 30, true);
+    let mut state = arena(limited(2), 20, true);
     // Control: with a free place, the summonings are listed, previewed and offered.
-    apply(&mut state, play(0)).unwrap();
+    let first = state.hand(PlayerId::One)[0];
+    apply(&mut state, Action::Play { card: first }).unwrap();
     let observation = Observation::of(&state).unwrap();
     assert!(legal_actions(&state).iter().any(is_play));
     assert!(
@@ -196,7 +197,8 @@ fn a_card_that_cannot_be_played_is_not_listed_previewed_or_offered_to_the_ai() {
     assert!(observation.actions().iter().any(is_play));
     drop(observation);
 
-    apply(&mut state, play(1)).unwrap();
+    let second = state.hand(PlayerId::One)[0];
+    apply(&mut state, Action::Play { card: second }).unwrap();
     assert!(!legal_actions(&state).iter().any(is_play));
     assert!(
         !preview_legal_actions(&state)

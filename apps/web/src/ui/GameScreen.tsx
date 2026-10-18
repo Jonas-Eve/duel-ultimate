@@ -11,6 +11,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { describeConsequence, describeWarnings } from "./consequence";
 import { EndScreen } from "./EndScreen";
 import { ErrorBanner } from "./ErrorBanner";
+import { messageFor } from "./errors.fr";
 import { FatalScreen } from "./FatalScreen";
 import { fr } from "./fr";
 import { Hand, playPreviewOf } from "./Hand";
@@ -272,7 +273,8 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
               <PlayActions
                 preview={detailPlay}
                 labels={labels}
-                reason={humanTurn ? fr.playUnavailable : fr.playUnavailableComputer}
+                // The engine's reason first (a persistent fact, in its own words), then the turn's.
+                reason={detailCard.unavailable !== undefined ? messageFor(detailCard.unavailable) : humanTurn ? fr.playUnavailable : fr.playUnavailableComputer}
                 onPlay={(preview) => {
                   // The tile leaves the hand: the focus goes to the game region once the sheet has closed.
                   setDetail(null);
