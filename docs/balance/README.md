@@ -8,6 +8,9 @@ n'est pas une mesure : il ne se compare à rien et ne se reproduit pas.
 - [`throughput.md`](throughput.md) : le débit du simulateur (parties par seconde), son protocole,
   la règle de comparaison entre machines, le seuil de régression et le tableau daté des mesures
   (#123).
+- [`duree.md`](duree.md) : le protocole et la feuille de relevé de la durée d'une partie jouée à la
+  main (cible de 15 minutes humain contre humain, convertie en actions comparables au rapport du
+  simulateur ; résultats consignés par la tâche suivante de #124).
 - [`reports/`](reports/) : les rapports d'équilibrage consignés, un fichier par mesure
   (`<AAAA-MM-JJ>-<jeu>-<version>-<politique>-<variante>.md`). Le premier est la ligne de base du
   comportement historique : [`2026-10-17-starter-1.1.0-random-legacy.md`](reports/2026-10-17-starter-1.1.0-random-legacy.md).
