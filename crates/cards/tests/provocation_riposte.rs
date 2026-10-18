@@ -36,6 +36,7 @@ fn card(id: &str, provocation: bool, riposte: u32) -> Card {
         riposte,
         immobile: false,
         tags: vec![],
+        effects: vec![],
     }
 }
 

@@ -19,8 +19,7 @@ const DEAL_UNIT: &str =
     r#"{"op":"deal_damage","target":{"select":"unit","side":"opposing"},"amount":2}"#;
 const DRAW: &str = r#"{"op":"draw","target":{"select":"hero","side":"own"},"count":1}"#;
 const MODIFY: &str = r#"{"op":"modify_stat","target":{"select":"self"},"stat":"force","delta":1}"#;
-const GRANT: &str =
-    r#"{"op":"grant_keyword","target":{"select":"self"},"keyword":"ranged"}"#;
+const GRANT: &str = r#"{"op":"grant_keyword","target":{"select":"self"},"keyword":"ranged"}"#;
 
 fn on_play(ops: &[&str]) -> String {
     format!(r#"{{"trigger":"on_play","ops":[{}]}}"#, ops.join(","))
@@ -37,13 +36,13 @@ fn continuous(ops: &[&str]) -> String {
 
 fn unit_json(effects: &[String]) -> String {
     format!(
-        r#"{{"id":"a","name":"A","cost":2,"force":3,"attack_cost":2,"health":5,"effects":[{}]}}"#,
+        r#"{{"kind":"unit","id":"a","name":"A","cost":2,"force":3,"attack_cost":2,"health":5,"effects":[{}]}}"#,
         effects.join(",")
     )
 }
 fn immobile_json(effects: &[String]) -> String {
     format!(
-        r#"{{"id":"a","name":"A","cost":2,"health":5,"immobile":true,"effects":[{}]}}"#,
+        r#"{{"kind":"unit","id":"a","name":"A","cost":2,"health":5,"immobile":true,"effects":[{}]}}"#,
         effects.join(",")
     )
 }
@@ -276,7 +275,10 @@ fn trigger_not_allowed_for_the_operation() {
 }
 
 fn name_of(name: &str) -> &'static str {
-    OPS.iter().find(|(n, _)| *n == name).map(|(_, s)| *s).unwrap()
+    OPS.iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, s)| *s)
+        .unwrap()
 }
 fn trigger_name(name: &str) -> &'static str {
     ["on_play", "activated", "continuous"]
@@ -352,7 +354,9 @@ fn value_op(name: &str, field: &str, value: u32) -> String {
         "deal_damage" => format!(
             r#"{{"op":"deal_damage","target":{{"select":"hero_or_unit","side":"opposing"}},"{field}":{value}}}"#
         ),
-        _ => format!(r#"{{"op":"draw","target":{{"select":"hero","side":"own"}},"{field}":{value}}}"#),
+        _ => format!(
+            r#"{{"op":"draw","target":{{"select":"hero","side":"own"}},"{field}":{value}}}"#
+        ),
     }
 }
 
@@ -480,7 +484,10 @@ fn mode_required_exactly_when_two_attackers() {
     // The range is checked before the mode.
     assert_eq!(
         refused(&eff(r#","attackers":0,"mode":"chained""#)),
-        CardsError::AttackersOutOfRange { effect: 0, found: 0 }
+        CardsError::AttackersOutOfRange {
+            effect: 0,
+            found: 0
+        }
     );
 }
 
@@ -519,7 +526,7 @@ fn too_many_expected_picks() {
 fn immobile_unit_cannot_declare_an_attack_effect() {
     for effect in [activated(&[ATTACK]), on_play(&[ATTACK])] {
         assert_eq!(
-            refused(&immobile_json(&[effect.clone()])),
+            refused(&immobile_json(std::slice::from_ref(&effect))),
             CardsError::ImmobileWithAttackEffect { effect: 0 }
         );
         // Among other operations and at another index.
@@ -557,10 +564,7 @@ fn a_spell_has_at_least_one_effect() {
 
 #[test]
 fn a_spell_effect_must_be_on_play() {
-    for (effect, expected) in [
-        (activated(&[DEAL]), 1),
-        (continuous(&[MODIFY]), 1),
-    ] {
+    for (effect, expected) in [(activated(&[DEAL]), 1), (continuous(&[MODIFY]), 1)] {
         assert_eq!(
             refused(&spell_json(2, &[on_play(&[DEAL]), effect])),
             CardsError::SpellEffectNotOnPlay { effect: expected }
@@ -671,7 +675,9 @@ fn everything_outside_the_closed_sets_is_refused() {
         unit_json(&[on_play(&[heal])]),
         unit_json(&[on_play(&[shield])]),
         unit_json(&[format!(r#"{{"trigger":"on_event","ops":[{DRAW}]}}"#)]),
-        unit_json(&[format!(r#"{{"trigger":"on_play","when":"x","ops":[{DRAW}]}}"#)]),
+        unit_json(&[format!(
+            r#"{{"trigger":"on_play","when":"x","ops":[{DRAW}]}}"#
+        )]),
         r#"{"kind":"building","id":"a","name":"A","cost":2,"health":5}"#.to_owned(),
         r#"{"kind":"equipment","id":"a","name":"A","cost":2,"effects":[]}"#.to_owned(),
         unit_json(&[continuous(&[
@@ -694,7 +700,9 @@ fn everything_outside_the_closed_sets_is_refused() {
         unit_json(&[on_play(&[
             r#"{"op":"draw","target":{"select":"hero","side":"enemy"},"count":1}"#,
         ])]),
-        format!(r#"{{"id":"a","name":"A","cost":2,"force":3,"attack_cost":2,"health":5,"effects":[{{"trigger":"on_play","duration":"instant","ops":[{DRAW}]}}]}}"#),
+        format!(
+            r#"{{"kind":"unit","id":"a","name":"A","cost":2,"force":3,"attack_cost":2,"health":5,"effects":[{{"trigger":"on_play","duration":"instant","ops":[{DRAW}]}}]}}"#
+        ),
     ];
     for json in cases {
         assert!(
@@ -801,7 +809,9 @@ fn polarity_is_derived_from_sign_and_side() {
                 r#"{{"op":"deal_damage","target":{target},"amount":2}}"#
             )),
             "draw" => op(&format!(r#"{{"op":"draw","target":{target},"count":1}}"#)),
-            "attack" => op(&format!(r#"{{"op":"attack","target":{target},"amount":2}}"#)),
+            "attack" => op(&format!(
+                r#"{{"op":"attack","target":{target},"amount":2}}"#
+            )),
             _ => op(&format!(
                 r#"{{"op":"grant_keyword","target":{target},"keyword":"ranged"}}"#
             )),
@@ -867,13 +877,19 @@ fn polarity_is_derived_from_sign_and_side() {
     // +2 force on the opponent is a malus for the owner of the card.
     assert_eq!(modify("self", "own", "cost", 1).polarity(), Malus);
     assert_eq!(modify("unit", "opposing", "force", 2).polarity(), Malus);
-    assert_eq!(modify("unit", "opposing", "attack_cost", 1).polarity(), Bonus);
+    assert_eq!(
+        modify("unit", "opposing", "attack_cost", 1).polarity(),
+        Bonus
+    );
 }
 
 #[test]
 fn polarity_of_a_zero_delta_is_neutral() {
     // Not a valid card (`DeltaZero`), but the function is total.
-    assert_eq!(modify("unit", "own", "force", 0).polarity(), Polarity::Neutral);
+    assert_eq!(
+        modify("unit", "own", "force", 0).polarity(),
+        Polarity::Neutral
+    );
 }
 
 #[test]
@@ -884,10 +900,12 @@ fn duration_is_derived_from_the_trigger() {
     // Never stored, never read.
     let json = serde_json::to_string(&effect(&on_play(&[DRAW]))).unwrap();
     assert!(!json.contains("duration"), "{json}");
-    assert!(serde_json::from_str::<CardEffect>(&format!(
-        r#"{{"trigger":"on_play","duration":"instant","ops":[{DRAW}]}}"#
-    ))
-    .is_err());
+    assert!(
+        serde_json::from_str::<CardEffect>(&format!(
+            r#"{{"trigger":"on_play","duration":"instant","ops":[{DRAW}]}}"#
+        ))
+        .is_err()
+    );
 }
 
 fn slot(role: PickRole, kind: PickKind, side: Side) -> PickSlot {
@@ -916,9 +934,10 @@ fn expected_picks_lists_attackers_then_targets_in_order() {
     assert_eq!(one.expected_picks(false), [target]);
     assert_eq!(one.expected_picks(true), [own_attacker, target]);
     // In the order of the operations, attackers before the target of the same operation.
-    let both = effect(&activated(&[&attack_with(
-        r#","attackers":2,"mode":"simultaneous""#,
-    ), DEAL_UNIT]));
+    let both = effect(&activated(&[
+        &attack_with(r#","attackers":2,"mode":"simultaneous""#),
+        DEAL_UNIT,
+    ]));
     assert_eq!(
         both.expected_picks(false),
         [
@@ -1008,7 +1027,10 @@ fn an_effect_round_trips_through_json_and_omits_defaults() {
 #[test]
 fn the_closed_sets_have_the_expected_variants() {
     assert_eq!(Keyword::Ranged, serde_json::from_str("\"ranged\"").unwrap());
-    assert_eq!(Stat::AttackCost, serde_json::from_str("\"attack_cost\"").unwrap());
+    assert_eq!(
+        Stat::AttackCost,
+        serde_json::from_str("\"attack_cost\"").unwrap()
+    );
     assert_eq!(
         Selector::Source {},
         serde_json::from_str(r#"{"select":"self"}"#).unwrap()
@@ -1107,20 +1129,25 @@ fn a_spell_spec_with_a_unit_field_is_refused_by_serde() {
         );
     }
     // The same on a card of a data set.
-    for field in ["force", "attack_cost", "health", "provocation", "riposte", "immobile"] {
-        let json = format!(
-            r#"{{"kind":"spell","id":"a","name":"A","cost":2,"{field}":1,{effects}}}"#
-        );
-        assert!(
-            matches!(parse(&json), Err(CardsError::Json(_))),
-            "{field}"
-        );
+    for field in [
+        "force",
+        "attack_cost",
+        "health",
+        "provocation",
+        "riposte",
+        "immobile",
+    ] {
+        let json =
+            format!(r#"{{"kind":"spell","id":"a","name":"A","cost":2,"{field}":1,{effects}}}"#);
+        assert!(matches!(parse(&json), Err(CardsError::Json(_))), "{field}");
     }
     // `cost` is required, `kind` must be known, `effects` absent reads as empty.
-    assert!(serde_json::from_str::<CardSpec>(r#"{"kind":"spell"}"#)
-        .unwrap_err()
-        .to_string()
-        .contains("missing field `cost`"));
+    assert!(
+        serde_json::from_str::<CardSpec>(r#"{"kind":"spell"}"#)
+            .unwrap_err()
+            .to_string()
+            .contains("missing field `cost`")
+    );
     assert!(serde_json::from_str::<CardSpec>(r#"{"kind":"building","cost":1}"#).is_err());
     let empty: CardSpec = serde_json::from_str(r#"{"kind":"spell","cost":2}"#).unwrap();
     assert_eq!(
@@ -1142,7 +1169,13 @@ fn a_spell_card_reads_and_writes_its_kind() {
     // Its stats are the ones an instance carries: the cost and zeros.
     let stats = cards[0].stats();
     assert_eq!(
-        (stats.cost, stats.force, stats.attack_cost, stats.health, stats.riposte),
+        (
+            stats.cost,
+            stats.force,
+            stats.attack_cost,
+            stats.health,
+            stats.riposte
+        ),
         (2, 0, 0, 0, 0)
     );
     assert!(!stats.provocation);
@@ -1236,8 +1269,8 @@ fn wire<T: serde::Serialize>(value: &T) -> String {
 #[test]
 fn the_name_lists_are_pinned_against_the_serialization_of_every_variant() {
     use duel_cards::{
-        DURATION_NAMES, KEYWORD_NAMES, MODE_NAMES, OP_NAMES, SELECT_NAMES, SIDE_NAMES,
-        STAT_NAMES, TRIGGER_NAMES,
+        DURATION_NAMES, KEYWORD_NAMES, MODE_NAMES, OP_NAMES, SELECT_NAMES, SIDE_NAMES, STAT_NAMES,
+        TRIGGER_NAMES,
     };
     let sides = [Side::Own, Side::Opposing, Side::Both];
     assert_eq!(sides.map(side_name), SIDE_NAMES);

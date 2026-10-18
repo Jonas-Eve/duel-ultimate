@@ -1,5 +1,8 @@
 use crate::tags::validate_card_tags;
-use crate::{Card, CardSpec, CreatureStats, Deck, Effect, Hero, UnitSpec};
+use crate::{
+    AttackMode, Card, CardEffect, CardSpec, CreatureStats, Deck, Effect, Hero, MAX_CARD_EFFECTS,
+    MAX_EFFECT_PICKS, MAX_OPS_PER_EFFECT, Op, Side, SpellSpec, Trigger, UnitSpec,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Exact number of cards in a deck.
@@ -79,6 +82,60 @@ pub enum CardsError {
     DuplicateTag(String),
     #[error("unknown tag `{0}` (not in the tag list of the data set)")]
     UnknownTag(String),
+    #[error("a card has at most {max} effects, found {found}")]
+    TooManyCardEffects { found: usize, max: usize },
+    #[error("effect #{effect}: an effect has at least one operation")]
+    EffectWithoutOps { effect: usize },
+    #[error("effect #{effect}: an effect has at most {max} operations, found {found}")]
+    TooManyOps {
+        effect: usize,
+        found: usize,
+        max: usize,
+    },
+    #[error("effect #{effect}: only an activated effect has a `cost`")]
+    EffectCostForbidden { effect: usize },
+    #[error("effect #{effect}: an activated effect needs a `cost`")]
+    EffectCostRequired { effect: usize },
+    #[error("effect #{effect}: `{op}` is not allowed with the trigger `{trigger}`")]
+    TriggerNotAllowed {
+        effect: usize,
+        op: &'static str,
+        trigger: &'static str,
+    },
+    #[error("effect #{effect}: `{op}` is not allowed on the selector `{select}`")]
+    SelectorNotAllowed {
+        effect: usize,
+        op: &'static str,
+        select: &'static str,
+    },
+    #[error("effect #{effect}: `{op}` is not allowed on this side (`opposing` only)")]
+    SideNotAllowed { effect: usize, op: &'static str },
+    #[error("effect #{effect}: `{field}` of `{op}` must be at least 1")]
+    OpValueBelowOne {
+        effect: usize,
+        op: &'static str,
+        field: &'static str,
+    },
+    #[error("effect #{effect}: `delta` of `{op}` cannot be 0")]
+    DeltaZero { effect: usize, op: &'static str },
+    #[error("effect #{effect}: `attackers` is {found}, must be 1 or 2")]
+    AttackersOutOfRange { effect: usize, found: u32 },
+    #[error("effect #{effect}: an attack with 2 attackers needs a `mode`")]
+    AttackModeMissing { effect: usize },
+    #[error("effect #{effect}: `mode` is only for an attack with 2 attackers")]
+    AttackModeUnexpected { effect: usize },
+    #[error("effect #{effect}: it expects {found} picks, at most {max}")]
+    TooManyExpectedPicks {
+        effect: usize,
+        found: usize,
+        max: usize,
+    },
+    #[error("effect #{effect}: an immobile unit cannot declare an `attack` effect")]
+    ImmobileWithAttackEffect { effect: usize },
+    #[error("a spell has at least one effect")]
+    SpellWithoutEffects,
+    #[error("effect #{effect}: every effect of a spell is `on_play`")]
+    SpellEffectNotOnPlay { effect: usize },
     #[error("card `{id}`: {source}")]
     InvalidCard { id: String, source: Box<CardsError> },
     #[error("deck `{id}`: {source}")]
@@ -139,8 +196,7 @@ pub fn parse_card_set(json: &str, tags: &[String]) -> Result<Vec<Card>, CardsErr
     ensure_unique(cards.iter().map(Card::name), CardsError::DuplicateCardName)?;
     for card in &cards {
         let checked = validate_card(card).and_then(|spec| {
-            let CardSpec::Unit(unit) = &spec;
-            match unit.tags.iter().find(|t| !tags.contains(t)) {
+            match spec.tags().iter().find(|t| !tags.contains(t)) {
                 Some(unknown) => Err(CardsError::UnknownTag(unknown.clone())),
                 None => Ok(()),
             }
@@ -165,7 +221,13 @@ fn validate_card(card: &Card) -> Result<CardSpec, CardsError> {
         attack_cost,
         immobile,
         ..
-    } = card;
+    } = card
+    else {
+        // A spell has no stat of a unit to check at the data level.
+        let spec = card.spec();
+        validate_card_spec(&spec)?;
+        return Ok(spec);
+    };
     if *immobile {
         for (field, value) in [("force", force), ("attack_cost", attack_cost)] {
             if value.is_some() {
@@ -204,16 +266,18 @@ pub fn parse_decks(json: &str) -> Result<Vec<Deck>, CardsError> {
     Ok(decks)
 }
 
-/// Validates a card of any kind: today a unit, see [`validate_unit`].
+/// Validates a card of any kind: see [`validate_unit`] and [`validate_spell`].
 pub fn validate_card_spec(spec: &CardSpec) -> Result<(), CardsError> {
     match spec {
         CardSpec::Unit(unit) => validate_unit(unit),
+        CardSpec::Spell(spell) => validate_spell(spell),
     }
 }
 
-/// Validates a unit. Not immobile: [`validate_creature`], then the tags. Immobile: the same
-/// bounds for `cost`, `health` and `riposte`, and `force` and `attack_cost` must be 0 (the
-/// internal state of a unit without them), then the tags.
+/// Validates a unit. Not immobile: [`validate_creature`]. Immobile: the same bounds for `cost`,
+/// `health` and `riposte`, and `force` and `attack_cost` must be 0 (the internal state of a unit
+/// without them). Then its effects (at most [`MAX_CARD_EFFECTS`], each valid, and none with an
+/// `attack` operation if it is immobile), then its tags.
 pub fn validate_unit(unit: &UnitSpec) -> Result<(), CardsError> {
     let stats = &unit.stats;
     if unit.immobile {
@@ -228,7 +292,162 @@ pub fn validate_unit(unit: &UnitSpec) -> Result<(), CardsError> {
     } else {
         validate_creature(stats)?;
     }
+    validate_card_effects(&unit.effects, false, unit.immobile)?;
     validate_card_tags(&unit.tags)
+}
+
+/// Validates a spell: its `cost` (bounded like the cost of a unit), at least one effect, every
+/// effect `on_play`, the bounds of the effects, then the tags.
+pub fn validate_spell(spell: &SpellSpec) -> Result<(), CardsError> {
+    cost_in_range("cost", spell.cost)?;
+    if spell.effects.is_empty() {
+        return Err(CardsError::SpellWithoutEffects);
+    }
+    if let Some(effect) = spell
+        .effects
+        .iter()
+        .position(|e| e.trigger != Trigger::OnPlay)
+    {
+        return Err(CardsError::SpellEffectNotOnPlay { effect });
+    }
+    validate_card_effects(&spell.effects, true, false)?;
+    validate_card_tags(&spell.tags)
+}
+
+/// The effects of a card: their number, then each effect in order.
+fn validate_card_effects(
+    effects: &[CardEffect],
+    is_spell: bool,
+    immobile: bool,
+) -> Result<(), CardsError> {
+    if effects.len() > MAX_CARD_EFFECTS {
+        return Err(CardsError::TooManyCardEffects {
+            found: effects.len(),
+            max: MAX_CARD_EFFECTS,
+        });
+    }
+    for (index, effect) in effects.iter().enumerate() {
+        validate_card_effect(index, effect, is_spell, immobile)?;
+    }
+    Ok(())
+}
+
+/// One effect, in this order: number of operations, cost, each operation (trigger, selector,
+/// side, values, attack parameters), number of expected picks, immobile.
+fn validate_card_effect(
+    index: usize,
+    effect: &CardEffect,
+    is_spell: bool,
+    immobile: bool,
+) -> Result<(), CardsError> {
+    if effect.ops.is_empty() {
+        return Err(CardsError::EffectWithoutOps { effect: index });
+    }
+    if effect.ops.len() > MAX_OPS_PER_EFFECT {
+        return Err(CardsError::TooManyOps {
+            effect: index,
+            found: effect.ops.len(),
+            max: MAX_OPS_PER_EFFECT,
+        });
+    }
+    match (effect.trigger, effect.cost) {
+        (Trigger::Activated, None) => {
+            return Err(CardsError::EffectCostRequired { effect: index });
+        }
+        (Trigger::Activated, Some(cost)) => {
+            if cost < 1 {
+                return Err(CardsError::EffectCostBelowOne { effect: index });
+            }
+            too_high(index, "cost", cost)?;
+        }
+        (_, Some(_)) => return Err(CardsError::EffectCostForbidden { effect: index }),
+        (_, None) => {}
+    }
+    for op in &effect.ops {
+        validate_op(index, effect.trigger, op)?;
+    }
+    let picks = effect.expected_picks(is_spell).len();
+    if picks > MAX_EFFECT_PICKS {
+        return Err(CardsError::TooManyExpectedPicks {
+            effect: index,
+            found: picks,
+            max: MAX_EFFECT_PICKS,
+        });
+    }
+    if immobile && effect.ops.iter().any(|op| matches!(op, Op::Attack { .. })) {
+        return Err(CardsError::ImmobileWithAttackEffect { effect: index });
+    }
+    Ok(())
+}
+
+/// A value that is a count or an amount: at least 1, at most [`MAX_STAT`].
+fn op_value(
+    effect: usize,
+    op: &'static str,
+    field: &'static str,
+    value: u32,
+) -> Result<(), CardsError> {
+    if value < 1 {
+        return Err(CardsError::OpValueBelowOne { effect, op, field });
+    }
+    too_high(effect, field, value)
+}
+
+fn validate_op(effect: usize, trigger: Trigger, op: &Op) -> Result<(), CardsError> {
+    let kind = op.kind();
+    let name = kind.name();
+    if !kind.triggers().contains(&trigger) {
+        return Err(CardsError::TriggerNotAllowed {
+            effect,
+            op: name,
+            trigger: trigger.name(),
+        });
+    }
+    let target = op.target();
+    if !kind.selectors().contains(&target.kind()) {
+        return Err(CardsError::SelectorNotAllowed {
+            effect,
+            op: name,
+            select: target.kind().name(),
+        });
+    }
+    match op {
+        Op::Attack {
+            target,
+            amount,
+            attackers,
+            mode,
+            ..
+        } => {
+            // Wave 1: an attack never targets its own side.
+            if target.side() != Side::Opposing {
+                return Err(CardsError::SideNotAllowed { effect, op: name });
+            }
+            op_value(effect, name, "amount", *amount)?;
+            if !(1..=2).contains(attackers) {
+                return Err(CardsError::AttackersOutOfRange {
+                    effect,
+                    found: *attackers,
+                });
+            }
+            match (attackers, mode) {
+                (2, None) => Err(CardsError::AttackModeMissing { effect }),
+                (1, Some(AttackMode::Simultaneous | AttackMode::Chained)) => {
+                    Err(CardsError::AttackModeUnexpected { effect })
+                }
+                _ => Ok(()),
+            }
+        }
+        Op::DealDamage { amount, .. } => op_value(effect, name, "amount", *amount),
+        Op::Draw { count, .. } => op_value(effect, name, "count", *count),
+        Op::ModifyStat { delta, .. } => {
+            if *delta == 0 {
+                return Err(CardsError::DeltaZero { effect, op: name });
+            }
+            too_high(effect, "delta", delta.unsigned_abs())
+        }
+        Op::GrantKeyword { .. } => Ok(()),
+    }
 }
 
 pub fn validate_creature(stats: &CreatureStats) -> Result<(), CardsError> {

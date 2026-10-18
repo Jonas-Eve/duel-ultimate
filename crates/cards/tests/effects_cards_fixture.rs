@@ -139,7 +139,12 @@ fn the_fixture_cards_all_validate_and_each_op_has_a_phi_class() {
     let cards = cards();
     assert!(cards.len() >= 8);
     for card in &cards {
-        duel_cards::validate_card_spec(&card.spec()).expect(card.id());
+        assert_eq!(
+            duel_cards::validate_card_spec(&card.spec()),
+            Ok(()),
+            "{}",
+            card.id()
+        );
     }
     for (trigger, op) in all_ops() {
         let class = op.phi_class();

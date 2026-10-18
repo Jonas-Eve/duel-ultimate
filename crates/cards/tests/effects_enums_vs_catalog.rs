@@ -174,7 +174,7 @@ const DRAW: &str = r#"{"op":"draw","target":{"select":"hero","side":"own"},"coun
 
 fn unit_with(effect: &str) -> String {
     format!(
-        r#"[{{"id":"a","name":"A","cost":2,"force":3,"attack_cost":2,"health":5,"effects":[{effect}]}}]"#
+        r#"[{{"kind":"unit","id":"a","name":"A","cost":2,"force":3,"attack_cost":2,"health":5,"effects":[{effect}]}}]"#
     )
 }
 
@@ -347,8 +347,16 @@ fn the_table_of_the_operations_as_the_test_reads_it() {
             .iter()
             .find(|k| k.name() == name)
             .expect("an OpKind");
-        let t: BTreeSet<String> = kind.triggers().iter().map(|t| t.name().to_owned()).collect();
-        let s: BTreeSet<String> = kind.selectors().iter().map(|s| s.name().to_owned()).collect();
+        let t: BTreeSet<String> = kind
+            .triggers()
+            .iter()
+            .map(|t| t.name().to_owned())
+            .collect();
+        let s: BTreeSet<String> = kind
+            .selectors()
+            .iter()
+            .map(|s| s.name().to_owned())
+            .collect();
         assert_eq!(t, set(triggers.split(", ").map(str::to_owned)), "{name}");
         assert_eq!(s, set(selectors.split(", ").map(str::to_owned)), "{name}");
         assert_eq!(phi_name(kind.phi_class()), class, "{name}");
@@ -422,11 +430,7 @@ fn the_cross_check_itself_fails_on_a_doctored_table() {
     let end = start + CATALOG[start..].find('\n').expect("end of row") + 1;
     let no_self = format!("{}{}", &CATALOG[..start], &CATALOG[end..]);
     assert!(cross_check(&no_self).unwrap_err().contains("sélecteurs"));
-    let unknown = CATALOG.replacen(
-        "| Soin | opération |",
-        "| Guérison | opération |",
-        1,
-    );
+    let unknown = CATALOG.replacen("| Soin | opération |", "| Guérison | opération |", 1);
     assert!(cross_check(&unknown).unwrap_err().contains("DEFERRED"));
     // A card type the test does not know.
     let kind = CATALOG.replacen("| sort | type de carte |", "| piège | type de carte |", 1);

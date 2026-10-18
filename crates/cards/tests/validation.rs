@@ -61,6 +61,7 @@ fn card(id: &str) -> Card {
         riposte: 0,
         immobile: false,
         tags: vec![],
+        effects: vec![],
     }
 }
 
@@ -112,13 +113,17 @@ fn resolve_deck_copies_the_stats_of_each_card_in_order() {
             riposte: 0,
             immobile: false,
             tags: vec![],
+            effects: vec![],
         },
         card("b"),
     ];
     let mut ids = vec!["b"; DECK_SIZE];
     ids[0] = "a";
     let resolved = resolve_deck(&deck_of(&ids), &cards).unwrap();
-    assert_eq!(resolved[0].creature().unwrap(), &stats_with(2, 3, 4, 5, false, 0));
+    assert_eq!(
+        resolved[0].creature().unwrap(),
+        &stats_with(2, 3, 4, 5, false, 0)
+    );
     assert_eq!(resolved[1].creature().unwrap(), &stats());
 }
 
@@ -518,7 +523,9 @@ fn existing_unit_cards_are_unchanged_by_the_effects_and_the_spell_kind() {
     ] {
         let cards = parse_cards(json).unwrap();
         for card in &cards {
-            assert!(matches!(card, duel_cards::Card::Creature { effects, .. } if effects.is_empty()));
+            assert!(
+                matches!(card, duel_cards::Card::Creature { effects, .. } if effects.is_empty())
+            );
             assert!(card.spec().is_plain_unit());
         }
         let again = parse_cards(&serde_json::to_string(&cards).unwrap()).unwrap();

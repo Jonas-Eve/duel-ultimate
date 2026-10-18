@@ -17,7 +17,7 @@
     ]
   },
   {
-    "id": "eclaireur", "name": "Éclaireur", "cost": 2, "force": 1, "attack_cost": 1, "health": 2,
+    "kind": "unit", "id": "eclaireur", "name": "Éclaireur", "cost": 2, "force": 1, "attack_cost": 1, "health": 2,
     "effects": [
       {"trigger": "on_play", "ops": [
         {"op": "draw", "target": {"select": "hero", "side": "own"}, "count": 1}
@@ -25,7 +25,7 @@
     ]
   },
   {
-    "id": "duelliste", "name": "Duelliste", "cost": 4, "force": 2, "attack_cost": 2, "health": 4,
+    "kind": "unit", "id": "duelliste", "name": "Duelliste", "cost": 4, "force": 2, "attack_cost": 2, "health": 4,
     "effects": [
       {"trigger": "activated", "cost": 3, "ops": [
         {"op": "attack", "target": {"select": "hero_or_unit", "side": "opposing"}, "amount": 3,
@@ -34,7 +34,7 @@
     ]
   },
   {
-    "id": "etendard", "name": "Étendard", "cost": 3, "force": 1, "attack_cost": 2, "health": 3,
+    "kind": "unit", "id": "etendard", "name": "Étendard", "cost": 3, "force": 1, "attack_cost": 2, "health": 3,
     "effects": [
       {"trigger": "continuous", "ops": [
         {"op": "modify_stat", "target": {"select": "all_units", "side": "own"}, "stat": "force", "delta": 1},
@@ -43,7 +43,7 @@
     ]
   },
   {
-    "id": "tour", "name": "Tour de guet", "cost": 3, "health": 6, "immobile": true, "tags": ["bâtiment"],
+    "kind": "unit", "id": "tour", "name": "Tour de guet", "cost": 3, "health": 6, "immobile": true, "tags": ["bâtiment"],
     "effects": [
       {"trigger": "on_play", "ops": [
         {"op": "draw", "target": {"select": "hero", "side": "own"}, "count": 1}
@@ -54,7 +54,7 @@
     ]
   },
   {
-    "id": "orage", "name": "Orage", "cost": 5, "force": 2, "attack_cost": 3, "health": 4,
+    "kind": "unit", "id": "orage", "name": "Orage", "cost": 5, "force": 2, "attack_cost": 3, "health": 4,
     "effects": [
       {"trigger": "activated", "cost": 3, "ops": [
         {"op": "deal_damage", "target": {"select": "all_units", "side": "opposing"}, "amount": 1}
@@ -62,7 +62,7 @@
     ]
   },
   {
-    "id": "malediction", "name": "Malédiction", "cost": 2, "force": 1, "attack_cost": 1, "health": 2,
+    "kind": "unit", "id": "malediction", "name": "Malédiction", "cost": 2, "force": 1, "attack_cost": 1, "health": 2,
     "effects": [
       {"trigger": "continuous", "ops": [
         {"op": "modify_stat", "target": {"select": "unit", "side": "opposing"}, "stat": "force", "delta": -1}
@@ -70,7 +70,7 @@
     ]
   },
   {
-    "id": "forge", "name": "Forge", "cost": 4, "force": 2, "attack_cost": 2, "health": 3,
+    "kind": "unit", "id": "forge", "name": "Forge", "cost": 4, "force": 2, "attack_cost": 2, "health": 3,
     "effects": [
       {"trigger": "continuous", "ops": [
         {"op": "modify_stat", "target": {"select": "all_units", "side": "own"}, "stat": "riposte", "delta": 2},

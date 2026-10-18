@@ -76,7 +76,9 @@ fn card_spec_errors_are_the_creature_stats_errors() {
     let expected = serde_json::from_str::<CreatureStats>(json)
         .unwrap_err()
         .to_string();
-    let got = serde_json::from_str::<CardSpec>(json).unwrap_err().to_string();
+    let got = serde_json::from_str::<CardSpec>(json)
+        .unwrap_err()
+        .to_string();
     assert!(expected.starts_with(&got), "{expected} / {got}");
     // `null` has the same cause (the struct name is that of the wire form, `CardSpec`).
     let got = serde_json::from_str::<CardSpec>("null")
