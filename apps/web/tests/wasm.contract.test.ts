@@ -24,6 +24,7 @@ const EVENT_KEYS: Record<string, string[]> = {
   damaged: ["amount", "player"],
   creature_damaged: ["amount", "creature", "player"],
   riposted: ["amount", "creature", "player"],
+  hero_riposted: ["creature", "player"],
   died: ["creature", "player"],
   token_moved: ["budget", "player"],
   active_player_changed: ["player"],

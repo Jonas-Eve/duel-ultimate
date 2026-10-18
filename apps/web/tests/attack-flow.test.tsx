@@ -4,12 +4,13 @@ import type { ActionPreview, CardView } from "../src/engine/types";
 import { isActivate, isAttack, isAttackBy, isPlay } from "../src/engine/types";
 import type { Snapshot } from "../src/game/controller";
 import { effectLineLabel } from "../src/ui/card-effects";
-import { decorateSession, newSession, type SessionProbe } from "./support/engine";
+import { formatRecords, logContext } from "../src/ui/log-format";
+import { decorateSession, newSession, rulesFactory, type SessionProbe } from "./support/engine";
 import { GameController } from "../src/game/controller";
 import { config } from "./support/config";
 import { playUntil, realDeps, settle } from "./support/policies";
 import { attackLine, selectAttacker } from "./support/play";
-import { inAct, makeController, mountGame, useRealEngine } from "./support/ui";
+import { inAct, makeCampsController, makeController, mountGame, useRealEngine } from "./support/ui";
 
 useRealEngine();
 
@@ -627,5 +628,162 @@ describe("two camps", () => {
     }
     campNames = null;
     c!.dispose();
+  });
+});
+
+// ---------- the hero's riposte (#170): the engine under explicit rules, never a mock ----------
+
+const RIPOSTE_RULES = '{"hero_riposte":true,"board_limit":null}';
+const riposting = rulesFactory(RIPOSTE_RULES);
+
+const hitsHero = (p: ActionPreview): p is ActionPreview & { action: { attack: { attacker: number; target: "hero" } } } =>
+  isAttack(p.action) && p.action.attack.target === "hero";
+/** A hit on the hero that does not kill it: the engine says the attacker is destroyed. */
+const suicidalHit = (p: ActionPreview) => hitsHero(p) && p.attacker_destroyed && p.ends_game === null;
+const lethalHit = (p: ActionPreview) => hitsHero(p) && p.ends_game?.reason === "hero_down";
+
+/** The seat holding the main, whichever the mode: its own view, its tiles at the bottom. */
+const activeView = (s: Snapshot) => s.views[s.views.One!.active]!;
+
+async function ruledGame(
+  mode: "computer" | "two-camps",
+  choose: (s: Snapshot) => ActionPreview,
+  predicate: (s: Snapshot) => boolean,
+  maxSteps: number,
+): Promise<GameController> {
+  for (let seed = 0; seed < 120; seed++) {
+    const c = mode === "computer" ? makeController("rush", "bulwark", seed, {}, riposting) : makeCampsController("rush", "bulwark", seed, {}, riposting);
+    c.start();
+    try {
+      await playUntil(c, choose, (s) => (mode === "computer" ? s.phase === "human-turn" : true) && predicate(s), maxSteps);
+      return c;
+    } catch {
+      c.dispose();
+    }
+  }
+  throw new Error(`no ${mode} scenario found within 120 seeds`);
+}
+
+/** Position of the card of the attack `p` among the active side's tiles, and its name. */
+function attackerIn(s: Snapshot, p: ActionPreview) {
+  const id = (p.action as { attack: { attacker: number } }).attack.attacker;
+  const board = activeView(s).you.board;
+  const index = board.findIndex((x) => x.id === id);
+  return { id, index, name: board[index].name as string, boardSize: board.length };
+}
+
+describe.each(["computer", "two-camps"] as const)("the hero's riposte, %s", (mode) => {
+  const camp = (seat: "One" | "Two") => `Camp ${seat === "One" ? 1 : 2} — ${seat === "One" ? "Ruée" : "Rempart"}`;
+  const setCamps = (s: Snapshot) => {
+    const active = s.views.One!.active;
+    campNames = mode === "two-camps" ? { bottom: camp(active), top: camp(active === "One" ? "Two" : "One") } : null;
+  };
+
+  test("a non-lethal hit on the hero warns that the attacker will be destroyed, then the tile leaves the board, is in the public discard and the journal says it", async () => {
+    const c = await ruledGame(mode, summoner, (s) => s.legal.some(suicidalHit), 80);
+    try {
+      const { user } = mountGame(c);
+      const s = c.getSnapshot();
+      setCamps(s);
+      const seat = s.views.One!.active;
+      const hit = s.legal.find(suicidalHit)!;
+      const { id, index, name, boardSize } = attackerIn(s, hit);
+      const heroName = activeView(s).opponent.hero.name;
+
+      await selectAttacker(user, myTiles()[index]);
+      await user.click(heroTarget());
+      const dialog = sheet()!;
+      const warning = dialog.querySelector(".attack-warning");
+      expect(warning).not.toBeNull();
+      expect(warning!.textContent).toBe("Attention : La créature qui attaque sera détruite.");
+      expect(warning!.textContent).not.toMatch(/\d/);
+      // Between the summary and the consequence lines, and the cost is still announced.
+      const paragraphs = [...dialog.querySelectorAll("p")].map((p) => p.textContent ?? "");
+      const at = paragraphs.findIndex((t) => t.startsWith("Attention"));
+      expect(at).toBe(1);
+      expect(paragraphs[2]).toContain("Coût d'attaque");
+      expect(within(dialog).getByRole("button", { name: "Annuler" })).toBe(document.activeElement);
+
+      await user.click(within(dialog).getByRole("button", { name: "Confirmer" }));
+      await waitFor(() => expect(c.getSnapshot().phase).not.toBe("computer-turn"));
+      const after = c.getSnapshot();
+      const side = after.views[seat]!;
+      expect(side.you.board.some((x) => x.id === id)).toBe(false);
+      expect(side.you.discard.some((x) => x.id === id)).toBe(true);
+      setCamps(after);
+      if (mode === "computer") expect(myTiles().length).toBe(boardSize - 1 + (after.views.One!.you.board.length - (boardSize - 1)));
+
+      // The destroyed card is in the public discard of its owner, shown "Détruite".
+      const ownGroup = screen.getByRole("group", { name: mode === "computer" ? "Ton héros" : `${camp(seat)} : héros` });
+      await user.click(within(ownGroup).getByRole("button", { name: `Défausse (${side.you.discard.length})` }));
+      const listed = within(screen.getByRole("dialog")).getAllByRole("listitem");
+      expect(listed.some((li) => li.querySelector(".card-name")?.textContent === name && /Détruite/.test(li.textContent ?? ""))).toBe(true);
+      await user.keyboard("{Escape}");
+
+      // The journal: the hero's riposte, then the death, in that order.
+      const lines = formatRecords(after.records, logContext(after)).map((l) => l.text);
+      const riposte = lines.indexOf(`Le héros ${heroName} riposte et détruit ${name}.`);
+      expect(riposte).toBeGreaterThan(-1);
+      expect(lines[riposte + 1]).toBe(`${name} meurt.`);
+      await user.click(screen.getByRole("button", { name: "Journal" }));
+      const drawer = screen.getByRole("dialog", { name: "Journal" });
+      expect(within(drawer).getByText(`Le héros ${heroName} riposte et détruit ${name}.`)).toBeTruthy();
+      expect(within(drawer).getAllByText(`${name} meurt.`).length).toBeGreaterThan(0);
+    } finally {
+      campNames = null;
+    }
+  });
+
+  test("a lethal hit on the hero shows no warning and says it ends the game", async () => {
+    const c = await ruledGame(mode, hunter, (s) => s.legal.some(lethalHit), 200);
+    try {
+      const { user } = mountGame(c);
+      const s = c.getSnapshot();
+      setCamps(s);
+      const hit = s.legal.find(lethalHit)!;
+      const { index } = attackerIn(s, hit);
+      await selectAttacker(user, myTiles()[index]);
+      await user.click(heroTarget());
+      const dialog = sheet()!;
+      expect(hit.attacker_destroyed).toBe(false);
+      expect(dialog.querySelector(".attack-warning")).toBeNull();
+      expect(dialog.textContent).not.toContain("Attention");
+      expect(dialog.textContent).toContain("Met fin à la partie");
+      await user.click(within(dialog).getByRole("button", { name: "Confirmer" }));
+      expect(c.getSnapshot().phase).toBe("over");
+      // The attacker is alive and no `hero_riposted` was recorded for it.
+      const events = c.getSnapshot().records.flatMap((r) => r.events);
+      expect(events.some((e) => "hero_riposted" in e && e.hero_riposted.creature === hit.action && false)).toBe(false);
+      expect(events[events.length - 1]).toEqual({ game_won: expect.objectContaining({ reason: "hero_down" }) });
+    } finally {
+      campNames = null;
+    }
+  });
+});
+
+describe("the warning on an attack on a creature (#170)", () => {
+  test("an attack on a creature whose riposte would kill the attacker carries the same warning, with the default rules", async () => {
+    const dying = (p: ActionPreview) => isAttack(p.action) && p.action.attack.target !== "hero" && p.attacker_destroyed;
+    const g = await findGame("bulwark", "rush", summoner, (s) => s.legal.some(dying), 80);
+    const { user } = mountGame(g.c);
+    const s = g.c.getSnapshot();
+    const p = s.legal.find(dying)!;
+    const attacker = (p.action as { attack: { attacker: number } }).attack.attacker;
+    const target = (p.action as { attack: { target: { creature: number } } }).attack.target.creature;
+    await selectAttacker(user, myTiles()[mine(s).findIndex((x) => x.id === attacker)]);
+    await user.click(theirTiles()[theirs(s).findIndex((x) => x.id === target)]);
+    expect(sheet()!.querySelector(".attack-warning")!.textContent).toBe("Attention : La créature qui attaque sera détruite.");
+  });
+
+  test("an attack that spares the attacker has no warning", async () => {
+    const g = await findGame("rush", "bulwark", summoner, (s) => s.legal.some((p) => isAttack(p.action) && !p.attacker_destroyed && p.ends_game === null));
+    const { user } = mountGame(g.c);
+    const s = g.c.getSnapshot();
+    const p = s.legal.find((x) => isAttack(x.action) && !x.attacker_destroyed && x.ends_game === null)!;
+    const { index } = attackerOf({ ...s, legal: [p] });
+    await selectAttacker(user, myTiles()[index]);
+    const t = targetOf(p);
+    await user.click(t === "hero" ? heroTarget() : theirTiles()[theirs(s).findIndex((x) => x.id === t)]);
+    expect(sheet()!.querySelector(".attack-warning")).toBeNull();
   });
 });

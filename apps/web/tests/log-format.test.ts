@@ -60,6 +60,11 @@ describe("one line per event kind", () => {
       event: { riposted: { player: "One", creature: ID.c, amount: 2 } },
       you: "Cavalier subit 2 dégâts de riposte (PV restants : 3).",
     },
+    hero_riposted: {
+      // The attacker `Cavalier` of One hit the hero of Two (Rempart): the hero hits back.
+      event: { hero_riposted: { player: "One", creature: ID.c } },
+      you: "Le héros Rempart riposte et détruit Cavalier.",
+    },
     died: { event: { died: { player: "Two", creature: ID.b } }, you: "Lancier meurt." },
     token_moved: {
       event: { token_moved: { player: "One", budget: 4 } },
@@ -151,6 +156,7 @@ describe("no raw identifier, no undefined", () => {
       { attacked: { player: "Two", attacker: 7771, cost: 1 } },
       { creature_damaged: { player: "One", creature: 7772, amount: 1 } },
       { riposted: { player: "Two", creature: 7771, amount: 1 } },
+      { hero_riposted: { player: "Two", creature: 7771 } },
       { died: { player: "One", creature: 7772 } },
       { drew: { player: "One", card: 7773 } },
     ];
@@ -160,6 +166,7 @@ describe("no raw identifier, no undefined", () => {
       "L'ordinateur attaque avec une carte (coût 1).",
       "Une carte subit 1 dégât (PV restants : 0).",
       "Une carte subit 1 dégât de riposte (PV restants : 0).",
+      "Le héros Ruée riposte et détruit une carte.",
       "Une carte meurt.",
       "Tu pioches 1 carte.",
     ]);
@@ -195,6 +202,8 @@ describe("French text only", () => {
           return { creature_damaged: { player: "One", creature: ID.a, amount: 1 } };
         case "riposted":
           return { riposted: { player: "One", creature: ID.a, amount: 1 } };
+        case "hero_riposted":
+          return { hero_riposted: { player: "One", creature: ID.a } };
         case "died":
           return { died: { player: "One", creature: ID.a } };
         case "token_moved":

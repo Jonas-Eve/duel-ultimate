@@ -36,7 +36,7 @@ function newGame(seed = 1) {
 const previewOf = (game: InstanceType<Binding["Game"]>) => JSON.parse(game.legal_actions_with_time()) as Preview[];
 
 describe("Game.legal_actions_with_time() in the browser build", () => {
-  test("same actions in the same order as legal_actions(), with the five agreed fields", () => {
+  test("same actions in the same order as legal_actions(), with the six agreed fields", () => {
     const game = newGame(3);
     try {
       for (let step = 0; step < 100; step++) {
@@ -44,7 +44,15 @@ describe("Game.legal_actions_with_time() in the browser build", () => {
         const previews = previewOf(game);
         expect(previews.map((p) => p.action)).toEqual(actions);
         for (const p of previews) {
-          expect(Object.keys(p).sort()).toEqual(["action", "budget_after", "cost", "ends_game", "hands_over"]);
+          expect(Object.keys(p).sort()).toEqual([
+            "action",
+            "attacker_destroyed",
+            "budget_after",
+            "cost",
+            "ends_game",
+            "hands_over",
+          ]);
+          expect(typeof p.attacker_destroyed).toBe("boolean");
         }
         expect(game.legal_actions_with_time()).not.toContain("drew");
         const playable = actions.filter((a) => a !== "concede");
@@ -70,6 +78,7 @@ describe("Game.legal_actions_with_time() in the browser build", () => {
         hands_over: false,
         budget_after: null,
         ends_game: { winner: "Two", reason: "concede" },
+        attacker_destroyed: false,
       });
       game.apply('"concede"');
       expect(previewOf(game)).toEqual([]);
