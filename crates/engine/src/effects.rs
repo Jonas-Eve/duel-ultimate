@@ -649,4 +649,212 @@ mod tests {
         assert!(listed(Source::Board(in_hand)).is_empty());
         assert!(listed(Source::Hand(CardInstanceId(10_000))).is_empty());
     }
+
+    /// What `apply` and the frozen reference each give on a clone of `state`: the result, then the
+    /// state, which must agree to the byte (generator included).
+    fn both(state: &GameState, action: &Action) -> Result<Vec<Event>, RuleError> {
+        let (mut new, mut old) = (state.clone(), state.clone());
+        let got = apply(&mut new, action.clone());
+        let expected = crate::reference::apply(&mut old, action.clone());
+        assert_eq!(got, expected, "{action:?}");
+        assert_eq!(new, old, "{action:?}");
+        got
+    }
+
+    /// An attack by a creature of force 0 is only judged by `validate` (`plan_damage`
+    /// debug-asserts a force of 1).
+    fn is_force_zero_attack(state: &GameState, action: &Action) -> bool {
+        matches!(action, Action::Attack { attacker, .. }
+            if state.player(state.active).board.iter().any(|c| c.id == *attacker && c.stats.force == 0))
+    }
+
+    #[test]
+    fn the_journal_order_of_every_operation_is_unchanged() {
+        #[derive(Default)]
+        struct Seen {
+            play: bool,
+            multi_draw: bool,
+            lethal: bool,
+            hero_hit: bool,
+            dead_attacker: bool,
+            hero_riposte: bool,
+            concede: bool,
+            hand_over_exhaustion: bool,
+        }
+        let mut seen = Seen::default();
+        for seed in 0..60u64 {
+            let mut state = game_of(seed);
+            let mut policy = ChaCha8Rng::seed_from_u64(seed ^ 0x184);
+            while state.winner.is_none() {
+                let legal = legal_actions(&state);
+                for action in &legal {
+                    if is_force_zero_attack(&state, action) {
+                        continue;
+                    }
+                    let events = both(&state, action).unwrap();
+                    let attacker = match action {
+                        Action::Attack { attacker, .. } => Some(*attacker),
+                        _ => None,
+                    };
+                    let won = |why| {
+                        events
+                            .iter()
+                            .any(|e| matches!(e, Event::GameWon { reason, .. } if *reason == why))
+                    };
+                    match action {
+                        Action::Play { .. } => seen.play = true,
+                        Action::Concede => seen.concede = true,
+                        Action::Activate { .. } => {
+                            let drawn = events
+                                .iter()
+                                .filter(|e| matches!(e, Event::Drew { .. }))
+                                .count();
+                            seen.multi_draw |= drawn >= 2;
+                        }
+                        Action::Attack {
+                            target: Target::Hero,
+                            ..
+                        } => {
+                            seen.lethal |= won(WinReason::HeroDown);
+                            seen.hero_hit |= !won(WinReason::HeroDown);
+                        }
+                        Action::Attack { .. } => {}
+                    }
+                    seen.hero_riposte |= events
+                        .iter()
+                        .any(|e| matches!(e, Event::HeroRiposted { .. }));
+                    seen.dead_attacker |= events.iter().any(|e| matches!(e, Event::Riposted { .. }))
+                        && events.iter().any(|e| matches!(e, Event::Died { creature, .. } if Some(*creature) == attacker));
+                    seen.hand_over_exhaustion |= won(WinReason::Exhaustion)
+                        && events
+                            .iter()
+                            .any(|e| matches!(e, Event::ActivePlayerChanged { .. }));
+                }
+                let playable: Vec<Action> = legal
+                    .into_iter()
+                    .filter(|a| *a != Action::Concede)
+                    .collect();
+                let action = playable[policy.random_range(0..playable.len())].clone();
+                apply(&mut state, action).unwrap();
+            }
+        }
+        assert!(seen.play, "no summoning");
+        assert!(seen.multi_draw, "no multi-card draw");
+        assert!(seen.lethal, "no lethal hero attack");
+        assert!(seen.hero_hit, "no non-lethal hero attack");
+        assert!(seen.dead_attacker, "no attacker dead of a riposte");
+        assert!(seen.hero_riposte, "no hero riposte");
+        assert!(seen.concede, "no concession");
+        let _ = seen.hand_over_exhaustion;
+    }
+
+    #[test]
+    fn a_lethal_attack_spends_no_time_and_does_not_check_exhaustion() {
+        let mut state = with_boards(1, RuleSet::standard(), 1, 0);
+        let active = state.active;
+        state.player_mut(active.opponent()).health = 1;
+        let attacker = state.player(active).board[0].id;
+        let (budget, token) = (state.budget, state.active);
+        let events = both(
+            &state,
+            &Action::Attack {
+                attacker,
+                target: Target::Hero,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            events.last(),
+            Some(&Event::GameWon {
+                winner: active,
+                reason: WinReason::HeroDown
+            })
+        );
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            Event::TokenMoved { .. } | Event::ActivePlayerChanged { .. }
+        )));
+        let mut after = state.clone();
+        apply(
+            &mut after,
+            Action::Attack {
+                attacker,
+                target: Target::Hero,
+            },
+        )
+        .unwrap();
+        assert_eq!((after.budget, after.active), (budget, token));
+    }
+
+    #[test]
+    fn concede_does_not_check_exhaustion() {
+        let mut state = with_boards(2, RuleSet::standard(), 0, 2);
+        let active = state.active;
+        let side = state.player_mut(active);
+        side.hand.clear();
+        side.hero.effects.clear();
+        let events = both(&state, &Action::Concede).unwrap();
+        assert_eq!(
+            events,
+            vec![Event::GameWon {
+                winner: active.opponent(),
+                reason: WinReason::Concede
+            }]
+        );
+    }
+
+    #[test]
+    fn a_dead_attacker_still_pays_its_attack_cost() {
+        let mut state = with_boards(3, RuleSet::standard(), 1, 1);
+        let active = state.active;
+        let opp = active.opponent();
+        state.player_mut(active).board[0].stats.health = 1;
+        state.player_mut(active).board[0].stats.attack_cost = 2;
+        state.player_mut(opp).board[0].stats.riposte = 3;
+        state.player_mut(opp).board[0].stats.provocation = false;
+        state.player_mut(opp).board[0].stats.health = 9;
+        let attacker = state.player(active).board[0].id;
+        let target = state.player(opp).board[0].id;
+        let action = Action::Attack {
+            attacker,
+            target: Target::Creature(target),
+        };
+        let events = both(&state, &action).unwrap();
+        assert!(events.contains(&Event::Died {
+            player: active,
+            creature: attacker
+        }));
+        assert!(events.iter().any(|e| matches!(e, Event::TokenMoved { .. })));
+        let mut after = state.clone();
+        apply(&mut after, action).unwrap();
+        let mut reference = state.clone();
+        crate::reference::apply(
+            &mut reference,
+            Action::Attack {
+                attacker,
+                target: Target::Creature(target),
+            },
+        )
+        .unwrap();
+        assert_eq!(after.budget, reference.budget);
+    }
+
+    #[test]
+    fn op_of_draw_carries_the_count_and_is_the_only_hero_sugar() {
+        assert_eq!(op_of(&Effect::Draw { count: 3 }), Op::Draw { count: 3 });
+        assert_eq!(op_of(&Effect::Draw { count: 1 }), Op::Draw { count: 1 });
+    }
+
+    /// A provocative game with `own` creatures on the active board and `opposing` on the other.
+    fn with_boards(seed: u64, rules: RuleSet, own: usize, opposing: usize) -> GameState {
+        let mut state = provocative_game(seed, rules);
+        for (seat, count) in [(state.active, own), (state.active.opponent(), opposing)] {
+            let side = state.player_mut(seat);
+            for _ in 0..count {
+                let card = side.deck.pop().unwrap();
+                side.board.push(card);
+            }
+        }
+        state
+    }
 }
