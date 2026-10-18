@@ -62,7 +62,9 @@ premières parties, le siège Two dans les 100 suivantes, graines fixes). Seuil 
   sera re-mesuré par #127 (une attaque dont l'attaquant meurt est déjà mal notée : la créature
   disparaît de la vue). Depuis #170 (option `hero_riposte`, aucun poids retouché) c'est testé dans
   `crates/ai/tests/greedy.rs` : face au héros, la gloutonne refuse le coup non létal (un sacrifice) et
-  garde le coup létal.
+  garde le coup létal. Depuis #172 la riposte du héros est **active par défaut** (`RuleSet::standard()`) :
+  le sacrifice est pesé par l'essai à blanc (`attacker_destroyed` de l'aperçu, l'attaquant disparaît de la
+  vue après l'action), aucun poids n'est retouché ici ; la mesure de l'effet est celle de la tâche T4 de #127.
 
 ## Brancher une autre politique
 
