@@ -4,8 +4,8 @@ use crate::rules::{self, Event};
 use crate::ruleset::{RuleSet, RuleSetError};
 use crate::state::{CardInstance, CardInstanceId, GameState, PlayerId, PlayerState};
 use duel_cards::{
-    CardSpec, CardsError, Hero, validate_card_names, validate_card_spec, validate_deck_shape,
-    validate_hero,
+    CardSpec, CardsError, CreatureStats, Hero, validate_card_names, validate_card_spec,
+    validate_deck_shape, validate_hero,
 };
 use serde::{Deserialize, Serialize};
 
@@ -67,13 +67,14 @@ fn validate_side(side: &PlayerSetup) -> Result<(), CardsError> {
     side.cards.iter().try_for_each(validate_card_spec)
 }
 
-/// Temporary fail-closed guard (#206, lifted by task 3 of #137): refuses a valid spec the engine
-/// cannot play properly yet. An `immobile` unit would still have its attack enumerated (force
-/// effective 0), and a tag has no meaning for the engine.
+/// Temporary fail-closed guard (#206, extended by #207, lifted by task 3 of #137): refuses a valid
+/// spec the engine cannot play properly yet. An `immobile` unit would still have its attack
+/// enumerated (force effective 0), a tag has no meaning for the engine, and neither a spell nor an
+/// effect can be resolved yet.
 fn ensure_playable(side: &PlayerSetup) -> Result<(), SetupError> {
     match side.cards.iter().find(|spec| !spec.is_plain_unit()) {
         Some(_) => Err(SetupError::Unsupported(
-            "only plain units (neither `immobile` nor tags) can be played for now",
+            "only plain units (neither `immobile`, tags nor effects) can be played for now",
         )),
         None => Ok(()),
     }
@@ -89,12 +90,24 @@ fn build_side(side: PlayerSetup, next_id: &mut u32) -> PlayerState {
         .cards
         .into_iter()
         .map(|spec| {
-            let CardSpec::Unit(unit) = spec;
+            // The guard refuses a spell before this point; a spell would carry its cost and
+            // zeros, the shape of an instance.
+            let stats = match spec {
+                CardSpec::Unit(unit) => unit.stats,
+                CardSpec::Spell(spell) => CreatureStats {
+                    cost: spell.cost,
+                    force: 0,
+                    attack_cost: 0,
+                    health: 0,
+                    provocation: false,
+                    riposte: 0,
+                },
+            };
             let id = CardInstanceId(*next_id);
             *next_id += 1;
             CardInstance {
                 id,
-                stats: unit.stats,
+                stats,
                 name: names.next(),
             }
         })
@@ -190,7 +203,7 @@ mod tests {
             side.card_names = side
                 .cards
                 .iter()
-                .map(|s| format!("c{}", s.creature().cost))
+                .map(|s| format!("c{}", s.creature().unwrap().cost))
                 .collect();
         }
         setup
@@ -283,7 +296,7 @@ mod tests {
             .cards
             .iter()
             .rev()
-            .map(|c| format!("c{}", c.creature().cost))
+            .map(|c| format!("c{}", c.creature().unwrap().cost))
             .collect();
         let (state, _) = new_game(s, 5).unwrap();
         for card in &state.one.deck {

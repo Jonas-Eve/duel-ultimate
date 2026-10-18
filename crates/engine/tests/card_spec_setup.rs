@@ -17,6 +17,7 @@ fn setup() -> GameSetup {
 fn spec_mut(setup: &mut GameSetup, index: usize) -> &mut duel_cards::CreatureStats {
     match &mut setup.one.cards[index] {
         CardSpec::Unit(unit) => &mut unit.stats,
+        CardSpec::Spell(_) => panic!("a unit was expected"),
     }
 }
 
@@ -87,6 +88,7 @@ fn new_game_revalidates_every_card_spec() {
     let mut second_side = setup();
     match &mut second_side.two.cards[29] {
         CardSpec::Unit(unit) => unit.stats.cost = 0,
+        CardSpec::Spell(_) => panic!("a unit was expected"),
     }
     assert_eq!(
         new_game(second_side, 1).unwrap_err(),
@@ -138,6 +140,7 @@ fn a_setup_json_with_an_unknown_card_key_is_invalid_json_as_before() {
 fn unit_mut(setup: &mut GameSetup, index: usize) -> &mut UnitSpec {
     match &mut setup.one.cards[index] {
         CardSpec::Unit(unit) => unit,
+        CardSpec::Spell(_) => panic!("a unit was expected"),
     }
 }
 
@@ -163,6 +166,7 @@ fn new_game_refuses_what_it_cannot_play_yet() {
     let mut second = setup();
     match &mut second.two.cards[29] {
         CardSpec::Unit(unit) => unit.tags = vec!["x".into()],
+        CardSpec::Spell(_) => panic!("a unit was expected"),
     }
     assert!(matches!(
         new_game(second, 1).unwrap_err(),
@@ -239,5 +243,5 @@ fn new_game_refuses_spells_and_effects_for_now() {
 #[test]
 fn max_effect_picks_fits_the_action_bound() {
     // `duel-cards` cannot depend on the engine, so it carries its own copy of the bound.
-    assert!(duel_cards::MAX_EFFECT_PICKS <= duel_engine::MAX_PICKS);
+    const { assert!(duel_cards::MAX_EFFECT_PICKS <= duel_engine::MAX_PICKS) };
 }
