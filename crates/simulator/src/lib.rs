@@ -26,7 +26,7 @@ pub mod stats;
 
 pub use batch::{
     BatchConfig, Contender, DEFAULT_MAX_ACTIONS, GameRecord, NamedPolicy, contenders_from,
-    game_seed, play_game, run_batch, run_batch_observed,
+    game_seed, play_game, play_game_seats, run_batch, run_batch_observed,
 };
 pub use diff::diff_reports;
 pub use duel_ai::{Policy, TAG_POLICY_ONE, TAG_POLICY_TWO, derive_seed, policy_rng, random_policy};

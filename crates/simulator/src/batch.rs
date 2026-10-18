@@ -94,6 +94,23 @@ pub fn play_game(
     seed: u64,
     policy: &dyn Policy,
     max_actions: u32,
+    on_step: impl FnMut(&[Action], &[Event]),
+) -> GameRecord {
+    play_game_seats(setup, seed, policy, policy, max_actions, on_step)
+}
+
+/// [`play_game`] with one policy per seat: `one` plays seat One, `two` seat Two. Each seat's
+/// policy gets the generator of its seat ([`policy_rng`]), whatever the policy is: giving the
+/// same policy to both seats is exactly [`play_game`]. The only game loop of the simulator.
+///
+/// # Panics
+/// As [`play_game`].
+pub fn play_game_seats(
+    setup: GameSetup,
+    seed: u64,
+    one: &dyn Policy,
+    two: &dyn Policy,
+    max_actions: u32,
     mut on_step: impl FnMut(&[Action], &[Event]),
 ) -> GameRecord {
     let (mut state, _) = new_game(setup, seed).expect("the setup is valid");
@@ -123,9 +140,9 @@ pub fn play_game(
         if obs.actions().is_empty() {
             break;
         }
-        let rng = match obs.seat() {
-            PlayerId::One => &mut rng_one,
-            PlayerId::Two => &mut rng_two,
+        let (policy, rng) = match obs.seat() {
+            PlayerId::One => (one, &mut rng_one),
+            PlayerId::Two => (two, &mut rng_two),
         };
         let chosen = policy.choose(&obs, rng);
         assert!(
