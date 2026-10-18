@@ -222,13 +222,13 @@ impl RuleError {
 }
 
 /// The effect of the active hero at the untrusted index `effect`, if there is one.
-fn hero_effect(state: &GameState, effect: u32) -> Option<&HeroEffect> {
+pub(crate) fn hero_effect(state: &GameState, effect: u32) -> Option<&HeroEffect> {
     let index = usize::try_from(effect).ok()?;
     state.player(state.active).hero.effects.get(index)
 }
 
 /// Position in the active player's hand of the card `card`, if it is there.
-fn hand_position(state: &GameState, card: CardInstanceId) -> Option<usize> {
+pub(crate) fn hand_position(state: &GameState, card: CardInstanceId) -> Option<usize> {
     state
         .player(state.active)
         .hand
@@ -237,7 +237,7 @@ fn hand_position(state: &GameState, card: CardInstanceId) -> Option<usize> {
 }
 
 /// Position in the active player's board of the creature `card`, if it is there.
-fn board_position(state: &GameState, card: CardInstanceId) -> Option<usize> {
+pub(crate) fn board_position(state: &GameState, card: CardInstanceId) -> Option<usize> {
     state
         .player(state.active)
         .board
@@ -246,7 +246,7 @@ fn board_position(state: &GameState, card: CardInstanceId) -> Option<usize> {
 }
 
 /// Position in the opposing player's board of the creature `card`, if it is there.
-fn opposing_board_position(state: &GameState, card: CardInstanceId) -> Option<usize> {
+pub(crate) fn opposing_board_position(state: &GameState, card: CardInstanceId) -> Option<usize> {
     state
         .player(state.active.opponent())
         .board
@@ -257,8 +257,8 @@ fn opposing_board_position(state: &GameState, card: CardInstanceId) -> Option<us
 /// Whether provocation lets the active player aim at `target`. Computed from the current
 /// board every time (no cache: a remembered set would be a second state to invalidate): with
 /// no opposing creature with provocation anything goes (the S2a behavior), otherwise only one
-/// of those creatures. The single implementation of the filter, called by [`validate`] alone.
-fn provocation_allows(state: &GameState, target: Target) -> bool {
+/// of those creatures. The single implementation of the filter, called by `effects::usable` alone.
+pub(crate) fn provocation_allows(state: &GameState, target: Target) -> bool {
     let opposing = &state.player(state.active.opponent()).board;
     let mut provocateurs = opposing.iter().filter(|c| c.stats.provocation).peekable();
     if provocateurs.peek().is_none() {
@@ -273,7 +273,7 @@ fn provocation_allows(state: &GameState, target: Target) -> bool {
 /// Why `seat` cannot summon a creature right now, if it cannot: `None` once the game is over
 /// (nothing is blocked by a rule of play then), `Some(BoardFull)` when the board limit is
 /// reached. Read from the seat's public board only, never from a hand. The single answer,
-/// called by [`validate`] (the active seat) and by `player_view` (the hand of the seat asked).
+/// called by `effects::usable` (the active seat) and by `player_view` (the hand of the seat asked).
 pub(crate) fn play_blocker(state: &GameState, seat: PlayerId) -> Option<RuleError> {
     if state.winner.is_some() {
         return None;
@@ -289,7 +289,9 @@ pub(crate) fn play_blocker(state: &GameState, seat: PlayerId) -> Option<RuleErro
     }
 }
 
-/// The single legality check, shared by [`apply`] and [`legal_actions`].
+/// The single legality check, shared by [`apply`] and [`legal_actions`]: the game must be
+/// running, the picks bounded, then `effects::usable` (the one predicate) judges the use the
+/// action expresses.
 pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleError> {
     if state.winner.is_some() {
         return Err(RuleError::GameOver);
@@ -299,59 +301,7 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
     if picks_of(action).len() > MAX_PICKS {
         return Err(RuleError::TooManyPicks);
     }
-    match action {
-        Action::Concede => Ok(()),
-        Action::Play { card, picks } => {
-            // The hand first: an id that is not in it gets `CardNotInHand` whatever the board.
-            hand_position(state, *card).ok_or(RuleError::CardNotInHand)?;
-            // No summoning takes a choice at this stage.
-            if !picks.is_empty() {
-                return Err(RuleError::InvalidPicks);
-            }
-            play_blocker(state, state.active).map_or(Ok(()), Err)
-        }
-        Action::Attack { attacker, target } => {
-            // Order of the checks: the attacker, then the target on the opposing board,
-            // then the provocation. Every id that is not an opposing creature gets
-            // `TargetNotOnBoard` whatever zone (hidden or not) it is in, even when a
-            // provocateur exists: the provocation error only ever speaks of the public board.
-            board_position(state, *attacker).ok_or(RuleError::AttackerNotOnBoard)?;
-            if let Target::Creature(creature) = target {
-                opposing_board_position(state, *creature).ok_or(RuleError::TargetNotOnBoard)?;
-            }
-            if provocation_allows(state, *target) {
-                Ok(())
-            } else {
-                Err(RuleError::TargetForbiddenByProvocation)
-            }
-        }
-        Action::Activate {
-            effect,
-            source: None,
-            picks,
-        } => {
-            let hero_effect = hero_effect(state, *effect).ok_or(RuleError::UnknownEffect)?;
-            // No hero effect takes a choice at this stage.
-            if !picks.is_empty() {
-                return Err(RuleError::InvalidPicks);
-            }
-            if effects::applicable(state, state.active, &hero_effect.effect) {
-                Ok(())
-            } else {
-                Err(RuleError::EffectNotApplicable)
-            }
-        }
-        Action::Activate {
-            source: Some(source),
-            ..
-        } => {
-            // One code for every id that is not a creature of my board (hand, pile, discard,
-            // opposing board, unknown): no hidden zone is told apart.
-            board_position(state, *source).ok_or(RuleError::SourceNotOnBoard)?;
-            // A creature declares no effect at this stage.
-            Err(RuleError::UnknownEffect)
-        }
-    }
+    effects::usable(state, &effects::decode(action))
 }
 
 /// The picks an action carries: none for `Attack` and `Concede`.
@@ -362,46 +312,11 @@ fn picks_of(action: &Action) -> &[Pick] {
     }
 }
 
-/// Every action worth testing for legality, `Concede` excluded, in the order of
-/// [`legal_actions`]: the hand, hero effects, then per attacker (board order) the opposing
-/// hero first and each creature of the opposing board in order. At most
-/// `board x (1 + opposing board)` attacks. Own creatures, hand, pile and discard are never
-/// candidates; `validate` stays the single judge of what is legal, provocation included (a
-/// provocation hides the hero and the other creatures by refusing them there, not by a
-/// second filter here).
-fn candidates(state: &GameState) -> Vec<Action> {
-    let side = state.player(state.active);
-    let opposing = state.player(state.active.opponent());
-    let plays = side.hand.iter().map(|c| Action::play(c.id));
-    let effects = (0..side.hero.effects.len())
-        .filter_map(|i| u32::try_from(i).ok())
-        .map(Action::activate);
-    let attacks = side.board.iter().flat_map(|attacker| {
-        std::iter::once(Target::Hero)
-            .chain(opposing.board.iter().map(|c| Target::Creature(c.id)))
-            .map(|target| Action::Attack {
-                attacker: attacker.id,
-                target,
-            })
-    });
-    plays.chain(effects).chain(attacks).collect()
-}
-
-/// The legal actions other than `Concede`.
-fn playable(state: &GameState) -> Vec<Action> {
-    candidates(state)
-        .into_iter()
-        .filter(|action| validate(state, action).is_ok())
-        .collect()
-}
-
-/// Ends the game if the active player has no legal action other than conceding. A living
-/// creature always has one (an opposing provocateur if there is one, else the opposing hero),
-/// so it keeps its owner in the game.
+/// Ends the game if the active player has no usable action other than conceding. A creature that
+/// carries the attack always has one (an opposing provocateur if there is one, else the opposing
+/// hero), so it keeps its owner in the game. Lazy: stops at the first usable action.
 pub(crate) fn check_exhaustion(state: &mut GameState, events: &mut Vec<Event>) {
-    let can_act = candidates(state)
-        .iter()
-        .any(|action| validate(state, action).is_ok());
+    let can_act = effects::sources(state).any(|used| effects::usable(state, &used).is_ok());
     if state.winner.is_none() && !can_act {
         let winner = state.active.opponent();
         state.winner = Some((winner, WinReason::Exhaustion));
@@ -518,7 +433,10 @@ pub fn legal_actions(state: &GameState) -> Vec<Action> {
     if state.winner.is_some() {
         return Vec::new();
     }
-    let mut actions = playable(state);
+    let mut actions: Vec<Action> = effects::sources(state)
+        .filter(|used| effects::usable(state, used).is_ok())
+        .filter_map(|used| effects::encode(&used))
+        .collect();
     actions.push(Action::Concede);
     actions
 }
@@ -619,12 +537,16 @@ mod tests {
                     .filter(|a| **a != Action::Concede)
                     .cloned()
                     .collect();
-                // A living creature always has a legal attack, even when only the opposing
-                // provocateurs may be targeted: provocation never exhausts a player.
-                if !state.player(state.active).board.is_empty() {
+                // A creature that carries the attack always has a legal attack, even when only
+                // the opposing provocateurs may be targeted: provocation never exhausts a player.
+                for creature in &state.player(state.active).board {
                     assert!(
-                        playable.iter().any(|a| matches!(a, Action::Attack { .. })),
-                        "seed {seed}: a creature but no attack is legal"
+                        playable.iter().any(|a| matches!(
+                            a,
+                            Action::Attack { attacker, .. } if *attacker == creature.id
+                        )),
+                        "seed {seed}: {:?} carries the attack but has none legal",
+                        creature.id
                     );
                 }
                 assert!(!playable.is_empty(), "seed {seed}: exhausted yet not over");
