@@ -4,7 +4,7 @@
 //! [--policy <name>[,<name>...]] [--noise <0..=100>]`, in any order: `games` per matchup (1000
 //! by default), the `starter` set (its latest version by default), seed 0 by default, and the
 //! engine's default rules for each rule option not given (the report names them in its header).
-//! `--hero-riposte on` changes the games (#170); `--board-limit` has no effect on them before #171. The
+//! `--hero-riposte on` changes the games (#170), and so does `--board-limit` (#171). The
 //! batch itself is `duel_simulator::run_batch_observed`; this file only reads the command line,
 //! picks the data and the policies and prints the checked `Report::render()` ([`finish`]).
 //!

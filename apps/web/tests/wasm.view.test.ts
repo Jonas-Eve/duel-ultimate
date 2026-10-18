@@ -30,6 +30,7 @@ interface Card {
   health: number;
   provocation: boolean;
   riposte: number;
+  unavailable?: string;
 }
 interface Hero {
   name: string;
@@ -170,5 +171,34 @@ describe("Game.view(seat) in the browser build", () => {
     errorOf(() => game.view("Three"));
     expect(JSON.parse(game.legal_actions()).length).toBeGreaterThan(0);
     game.free();
+  });
+});
+
+describe("the reason a card cannot be played (#171)", () => {
+  const limited = () =>
+    binding.Game.from_data(fixture("cards.json"), fixture("decks.json"), "aggro", "control", VERSIONS, 1, '{"hero_riposte":false,"board_limit":1}');
+
+  test("absent from every card of a game without a full board", () => {
+    const game = newGame();
+    for (const seat of ["One", "Two"]) expect(game.view(seat)).not.toContain("unavailable");
+  });
+
+  test("present, as an engine code, on each card of the hand of the seat whose board is full only", () => {
+    const game = limited();
+    const first = viewOf(game, "One").active;
+    const other = first === "One" ? "Two" : "One";
+    const actions = JSON.parse(game.legal_actions()) as ({ play: { card: number } } | string)[];
+    const play = actions.find((a) => typeof a === "object" && "play" in a)!;
+    game.apply(JSON.stringify(play));
+
+    const full = viewOf(game, first);
+    expect(full.you.hand.length).toBeGreaterThan(0);
+    for (const card of full.you.hand) expect(card.unavailable).toBe("board_full");
+    for (const card of [...full.you.board, ...full.opponent.board, ...full.you.discard, ...full.opponent.discard]) {
+      expect(card.unavailable).toBeUndefined();
+    }
+    // The other seat has room: its own hand has no key, and neither has the opponent block of the full seat.
+    expect(game.view(other)).not.toContain("unavailable");
+    expect(JSON.stringify(full.opponent)).not.toContain("unavailable");
   });
 });

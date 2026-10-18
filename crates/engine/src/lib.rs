@@ -28,9 +28,10 @@
 //! [`RuleSet`] holds the per-game options (two closed ones: `hero_riposte`, `board_limit`),
 //! carried by `GameSetup.rules`, validated by [`new_game`] (`invalid_setup`) and copied into
 //! `Event::GameStarted` only when they differ from the engine default. `hero_riposte` acts (#170:
-//! a non-lethal hit on the hero destroys the attacker, `Event::HeroRiposted`); `board_limit` has no
-//! effect yet (#171). Neither touches the generator. To replay a historical game, pass its rules
-//! explicitly.
+//! a non-lethal hit on the hero destroys the attacker, `Event::HeroRiposted`); `board_limit` acts
+//! too (#171: a full board refuses a summoning with `RuleError::BoardFull`, and the view of a seat
+//! says so on each card of its hand, `CardView::unavailable`). Neither touches the generator. To
+//! replay a historical game, pass its rules explicitly.
 //!
 //! Randomness is consumed only at setup, in this documented order: shuffle of One's deck,
 //! shuffle of Two's deck, then `random_below(2)` if (and only if) the initiatives are equal.

@@ -315,3 +315,83 @@ fn a_view_with_unnamed_cards_has_null_names() {
         "{v}"
     );
 }
+
+// ---- #171: `unavailable`, the reason a card of the hand cannot be played --------------------
+
+/// A game on the starter decks with a board limit of one creature.
+fn limited_game(seed: u32) -> Duel {
+    let setup = GameSetup {
+        one: side("rush", 0),
+        two: side("bulwark", 30),
+        data_versions: vec!["starter@1.0.0".into()],
+        rules: RuleSet {
+            board_limit: Some(1),
+            ..RuleSet::legacy()
+        },
+    };
+    Duel::from_json(&serde_json::to_string(&setup).unwrap(), seed).unwrap()
+}
+
+/// Whether the key appears anywhere in the document.
+fn mentions(value: &Value, key: &str) -> bool {
+    match value {
+        Value::Object(map) => map.contains_key(key) || map.values().any(|v| mentions(v, key)),
+        Value::Array(items) => items.iter().any(|v| mentions(v, key)),
+        _ => false,
+    }
+}
+
+/// Plays the first summoning offered to the active seat; `false` when there is none.
+fn summon(game: &mut Duel) -> bool {
+    let actions: Vec<Value> = serde_json::from_str(&game.legal_actions_json().unwrap()).unwrap();
+    let Some(play) = actions.iter().find(|a| a.get("play").is_some()) else {
+        return false;
+    };
+    game.apply_json(&play.to_string()).unwrap();
+    true
+}
+
+#[test]
+fn a_full_board_says_why_for_its_own_hand_only_in_the_json_of_the_view() {
+    let mut game = limited_game(3);
+    let first = view(&game, "One")["active"].as_str().unwrap().to_owned();
+    let other = if first == "One" { "Two" } else { "One" };
+    // Control: nobody is full yet, the key is nowhere.
+    for seat in ["One", "Two"] {
+        assert!(!mentions(&view(&game, seat), "unavailable"), "{seat}");
+    }
+    assert!(summon(&mut game));
+    // The seat that summoned is full: every card of its hand says why, in the last key.
+    let full = view(&game, &first);
+    let hand = full["you"]["hand"].as_array().unwrap();
+    assert!(!hand.is_empty());
+    for card in hand {
+        assert_eq!(card["unavailable"], "board_full", "{card}");
+    }
+    assert!(
+        game.view_json(&first)
+            .unwrap()
+            .contains(r#","unavailable":"board_full"}"#)
+    );
+    // The other seat is not full: no key, in its view nor in the opponent block of the first.
+    assert!(!mentions(&view(&game, other), "unavailable"));
+    assert!(!mentions(&full["opponent"], "unavailable"));
+    assert!(!mentions(&full["you"]["board"], "unavailable"));
+}
+
+#[test]
+fn the_reason_is_a_function_of_the_view_not_of_whose_turn_it_is() {
+    let mut game = limited_game(3);
+    assert!(summon(&mut game));
+    // Whoever holds the token now, the summoner's hand says why in its own view.
+    let first = if view(&game, "One")["you"]["board"]
+        .as_array()
+        .unwrap()
+        .is_empty()
+    {
+        "Two"
+    } else {
+        "One"
+    };
+    assert!(mentions(&view(&game, first)["you"]["hand"], "unavailable"));
+}

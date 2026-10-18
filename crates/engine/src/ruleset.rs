@@ -4,8 +4,9 @@
 //! travel in `GameSetup.rules` and are recorded in `Event::GameStarted`.
 //!
 //! `hero_riposte` acts since #170 (`combat.rs`: a non-lethal hit on the hero destroys the
-//! attacker); `board_limit` **has no effect yet** (until #171): no rule reads it. Neither is
-//! read by a potential formula, and neither touches the generator.
+//! attacker); `board_limit` acts since #171 (`rules::play_blocker`: a full board refuses a
+//! summoning, `RuleError::BoardFull`). Neither is read by a potential formula, and neither
+//! touches the generator.
 
 use duel_cards::DECK_SIZE;
 use serde::{Deserialize, Serialize};
@@ -17,8 +18,6 @@ pub const MAX_BOARD_LIMIT: u32 = DECK_SIZE as u32;
 /// absent field (the default of the time, so an explicit `"board_limit": null` is how to write
 /// "no limit" whatever the default is); the output is always the complete object, in
 /// declaration order. Unknown fields are refused: the value may come from an untrusted client.
-///
-/// `board_limit` has no effect before #171.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RuleSet {
@@ -27,7 +26,9 @@ pub struct RuleSet {
     /// (`Event::HeroRiposted`); a lethal hit is `HeroDown` as ever, with no riposte.
     pub hero_riposte: bool,
     /// Largest number of creatures a board may hold; `None` means no limit, `Some(n)` needs
-    /// `1 <= n <=` [`MAX_BOARD_LIMIT`]. No effect before #171.
+    /// `1 <= n <=` [`MAX_BOARD_LIMIT`]. A board that holds `n` creatures or more refuses a
+    /// summoning (`RuleError::BoardFull`, read by `validate` alone); `legal_actions`, the AI
+    /// and exhaustion follow by themselves.
     pub board_limit: Option<u32>,
 }
 

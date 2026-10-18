@@ -4,7 +4,7 @@
 //! The surface is deliberately small: a constructor from a JSON setup, a constructor from the
 //! data (`from_data`: `cards.json` and `decks.json` strings, decks by identifier, each string
 //! bounded to 1 MiB, no disk, plus an optional sixth input `rules_json`, a `RuleSet`: `hero_riposte`
-//! acts, `board_limit` has no effect before #171), `legal_actions()` and `apply(action)`, all as JSON strings, plus `start_events()`: the events of the setup
+//! and `board_limit` act), `legal_actions()` and `apply(action)`, all as JSON strings, plus `start_events()`: the events of the setup
 //! (`game_started` with the recorded `data_versions` and, when not the engine default, `rules`,
 //! possibly `game_won`), which are public
 //! (no hand, pile or card id). Still no accessor for the full state; instead, `view(seat)` gives
@@ -56,8 +56,8 @@ impl Duel {
     /// `rules_json` is optional: `None` is the engine default rules, `Some` a JSON `RuleSet`
     /// object (a partial object reads the default for each absent field; `""` and `"null"` are
     /// not "absent" but `invalid_json`, nothing is normalised). `hero_riposte` acts (a
-    /// non-lethal hit on the hero destroys the attacker); `board_limit` has no effect before
-    /// #171; the options are only recorded in `game_started` when they differ from
+    /// non-lethal hit on the hero destroys the attacker); `board_limit` too (#171: a full board
+    /// refuses a summoning with `board_full`); the options are only recorded in `game_started` when they differ from
     /// the default.
     ///
     /// Order of the checks, the first to fail answers: (1) the size of every string present,

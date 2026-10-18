@@ -636,16 +636,17 @@ mod tests {
 
     #[test]
     fn the_potential_strictly_decreases_under_every_combination_of_options() {
-        // `board_limit: Some(5)` is still inert here (#171 makes it real); the combinations are
-        // played now so that the proof is re-checked, unchanged, the day it acts.
+        // The limit restricts the legal actions, as provocation does: it never touches Φ. Limits
+        // 1, 2 and 5 bind often in these games, so the proof is really re-checked with them.
         let combinations = [false, true].into_iter().flat_map(|hero_riposte| {
-            [None, Some(5)].map(|board_limit| RuleSet {
+            [None, Some(1), Some(2), Some(5)].map(|board_limit| RuleSet {
                 hero_riposte,
                 board_limit,
             })
         });
         for rules in combinations {
             let (mut hero_hits, mut hero_deaths, mut deaths, mut games) = (0, 0, 0, 0);
+            let mut blocked_hands = 0;
             for seed in 0..250u64 {
                 let mut game = setup(
                     hero(1 + (seed % 2) as u32, 3, 8, vec![draw(1, 1), draw(4, 3)]),
@@ -660,6 +661,15 @@ mod tests {
                         .into_iter()
                         .filter(|a| *a != Action::Concede)
                         .collect();
+                    let active = state.player(state.active);
+                    if !active.hand.is_empty()
+                        && !playable.iter().any(|a| matches!(a, Action::Play { .. }))
+                        && rules
+                            .board_limit
+                            .is_some_and(|n| active.board.len() >= n as usize)
+                    {
+                        blocked_hands += 1;
+                    }
                     let pick = playable
                         .get(policy.next_u32() as usize % playable.len().max(1))
                         .copied()
@@ -703,6 +713,12 @@ mod tests {
             assert!(games >= 200, "{rules:?}: {games} games");
             assert!(hero_hits > 200, "{rules:?}: attacks on heroes: {hero_hits}");
             assert!(deaths > 200, "{rules:?}: deaths: {deaths}");
+            if rules.board_limit.is_some() {
+                assert!(
+                    blocked_hands > 100,
+                    "{rules:?}: steps with a hand but no summoning: {blocked_hands}"
+                );
+            }
             if rules.hero_riposte {
                 assert!(
                     hero_deaths > 0,

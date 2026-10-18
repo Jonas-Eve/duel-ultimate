@@ -1,13 +1,12 @@
 //! #146: `RuleSet`, the per-game options carried by `GameSetup.rules` and recorded in
 //! `Event::GameStarted`. Through the public API and the JSON form only; JSON comparisons are
 //! on text, not on `Value`. "Different from the default" is always written relative to
-//! `RuleSet::default()`, so the switch of the default (#127) does not rewrite these tests; the
-//! ones that hold only while the options do nothing live in `while_inert`.
+//! `RuleSet::default()`, so the switch of the default (#127) does not rewrite these tests.
 
 use duel_cards::{CreatureStats, Effect, Hero, HeroEffect};
 use duel_engine::{
     Action, Event, GameSetup, GameState, MAX_BOARD_LIMIT, PlayerId, PlayerSetup, RuleSet,
-    RuleSetError, SetupError, apply, legal_actions, new_game, player_view,
+    RuleSetError, SetupError, apply, legal_actions, new_game,
 };
 
 fn hero(initiative: u32, start_budget: u32, starting_hand: u32) -> Hero {
@@ -454,63 +453,7 @@ fn the_state_exposes_the_rules_of_the_game() {
     assert_eq!(state.rules(), RuleSet::default());
 }
 
-// ---- Inert options and randomness -------------------------------------------------------------
-
-/// Holds only while `board_limit` does nothing (before #171): #171 removes it on purpose.
-/// `hero_riposte` acts since #170, so it stays off in these rules.
-mod while_inert {
-    use super::*;
-
-    fn inert_rules() -> RuleSet {
-        RuleSet {
-            board_limit: Some(5),
-            ..RuleSet::legacy()
-        }
-    }
-
-    /// Plays a game: always the last non-concede action; the journal, `GameStarted` included.
-    fn journal(rules: RuleSet, seed: u64) -> (GameState, Vec<Event>) {
-        let (mut state, mut log) = new_game(setup_with(&["fixture@1.0.0"], rules), seed).unwrap();
-        while state.winner().is_none() {
-            let action = legal_actions(&state)
-                .into_iter()
-                .rfind(|a| *a != Action::Concede)
-                .unwrap_or(Action::Concede);
-            log.extend(apply(&mut state, action).unwrap());
-        }
-        (state, log)
-    }
-
-    #[test]
-    fn the_whole_journal_is_the_same_but_for_the_key_of_game_started() {
-        for seed in 0..20 {
-            let (plain_state, plain) = journal(RuleSet::default(), seed);
-            let (state, log) = journal(inert_rules(), seed);
-            assert_eq!(state.rules(), inert_rules());
-            assert_eq!(plain.len(), log.len(), "seed {seed}");
-            assert_eq!(plain[1..], log[1..], "seed {seed}");
-            let stripped = started_json(&log)
-                .replace(&format!(r#","rules":{}"#, rules_text(inert_rules())), "");
-            assert_eq!(stripped, started_json(&plain), "seed {seed}");
-            assert_eq!(state.winner(), plain_state.winner(), "seed {seed}");
-        }
-    }
-
-    #[test]
-    fn both_seat_views_are_the_same_at_the_start() {
-        for seed in 0..20 {
-            let (plain, _) = new_game(setup_with(&[], RuleSet::default()), seed).unwrap();
-            let (other, _) = new_game(setup_with(&[], inert_rules()), seed).unwrap();
-            for seat in [PlayerId::One, PlayerId::Two] {
-                assert_eq!(
-                    serde_json::to_string(&player_view(&plain, seat)).unwrap(),
-                    serde_json::to_string(&player_view(&other, seat)).unwrap(),
-                    "seed {seed} {seat:?}"
-                );
-            }
-        }
-    }
-}
+// ---- Randomness ------------------------------------------------------------------------------
 
 /// What the generator decided at setup and during the first draws, by seat.
 fn random_outcome(rules: RuleSet, seed: u64) -> (PlayerId, u32, Vec<Vec<u32>>, Vec<Event>) {

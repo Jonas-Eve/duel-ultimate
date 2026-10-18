@@ -137,6 +137,8 @@ pub enum RuleError {
     TargetNotOnBoard,
     #[error("an opposing creature with provocation must be attacked first")]
     TargetForbiddenByProvocation,
+    #[error("the active player's board is full")]
+    BoardFull,
 }
 
 impl RuleError {
@@ -150,6 +152,7 @@ impl RuleError {
             Self::AttackerNotOnBoard => "attacker_not_on_board",
             Self::TargetNotOnBoard => "target_not_on_board",
             Self::TargetForbiddenByProvocation => "target_forbidden_by_provocation",
+            Self::BoardFull => "board_full",
         }
     }
 }
@@ -203,6 +206,25 @@ fn provocation_allows(state: &GameState, target: Target) -> bool {
     }
 }
 
+/// Why `seat` cannot summon a creature right now, if it cannot: `None` once the game is over
+/// (nothing is blocked by a rule of play then), `Some(BoardFull)` when the board limit is
+/// reached. Read from the seat's public board only, never from a hand. The single answer,
+/// called by [`validate`] (the active seat) and by `player_view` (the hand of the seat asked).
+pub(crate) fn play_blocker(state: &GameState, seat: PlayerId) -> Option<RuleError> {
+    if state.winner.is_some() {
+        return None;
+    }
+    // `>=`, not `==`: a state built by hand above the limit is still blocked.
+    match state.rules.board_limit {
+        Some(limit)
+            if state.player(seat).board.len() >= usize::try_from(limit).unwrap_or(usize::MAX) =>
+        {
+            Some(RuleError::BoardFull)
+        }
+        _ => None,
+    }
+}
+
 /// The single legality check, shared by [`apply`] and [`legal_actions`].
 pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleError> {
     if state.winner.is_some() {
@@ -210,9 +232,11 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
     }
     match action {
         Action::Concede => Ok(()),
-        Action::Play { card } => hand_position(state, *card)
-            .map(|_| ())
-            .ok_or(RuleError::CardNotInHand),
+        Action::Play { card } => {
+            // The hand first: an id that is not in it gets `CardNotInHand` whatever the board.
+            hand_position(state, *card).ok_or(RuleError::CardNotInHand)?;
+            play_blocker(state, state.active).map_or(Ok(()), Err)
+        }
         Action::Attack { attacker, target } => {
             // Order of the checks: the attacker, then the target on the opposing board,
             // then the provocation. Every id that is not an opposing creature gets
@@ -383,9 +407,9 @@ fn pay(state: &mut GameState, cost: u32, events: &mut Vec<Event>) {
     }
 }
 
-/// Every action the active player may take: one `Play` per card in hand, hero effects in the
-/// order of the hero's list, then one `Attack` per (attacker, valid target) pair, attackers in
-/// order of summoning and, for each, the opposing hero first and then every creature of the
+/// Every action the active player may take: one `Play` per card in hand (none while the board is
+/// full, `play_blocker`), hero effects in the order of the hero's list, then one
+/// `Attack` per (attacker, valid target) pair, attackers in order of summoning and, for each, the opposing hero first and then every creature of the
 /// opposing board in order (a dead creature is on no board, so it is neither listed as an
 /// attacker nor as a target; own creatures are never targets), then `Concede`. While the
 /// opponent has a creature with provocation, only those creatures are listed as targets (in
