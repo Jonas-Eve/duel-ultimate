@@ -1,6 +1,5 @@
 //! Actions, events and the rules that apply them.
 
-use crate::combat;
 use crate::effects;
 use crate::ruleset::RuleSet;
 use crate::state::{CardInstanceId, GameState, PlayerId, WinReason};
@@ -331,71 +330,13 @@ pub(crate) fn check_exhaustion(state: &mut GameState, events: &mut Vec<Event>) {
 /// untouched: everything is validated before anything is mutated. Never consumes randomness.
 pub fn apply(state: &mut GameState, action: Action) -> Result<Vec<Event>, RuleError> {
     validate(state, &action)?;
-    let player = state.active;
-    match action {
-        Action::Concede => {
-            let winner = player.opponent();
-            state.winner = Some((winner, WinReason::Concede));
-            Ok(vec![Event::GameWon {
-                winner,
-                reason: WinReason::Concede,
-            }])
-        }
-        Action::Attack { attacker, target } => {
-            let index = board_position(state, attacker).ok_or(RuleError::AttackerNotOnBoard)?;
-            let cost = state
-                .player(player)
-                .board
-                .get(index)
-                .map(|c| c.stats.attack_cost)
-                .ok_or(RuleError::AttackerNotOnBoard)?;
-            let mut events = vec![Event::Attacked {
-                player,
-                attacker,
-                cost,
-            }];
-            combat::resolve_damage(state, player, attacker, target, &mut events);
-            combat::bury_dead(state, &mut events);
-            let victim = player.opponent();
-            if state.player(victim).health == 0 {
-                // The game stops here: no time is spent, the token does not move and the
-                // budget stays within 1..=max_time of the (unchanged) active player.
-                state.winner = Some((player, WinReason::HeroDown));
-                events.push(Event::GameWon {
-                    winner: player,
-                    reason: WinReason::HeroDown,
-                });
-                return Ok(events);
-            }
-            pay(state, cost, &mut events);
-            check_exhaustion(state, &mut events);
-            Ok(events)
-        }
-        Action::Play { card, .. } => {
-            let index = hand_position(state, card).ok_or(RuleError::CardNotInHand)?;
-            let creature = state.player_mut(player).hand.remove(index);
-            let cost = creature.stats.cost;
-            state.player_mut(player).board.push(creature);
-            let mut events = vec![Event::Played { player, card, cost }];
-            pay(state, cost, &mut events);
-            check_exhaustion(state, &mut events);
-            Ok(events)
-        }
-        Action::Activate { effect, .. } => {
-            let hero_effect = hero_effect(state, effect)
-                .cloned()
-                .ok_or(RuleError::UnknownEffect)?;
-            let mut events = vec![Event::EffectActivated {
-                player,
-                effect,
-                cost: hero_effect.cost,
-            }];
-            effects::resolve(state, player, &hero_effect.effect, &mut events);
-            pay(state, hero_effect.cost, &mut events);
-            check_exhaustion(state, &mut events);
-            Ok(events)
-        }
+    let used = effects::decode(&action);
+    let mut events = Vec::new();
+    if let effects::Settled::Spent(cost) = effects::resolve(state, &used, &mut events) {
+        pay(state, cost, &mut events);
+        check_exhaustion(state, &mut events);
     }
+    Ok(events)
 }
 
 /// Charges `cost` to the active player and moves the token accordingly.

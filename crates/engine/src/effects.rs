@@ -10,11 +10,12 @@
 //! effect, synthesized for every creature of the board (never a line of data); a creature
 //! declares no effect at this stage.
 
+use crate::combat;
 use crate::rules::{
     Action, Event, Pick, RuleError, Target, board_position, hand_position, hero_effect,
     opposing_board_position, play_blocker, provocation_allows,
 };
-use crate::state::{CardInstanceId, GameState, PlayerId};
+use crate::state::{CardInstanceId, GameState, PlayerId, WinReason};
 use duel_cards::Effect;
 
 /// Where an effect comes from: a card of the active hand, a creature of the active board, or the
@@ -309,28 +310,134 @@ pub(crate) fn applicable(state: &GameState, player: PlayerId, effect: &Effect) -
     }
 }
 
-/// Applies `effect` for `player`, appending what happened to `events`. The caller has
-/// already checked [`applicable`].
-pub(crate) fn resolve(
-    state: &mut GameState,
-    player: PlayerId,
-    effect: &Effect,
-    events: &mut Vec<Event>,
-) {
+/// What an effect does when resolved: the operations of the write side. Built on the fly from an
+/// [`EffectRef`] (never stored); [`Effect`] stays the type of the data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Op {
+    /// Moves up to `count` cards from the pile to the hand.
+    Draw { count: u32 },
+    /// The attack of a creature: damage planned then applied by `combat`.
+    Attack,
+    /// Summons a card of the hand onto the board.
+    Play,
+}
+
+/// The operation of a declared effect: the one place the sugar of the hero's list is normalized.
+pub(crate) fn op_of(effect: &Effect) -> Op {
     match effect {
-        Effect::Draw { count } => {
-            // Draws what is left when the pile is shorter than `count`.
-            let wanted = usize::try_from(*count).unwrap_or(usize::MAX);
-            let side = state.player_mut(player);
-            for _ in 0..wanted {
-                let Some(card) = side.deck.pop() else { break };
-                events.push(Event::Drew {
-                    player,
-                    card: card.id,
-                });
-                side.hand.push(card);
-            }
+        Effect::Draw { count } => Op::Draw { count: *count },
+    }
+}
+
+/// How a resolved use ends: it costs `Spent(cost)` of time (the caller pays, then checks
+/// exhaustion), or it `Ended` the game by itself (no time, the token stays).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Settled {
+    Spent(u32),
+    Ended,
+}
+
+/// Resolves a use `validate` has accepted, by operation, appending what happened to `events`.
+/// Revalidates nothing: an inconsistency (unreachable once validated) is a `debug_assert!`
+/// then a clean exit that changes nothing.
+pub(crate) fn resolve(state: &mut GameState, used: &Use<'_>, events: &mut Vec<Event>) -> Settled {
+    let player = state.active;
+    let Use::Effect {
+        source,
+        effect,
+        choice,
+    } = *used
+    else {
+        let winner = player.opponent();
+        state.winner = Some((winner, WinReason::Concede));
+        events.push(Event::GameWon {
+            winner,
+            reason: WinReason::Concede,
+        });
+        return Settled::Ended;
+    };
+    // The declared effect of the hero, with its operation: (index, cost, op).
+    let declared = match effect {
+        EffectRef::Declared(index) => {
+            hero_effect(state, index).map(|e| (index, e.cost, op_of(&e.effect)))
         }
+        EffectRef::Play | EffectRef::Attack => None,
+    };
+    let op = match effect {
+        EffectRef::Play => Some(Op::Play),
+        EffectRef::Attack => Some(Op::Attack),
+        EffectRef::Declared(_) => declared.map(|(_, _, op)| op),
+    };
+    match (op, source, choice) {
+        (Some(Op::Play), Source::Hand(card), _) => {
+            let Some(index) = hand_position(state, card) else {
+                debug_assert!(false, "validated card in the hand");
+                return Settled::Ended;
+            };
+            let creature = state.player_mut(player).hand.remove(index);
+            let cost = creature.stats.cost;
+            state.player_mut(player).board.push(creature);
+            events.push(Event::Played { player, card, cost });
+            Settled::Spent(cost)
+        }
+        (Some(Op::Draw { count }), Source::Hero, _) => {
+            let (index, cost) = declared.map_or((0, 0), |(index, cost, _)| (index, cost));
+            events.push(Event::EffectActivated {
+                player,
+                effect: index,
+                cost,
+            });
+            draw(state, player, count, events);
+            Settled::Spent(cost)
+        }
+        (Some(Op::Attack), Source::Board(attacker), Choice::Target(target)) => {
+            let Some(cost) = state
+                .player(player)
+                .board
+                .iter()
+                .find(|c| c.id == attacker)
+                .map(|c| c.stats.attack_cost)
+            else {
+                debug_assert!(false, "validated attacker on the board");
+                return Settled::Ended;
+            };
+            events.push(Event::Attacked {
+                player,
+                attacker,
+                cost,
+            });
+            combat::resolve_damage(state, player, attacker, target, events);
+            combat::bury_dead(state, events);
+            if state.player(player.opponent()).health == 0 {
+                // The game stops here: no time is spent, the token does not move and the
+                // budget stays within 1..=max_time of the (unchanged) active player.
+                state.winner = Some((player, WinReason::HeroDown));
+                events.push(Event::GameWon {
+                    winner: player,
+                    reason: WinReason::HeroDown,
+                });
+                return Settled::Ended;
+            }
+            Settled::Spent(cost)
+        }
+        _ => {
+            debug_assert!(false, "a use `validate` accepted always resolves");
+            Settled::Ended
+        }
+    }
+}
+
+/// Draws what is left when the pile is shorter than `count`.
+fn draw(state: &mut GameState, player: PlayerId, count: u32, events: &mut Vec<Event>) {
+    let wanted = usize::try_from(count).unwrap_or(usize::MAX);
+    let side = state.player_mut(player);
+    for _ in 0..wanted {
+        let Some(card) = side.deck.pop() else { break };
+        events.push(Event::Drew {
+            player,
+            card: card.id,
+        });
+        side.hand.push(card);
     }
 }
 
@@ -679,7 +786,6 @@ mod tests {
             dead_attacker: bool,
             hero_riposte: bool,
             concede: bool,
-            hand_over_exhaustion: bool,
         }
         let mut seen = Seen::default();
         for seed in 0..60u64 {
@@ -725,10 +831,6 @@ mod tests {
                         .any(|e| matches!(e, Event::HeroRiposted { .. }));
                     seen.dead_attacker |= events.iter().any(|e| matches!(e, Event::Riposted { .. }))
                         && events.iter().any(|e| matches!(e, Event::Died { creature, .. } if Some(*creature) == attacker));
-                    seen.hand_over_exhaustion |= won(WinReason::Exhaustion)
-                        && events
-                            .iter()
-                            .any(|e| matches!(e, Event::ActivePlayerChanged { .. }));
                 }
                 let playable: Vec<Action> = legal
                     .into_iter()
@@ -745,7 +847,6 @@ mod tests {
         assert!(seen.dead_attacker, "no attacker dead of a riposte");
         assert!(seen.hero_riposte, "no hero riposte");
         assert!(seen.concede, "no concession");
-        let _ = seen.hand_over_exhaustion;
     }
 
     #[test]
