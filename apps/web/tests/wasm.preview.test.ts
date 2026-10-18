@@ -27,6 +27,7 @@ interface Preview {
   hands_over: boolean;
   budget_after: number | null;
   ends_game: { winner: string; reason: string } | null;
+  attacker_destroyed: boolean;
 }
 
 function newGame(seed = 1) {

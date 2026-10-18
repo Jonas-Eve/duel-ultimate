@@ -101,6 +101,10 @@ export const fr = {
   heroAsTarget: (name: string) => `le héros ${name}`,
   confirm: "Confirmer",
   cancel: "Annuler",
+  /** Label of a warning in the attack sheet, followed by " :" and the text. */
+  attention: "Attention",
+  /** The attack destroys the attacker (riposte of the hero or of a creature): neutral, no number. */
+  attackerDestroyed: "La créature qui attaque sera détruite.",
   emptyHand: "Aucune carte en main",
 
   /** Visible caption above the other camp's hand (two camps): the region itself is named by `campRegion`. */
@@ -165,6 +169,7 @@ export const fr = {
       `${capital(named(card))} subit ${damage(amount)} (PV restants : ${left}).`,
     riposted: (card: string | null, amount: number, left: number) =>
       `${capital(named(card))} subit ${damage(amount)} de riposte (PV restants : ${left}).`,
+    heroRiposted: (hero: string, card: string | null) => `Le héros ${hero} riposte et détruit ${named(card)}.`,
     died: (card: string | null) => `${capital(named(card))} meurt.`,
     handPasses: (w: Who, budget: number | null) => `La main passe à ${w.tonic}${budget === null ? "" : ` (temps ${budget})`}.`,
     handKept: (w: Who, budget: number) => `${w.subject} ${verb(w, "garde", "gardes")} la main (temps restant ${budget}).`,

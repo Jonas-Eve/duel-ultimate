@@ -8,6 +8,7 @@ const p = (action: Action, over: Partial<ActionPreview> = {}): ActionPreview => 
   hands_over: false,
   budget_after: 2,
   ends_game: null,
+  attacker_destroyed: false,
   ...over,
 });
 const hero = (attacker: number) => p({ attack: { attacker, target: "hero" } });

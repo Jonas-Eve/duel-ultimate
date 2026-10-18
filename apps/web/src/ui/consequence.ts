@@ -2,6 +2,7 @@
 // computes a cost, a hand-over or an end of game (the engine's time rule is the single one).
 import type { ActionPreview, GameResult, Seat } from "../engine/types";
 import { isAttack } from "../engine/types";
+import { fr } from "./fr";
 
 export interface ConsequenceLabels {
   /** "Tu gagnes" / "L'ordinateur gagne". */
@@ -36,4 +37,13 @@ export function describeConsequence(preview: ActionPreview, labels: ConsequenceL
     lines.push(labels.timeLeft(preview.budget_after));
   }
   return lines;
+}
+
+/**
+ * Warnings to show beside the consequence, read ONLY from the engine's preview (never a rule of
+ * ours): `attacker_destroyed` is the engine's own fact. Separate from [`describeConsequence`] so
+ * the cost/time lines keep their shape.
+ */
+export function describeWarnings(preview: ActionPreview): string[] {
+  return preview.attacker_destroyed ? [fr.attackerDestroyed] : [];
 }

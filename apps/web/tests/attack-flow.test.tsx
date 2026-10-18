@@ -711,7 +711,11 @@ describe.each(["computer", "two-camps"] as const)("the hero's riposte, %s", (mod
       expect(side.you.board.some((x) => x.id === id)).toBe(false);
       expect(side.you.discard.some((x) => x.id === id)).toBe(true);
       setCamps(after);
-      if (mode === "computer") expect(myTiles().length).toBe(boardSize - 1 + (after.views.One!.you.board.length - (boardSize - 1)));
+      if (mode === "computer") {
+        // The tile left the board: the DOM shows exactly the creatures the engine's view lists.
+        expect(within(board(true)).queryAllByRole("button")).toHaveLength(after.views.One!.you.board.length);
+        expect(boardSize).toBeGreaterThanOrEqual(1);
+      }
 
       // The destroyed card is in the public discard of its owner, shown "Détruite".
       const ownGroup = screen.getByRole("group", { name: mode === "computer" ? "Ton héros" : `${camp(seat)} : héros` });
@@ -752,8 +756,9 @@ describe.each(["computer", "two-camps"] as const)("the hero's riposte, %s", (mod
       await user.click(within(dialog).getByRole("button", { name: "Confirmer" }));
       expect(c.getSnapshot().phase).toBe("over");
       // The attacker is alive and no `hero_riposted` was recorded for it.
-      const events = c.getSnapshot().records.flatMap((r) => r.events);
-      expect(events.some((e) => "hero_riposted" in e && e.hero_riposted.creature === hit.action && false)).toBe(false);
+      const records = c.getSnapshot().records;
+      const events = records[records.length - 1].events;
+      expect(events.some((e) => "hero_riposted" in e || "died" in e)).toBe(false);
       expect(events[events.length - 1]).toEqual({ game_won: expect.objectContaining({ reason: "hero_down" }) });
     } finally {
       campNames = null;
@@ -764,7 +769,7 @@ describe.each(["computer", "two-camps"] as const)("the hero's riposte, %s", (mod
 describe("the warning on an attack on a creature (#170)", () => {
   test("an attack on a creature whose riposte would kill the attacker carries the same warning, with the default rules", async () => {
     const dying = (p: ActionPreview) => isAttack(p.action) && p.action.attack.target !== "hero" && p.attacker_destroyed;
-    const g = await findGame("bulwark", "rush", summoner, (s) => s.legal.some(dying), 80);
+    const g = await findGame("rush", "rush", summoner, (s) => s.legal.some(dying), 80);
     const { user } = mountGame(g.c);
     const s = g.c.getSnapshot();
     const p = s.legal.find(dying)!;

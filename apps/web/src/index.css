@@ -173,6 +173,8 @@ p { margin: 6px 0; }
 .card-detail-attack { display: flex; flex-direction: column; gap: 4px; }
 .card-detail-effect-button { width: 100%; min-height: 44px; text-align: left; font-size: 14px; }
 .card-detail-effect-button[aria-disabled="true"] { background: var(--surface); color: var(--muted); border: 2px dashed var(--border); cursor: not-allowed; }
+.attack-warning { margin: 0; padding: 6px 10px; border-inline-start: 6px solid var(--danger); background: var(--danger-bg); }
+.attack-warning-label { font-weight: 800; }
 .attack-hint { margin: 0; font-size: 0.9375rem; font-weight: 700; }
 .btn-play { width: 100%; min-height: 48px; font-weight: 700; }
 .btn-play[aria-disabled="true"] { background: var(--surface); color: var(--muted); border: 2px dashed var(--border); cursor: not-allowed; }

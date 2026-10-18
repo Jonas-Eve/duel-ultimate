@@ -8,7 +8,7 @@ import { deriveAttackState, previewOn } from "./attack-state";
 import { Board } from "./Board";
 import { CardDetailSheet } from "./CardDetailSheet";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { describeConsequence } from "./consequence";
+import { describeConsequence, describeWarnings } from "./consequence";
 import { EndScreen } from "./EndScreen";
 import { ErrorBanner } from "./ErrorBanner";
 import { FatalScreen } from "./FatalScreen";
@@ -287,6 +287,7 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
       {pending !== null && pendingPreview !== undefined && (
         <AttackSheet
           summary={fr.attackSummary(attackerName, targetName(pending))}
+          warnings={describeWarnings(pendingPreview)}
           lines={describeConsequence(pendingPreview, labels)}
           onCancel={() => setPending(null)}
           onConfirm={() => {
