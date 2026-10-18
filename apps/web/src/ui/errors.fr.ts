@@ -14,6 +14,9 @@ export const ERROR_TEXT: Record<ErrorCode, string> = {
   too_many_picks: "Cette action contient trop de choix : huit au plus sont acceptés.",
   invalid_picks: "Cette action n'attend pas ces choix : retirez-les puis réessayez.",
   source_not_on_board: "Cette source n'est pas une créature de votre plateau.",
+  attack_force_zero: "Cette unité ne peut pas attaquer : sa force est nulle.",
+  // Temporary code (#208): removed with the effects of #129, #130 and #131.
+  unsupported_effect: "Cette carte utilise un effet que le jeu ne gère pas encore.",
   invalid_setup: "Les données de la partie sont invalides. Rechargez la page.",
   invalid_json: "La demande n'a pas pu être lue. Rechargez la page et recommencez.",
   unknown_deck: "Ce deck n'existe pas. Choisissez un deck de la liste.",
