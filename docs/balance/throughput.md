@@ -63,6 +63,7 @@ Le seuil n'est épinglé dans aucun test et aucune mesure de débit ne tourne en
 | 2026-10-17 | `e798210` | `--hero-riposte off --board-limit none`, `starter@1.1.0`, graine 1 | Intel Xeon 2,10 GHz, 4 coeurs (`nproc`), rustc 1.97.0 (2026-07-07), conteneur Linux | 14 151,4 (13 690,3 - 14 906,7) | 776 602,2 | 11 321,1 parties/s |
 | 2026-10-17 | `f21f1c5` | idem, **nouveau format de rapport** (#153, histogramme des durées) | idem (Intel Xeon 2,10 GHz, 4 coeurs, rustc 1.97.0) | 14 136,9 (13 402,5 - 14 778,1) | 775 810,0 | **non gardante** (informative) |
 | 2026-10-18 | `aa1fdbc` | **`--hero-riposte on --board-limit 5` (règles par défaut, `standard`)**, `starter@1.1.0`, graine 1 | Intel Xeon 2,10 GHz, 4 coeurs (`nproc`), rustc 1.97.0 (2026-07-07), conteneur Linux | 15 557,6 (14 200,8 - 15 605,9) | 931 366,1 | **12 446,1 parties/s** (gardante sous les règles par défaut) |
+| 2026-10-18 | `4aa050e` | **`--hero-riposte on --board-limit 5` (règles par défaut)**, `starter@1.1.0`, graine 1, tête de #128 (tranche a, tâche 7) | Intel Xeon 2,10 GHz, 4 coeurs (`nproc`), rustc 1.97.0 (2026-07-07), conteneur Linux | 15 317,4 (15 042,8 - 16 904,0) | 916 988,0 | **12 446,1 parties/s** (gardante : c'est la ligne qui garde #131, seuil inchangé) |
 
 Détail de la mesure du 2026-10-17 : 6 passes de 30 000 parties (1 646 347 actions chacune), la
 première écartée ; passes retenues en parties/s : 14 151,4 ; 13 954,7 ; 14 906,7 ; 13 690,3 ;
@@ -93,6 +94,18 @@ Charge moyenne de 0,8 sur 4 coeurs avant et après (machine essentiellement inac
 fois, exécution monocoeur). La médiane est à 109,9 % de celle de `e798210` : une seule mesure, dans une autre session (même classe de machine)
 et un autre jour, **ne dit rien d'un gain** ; elle fixe seulement le seuil sous les nouveaux défauts.
 
+Ligne `4aa050e` (**gardante**, #186, clôture de #128 tranche a ; le seuil reste celui de `aa1fdbc`, **12 446,1 parties/s**,
+et c'est contre cette ligne que #131 compare) : même commande que `aa1fdbc`, **1 795 973 actions** par passe (identique :
+les parties n'ont pas changé). Base `ac409e4` (avant #128) **remesurée dans la même session, passes alternées
+base/candidat** (worktree jetable), 1 passe de chauffe par côté écartée puis 5 passes. Candidat, en parties/s : 15 042,8 ;
+16 904,0 ; 15 230,5 ; 15 317,4 ; 16 214,8 ; en actions/s : 900 548,4 ; 1 011 969,5 ; 911 784,4 ; 916 988,0 ; 970 712,2.
+Base, en parties/s : 14 390,3 ; 15 090,9 ; 15 409,9 ; 15 939,5 ; 15 757,5 (médiane 15 409,9, min-max 14 390,3 - 15 939,5).
+Les **deux conditions** tiennent : médiane du candidat 15 317,4 >= 12 446,1, et >= 0,8 x 15 409,9 = 12 327,9 ; le candidat
+est à 99,4 % de la médiane de la base (dans la dispersion d'environ 10 %, aucun écart mesurable). Charge moyenne d'environ
+1,7 sur 4 coeurs pendant la session (exécution monocoeur). Les commits qui suivent `4aa050e` ne changent que de la documentation : le code de production mesuré est celui de la tête.
+Les rapports du candidat et de la base sont identiques octet pour octet (`cmp`) sur `20 --seed 1`,
+`30 --seed 2 --policy random,greedy`, `1000 --seed 0`, `200 --set fixture --seed 7`, le lot gardant et le lot glouton.
+
 ## Politique gloutonne (`--policy greedy`, #160)
 
 Série **distincte** de celle de `random` ci-dessus : même protocole, autre politique, autre ordre de
@@ -115,6 +128,7 @@ target/release/duel-simulator 1000 --set starter@1.1.0 --seed 1 --hero-riposte o
 | Date | SHA | Règles (options explicites) | Machine | Parties/s (médiane, min-max) | Actions/s (médiane) | Seuil |
 |---|---|---|---|---|---|---|
 | 2026-10-18 | `7124e99` | `--hero-riposte off --board-limit none`, `starter@1.1.0`, graine 1, `--policy greedy`, 1000 parties/matchup | Intel Xeon 2,10 GHz, 4 coeurs (`nproc`), rustc 1.97.0 (2026-07-07), conteneur Linux | 454,7 (393,7 - 470,6) | 16 380,2 (14 184,3 - 16 953,6) | aucun |
+| 2026-10-18 | `4aa050e` | idem (`--hero-riposte off --board-limit none`, `--policy greedy`, 1000 parties/matchup), **informative** | idem (Intel Xeon 2,10 GHz, 4 coeurs, rustc 1.97.0) | 444,7 (436,5 - 455,9) | 16 022,9 (15 726,0 - 16 425,7) | aucun |
 
 Détail : passe de chauffe écartée à 457,7 parties/s ; passes retenues en parties/s : 393,7 ; 456,0 ;
 435,4 ; 454,7 ; 470,6 ; en actions/s : 14 184,3 ; 16 427,2 ; 15 685,3 ; 16 380,2 ; 16 953,6. La
@@ -125,3 +139,7 @@ observée est d'environ 18 % : lire la valeur comme un ordre de grandeur.
 
 La ligne « nouveaux défauts de #127 » (`aa1fdbc`, `standard`) est dans le tableau « Mesures » ci-dessus,
 mesurée avec le même protocole par #173 : c'est elle qui garde #128 puis #131.
+
+Mesure `4aa050e` (#186, **informative, sans seuil**) : 108 083 actions par passe (identique), passe de chauffe écartée à
+442,8 parties/s, passes retenues en parties/s : 455,9 ; 444,7 ; 436,5 ; 438,8 ; 453,8. Plafond de 10 minutes : le rapport de
+référence (`2000` parties, `--policy random,greedy`, règles par défaut) tourne en environ 52 s sur cette machine, plafond tenu.

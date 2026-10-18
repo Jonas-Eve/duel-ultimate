@@ -1366,9 +1366,6 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     })
 }
 
-/// `(winner, reason, number of events, FNV-1a of the events as JSON)` per seed 0..20,
-/// recorded on the engine as merged by S1, before creatures became attackable. Attacking a
-/// hero must keep producing exactly these games.
 /// The stats of a card, to edit them in place (`CardSpec` has a single variant for now).
 fn stats_mut(spec: &mut CardSpec) -> &mut CreatureStats {
     match spec {
@@ -1376,6 +1373,9 @@ fn stats_mut(spec: &mut CardSpec) -> &mut CreatureStats {
     }
 }
 
+/// `(winner, reason, number of events, FNV-1a of the events as JSON)` per seed 0..20,
+/// recorded on the engine as merged by S1, before creatures became attackable. Attacking a
+/// hero must keep producing exactly these games.
 const S1_GOLDEN: [(PlayerId, WinReason, usize, u64); 20] = [
     (PlayerId::One, WinReason::HeroDown, 178, 0x3b151a1a9605c44e),
     (PlayerId::One, WinReason::HeroDown, 177, 0x8b94d569b261925e),

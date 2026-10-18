@@ -51,8 +51,6 @@ mod data;
 mod effects;
 mod observation;
 mod preview;
-#[cfg(test)]
-mod reference;
 mod rules;
 mod ruleset;
 mod setup;

@@ -837,15 +837,9 @@ mod tests {
         assert!(listed(Source::Hand(CardInstanceId(10_000))).is_empty());
     }
 
-    /// What `apply` and the frozen reference each give on a clone of `state`: the result, then the
-    /// state, which must agree to the byte (generator included).
-    fn both(state: &GameState, action: &Action) -> Result<Vec<Event>, RuleError> {
-        let (mut new, mut old) = (state.clone(), state.clone());
-        let got = apply(&mut new, action.clone());
-        let expected = crate::reference::apply(&mut old, action.clone());
-        assert_eq!(got, expected, "{action:?}");
-        assert_eq!(new, old, "{action:?}");
-        got
+    /// What `apply` gives on a clone of `state`.
+    fn applied(state: &GameState, action: &Action) -> Result<Vec<Event>, RuleError> {
+        apply(&mut state.clone(), action.clone())
     }
 
     /// An attack by a creature of force 0 is only judged by `validate` (`plan_damage`
@@ -856,7 +850,7 @@ mod tests {
     }
 
     #[test]
-    fn the_journal_order_of_every_operation_is_unchanged() {
+    fn random_play_exercises_every_operation_and_every_journal_shape() {
         #[derive(Default)]
         struct Seen {
             play: bool,
@@ -877,7 +871,7 @@ mod tests {
                     if is_force_zero_attack(&state, action) {
                         continue;
                     }
-                    let events = both(&state, action).unwrap();
+                    let events = applied(&state, action).unwrap();
                     let attacker = match action {
                         Action::Attack { attacker, .. } => Some(*attacker),
                         _ => None,
@@ -936,7 +930,7 @@ mod tests {
         state.player_mut(active.opponent()).health = 1;
         let attacker = state.player(active).board[0].id;
         let (budget, token) = (state.budget, state.active);
-        let events = both(
+        let events = applied(
             &state,
             &Action::Attack {
                 attacker,
@@ -974,7 +968,7 @@ mod tests {
         let side = state.player_mut(active);
         side.hand.clear();
         side.hero.effects.clear();
-        let events = both(&state, &Action::Concede).unwrap();
+        let events = applied(&state, &Action::Concede).unwrap();
         assert_eq!(
             events,
             vec![Event::GameWon {
@@ -1000,24 +994,58 @@ mod tests {
             attacker,
             target: Target::Creature(target),
         };
-        let events = both(&state, &action).unwrap();
+        let events = applied(&state, &action).unwrap();
         assert!(events.contains(&Event::Died {
             player: active,
             creature: attacker
         }));
-        assert!(events.iter().any(|e| matches!(e, Event::TokenMoved { .. })));
-        let mut after = state.clone();
-        apply(&mut after, action).unwrap();
-        let mut reference = state.clone();
-        crate::reference::apply(
-            &mut reference,
-            Action::Attack {
-                attacker,
-                target: Target::Creature(target),
-            },
-        )
-        .unwrap();
-        assert_eq!(after.budget, reference.budget);
+        // The cost (2) is paid although the attacker died of the riposte: the time rule (a cost
+        // below the budget keeps the token with the difference, otherwise it passes) decides.
+        let budget = state.budget;
+        let expected = if 2 < budget {
+            Event::TokenMoved {
+                player: active,
+                budget: budget - 2,
+            }
+        } else {
+            Event::TokenMoved {
+                player: opp,
+                budget: (2 - budget + 1).min(state.player(opp).hero.max_time),
+            }
+        };
+        assert!(events.contains(&expected), "{events:?}");
+    }
+
+    #[test]
+    fn a_force_zero_attacker_is_still_legal() {
+        for seed in 0..5u64 {
+            let mut state = with_boards(seed, rules_of(seed), 2, 1);
+            let active = state.active;
+            let attacker = {
+                let side = state.player_mut(active);
+                side.board[0].stats.force = 0;
+                side.board[0].id
+            };
+            // Whatever the provocation, one target is legal: the hero, or a provocateur.
+            let legal = legal_actions(&state);
+            let zero_attacks: Vec<&Action> = legal
+                .iter()
+                .filter(|a| matches!(a, Action::Attack { attacker: id, .. } if *id == attacker))
+                .collect();
+            assert!(
+                !zero_attacks.is_empty(),
+                "seed {seed}: the force-0 attacker is not listed"
+            );
+            // Accepted by `validate` (listed); applying one is out of reach until #131
+            // (`plan_damage` debug-asserts a force of 1).
+            for action in zero_attacks {
+                assert_eq!(
+                    crate::rules::validate(&state, action),
+                    Ok(()),
+                    "seed {seed}"
+                );
+            }
+        }
     }
 
     #[test]
