@@ -45,6 +45,13 @@ impl<'a> Observation<'a> {
         &self.actions
     }
 
+    /// The legal actions of [`actions`](Self::actions), handed over without a copy: the vector
+    /// [`of`](Self::of) already built. It gives nothing more than `actions()` (the fields stay
+    /// private, there is still no `Deref` and no `Clone`).
+    pub fn into_actions(self) -> Vec<Action> {
+        self.actions
+    }
+
     /// The seat's own view of the game (its hand in full, the opponent's hand and both piles
     /// as counts), computed on each call.
     pub fn view(&self) -> PlayerView {
@@ -54,8 +61,8 @@ impl<'a> Observation<'a> {
     /// The preview of the legal action at index `i` of [`actions`](Self::actions) (what it costs
     /// and causes, hidden draws excluded); `None` out of range. One clone per call.
     pub fn preview(&self, i: usize) -> Option<ActionPreview> {
-        let action = *self.actions.get(i)?;
-        let run = dry_run(self.state, action);
+        let action = self.actions.get(i)?.clone();
+        let run = dry_run(self.state, action.clone());
         Some(preview_of(
             action,
             run.as_ref().map(|(_, events)| events.as_slice()),
@@ -68,9 +75,9 @@ impl<'a> Observation<'a> {
     /// Should `apply` refuse the action on the clone (an internal inconsistency), the outcome has
     /// no consequence: an empty preview and the unchanged view.
     pub fn outcome(&self, i: usize) -> Option<ActionOutcome> {
-        let action = *self.actions.get(i)?;
+        let action = self.actions.get(i)?.clone();
         let seat = self.seat();
-        let outcome = match dry_run(self.state, action) {
+        let outcome = match dry_run(self.state, action.clone()) {
             Some((after, events)) => ActionOutcome {
                 preview: preview_of(action, Some(&events)),
                 view_after: outcome_view(&after, seat, &drawn_ids(&events, seat)),

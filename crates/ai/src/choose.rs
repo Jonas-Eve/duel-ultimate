@@ -28,7 +28,7 @@ pub fn choose(
     let index = policy.choose(&obs, rng);
     obs.actions()
         .get(index)
-        .copied()
+        .cloned()
         .ok_or(AiError::IndexOutOfRange {
             index,
             len: obs.actions().len(),

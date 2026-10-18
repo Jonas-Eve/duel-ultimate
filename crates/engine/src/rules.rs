@@ -8,16 +8,52 @@ use crate::time::{self, Spend};
 use duel_cards::HeroEffect;
 use serde::{Deserialize, Serialize};
 
+/// The most `picks` an [`Action`] may carry; the engine refuses more with
+/// [`RuleError::TooManyPicks`], before reading the state. The bound lives in `validate`, not in
+/// the deserializer, so that the refusal keeps a stable code (a bound in the deserializer would
+/// surface as `invalid_json`). The input of the WASM binding is capped at 1 MiB before any
+/// analysis, so a list is at most about 70 000 elements long when it reaches the engine: bounded,
+/// harmless, never a reason to cap it earlier.
+pub const MAX_PICKS: usize = 8;
+
+/// A choice carried by an [`Action`]: the hero of a seat or a creature in play (untrusted, judged
+/// by the engine). Distinct from [`Target`]: a spell may aim at the **own** hero, while
+/// `Target::Hero` always means the opposing one. JSON: `{"hero":"One"}` or `{"creature":7}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Pick {
+    Hero(PlayerId),
+    Creature(CardInstanceId),
+}
+
+/// What a player may do. The contract is additive: the JSON of an action without `picks` and
+/// `source` is what it always was (both are omitted when empty). No legal action carries them at
+/// this stage; only a hostile caller sends them, and `validate` refuses them with
+/// `too_many_picks`, `invalid_picks` or `source_not_on_board`.
+///
+/// Architecture decision: the normal attack (`Attack { attacker, target }`, [`Target`]) is frozen.
+/// A future special attack is written `Activate { source: Some(attacker), effect: k, picks:
+/// [target] }`. `source` absent means the hero.
+///
+/// `Action` is not `Copy` (the list of picks is free): clone it when it must be kept.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
     /// Summons a creature of the active player's hand (untrusted id, validated by the engine).
     Play {
         card: CardInstanceId,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        picks: Vec<Pick>,
     },
-    /// Activates the active hero's effect at this index of its list (untrusted input).
+    /// Activates an effect: the active hero's effect at this index of its list when `source` is
+    /// absent, else an effect of the creature `source` of the active player's board (untrusted
+    /// input).
     Activate {
         effect: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<CardInstanceId>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        picks: Vec<Pick>,
     },
     /// Attacks with a creature of the active player's board (untrusted id, validated).
     Attack {
@@ -25,6 +61,25 @@ pub enum Action {
         target: Target,
     },
     Concede,
+}
+
+impl Action {
+    /// `Play { card }`: summons a creature of the active player's hand.
+    pub fn play(card: CardInstanceId) -> Action {
+        Action::Play {
+            card,
+            picks: Vec::new(),
+        }
+    }
+
+    /// `Activate { effect }`: activates the active hero's effect at this index.
+    pub fn activate(effect: u32) -> Action {
+        Action::Activate {
+            effect,
+            source: None,
+            picks: Vec::new(),
+        }
+    }
 }
 
 /// What an attack aims at: the opposing hero or a creature of the opposing board.
@@ -139,6 +194,12 @@ pub enum RuleError {
     TargetForbiddenByProvocation,
     #[error("the active player's board is full")]
     BoardFull,
+    #[error("an action carries too many picks")]
+    TooManyPicks,
+    #[error("this action does not take these picks")]
+    InvalidPicks,
+    #[error("the source is not a creature of the active player's board")]
+    SourceNotOnBoard,
 }
 
 impl RuleError {
@@ -153,6 +214,9 @@ impl RuleError {
             Self::TargetNotOnBoard => "target_not_on_board",
             Self::TargetForbiddenByProvocation => "target_forbidden_by_provocation",
             Self::BoardFull => "board_full",
+            Self::TooManyPicks => "too_many_picks",
+            Self::InvalidPicks => "invalid_picks",
+            Self::SourceNotOnBoard => "source_not_on_board",
         }
     }
 }
@@ -230,11 +294,20 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
     if state.winner.is_some() {
         return Err(RuleError::GameOver);
     }
+    // The size of the list first, before any read of the state: the same refusal whatever
+    // card or source it names, so nothing about a hidden zone leaks.
+    if picks_of(action).len() > MAX_PICKS {
+        return Err(RuleError::TooManyPicks);
+    }
     match action {
         Action::Concede => Ok(()),
-        Action::Play { card } => {
+        Action::Play { card, picks } => {
             // The hand first: an id that is not in it gets `CardNotInHand` whatever the board.
             hand_position(state, *card).ok_or(RuleError::CardNotInHand)?;
+            // No summoning takes a choice at this stage.
+            if !picks.is_empty() {
+                return Err(RuleError::InvalidPicks);
+            }
             play_blocker(state, state.active).map_or(Ok(()), Err)
         }
         Action::Attack { attacker, target } => {
@@ -252,14 +325,40 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
                 Err(RuleError::TargetForbiddenByProvocation)
             }
         }
-        Action::Activate { effect } => {
+        Action::Activate {
+            effect,
+            source: None,
+            picks,
+        } => {
             let hero_effect = hero_effect(state, *effect).ok_or(RuleError::UnknownEffect)?;
+            // No hero effect takes a choice at this stage.
+            if !picks.is_empty() {
+                return Err(RuleError::InvalidPicks);
+            }
             if effects::applicable(state, state.active, &hero_effect.effect) {
                 Ok(())
             } else {
                 Err(RuleError::EffectNotApplicable)
             }
         }
+        Action::Activate {
+            source: Some(source),
+            ..
+        } => {
+            // One code for every id that is not a creature of my board (hand, pile, discard,
+            // opposing board, unknown): no hidden zone is told apart.
+            board_position(state, *source).ok_or(RuleError::SourceNotOnBoard)?;
+            // A creature declares no effect at this stage.
+            Err(RuleError::UnknownEffect)
+        }
+    }
+}
+
+/// The picks an action carries: none for `Attack` and `Concede`.
+fn picks_of(action: &Action) -> &[Pick] {
+    match action {
+        Action::Play { picks, .. } | Action::Activate { picks, .. } => picks,
+        Action::Attack { .. } | Action::Concede => &[],
     }
 }
 
@@ -273,10 +372,10 @@ pub(crate) fn validate(state: &GameState, action: &Action) -> Result<(), RuleErr
 fn candidates(state: &GameState) -> Vec<Action> {
     let side = state.player(state.active);
     let opposing = state.player(state.active.opponent());
-    let plays = side.hand.iter().map(|c| Action::Play { card: c.id });
+    let plays = side.hand.iter().map(|c| Action::play(c.id));
     let effects = (0..side.hero.effects.len())
         .filter_map(|i| u32::try_from(i).ok())
-        .map(|effect| Action::Activate { effect });
+        .map(Action::activate);
     let attacks = side.board.iter().flat_map(|attacker| {
         std::iter::once(Target::Hero)
             .chain(opposing.board.iter().map(|c| Target::Creature(c.id)))
@@ -357,7 +456,7 @@ pub fn apply(state: &mut GameState, action: Action) -> Result<Vec<Event>, RuleEr
             check_exhaustion(state, &mut events);
             Ok(events)
         }
-        Action::Play { card } => {
+        Action::Play { card, .. } => {
             let index = hand_position(state, card).ok_or(RuleError::CardNotInHand)?;
             let creature = state.player_mut(player).hand.remove(index);
             let cost = creature.stats.cost;
@@ -367,7 +466,7 @@ pub fn apply(state: &mut GameState, action: Action) -> Result<Vec<Event>, RuleEr
             check_exhaustion(state, &mut events);
             Ok(events)
         }
-        Action::Activate { effect } => {
+        Action::Activate { effect, .. } => {
             let hero_effect = hero_effect(state, effect)
                 .cloned()
                 .ok_or(RuleError::UnknownEffect)?;
@@ -490,7 +589,7 @@ mod tests {
                 let legal = legal_actions(&state);
                 for action in every_attack(&state) {
                     let mut clone = state.clone();
-                    match apply(&mut clone, action) {
+                    match apply(&mut clone, action.clone()) {
                         Ok(_) => assert!(
                             legal.contains(&action),
                             "seed {seed}: {action:?} applies but is not listed"
@@ -517,8 +616,8 @@ mod tests {
                 }
                 let playable: Vec<Action> = legal
                     .iter()
-                    .copied()
-                    .filter(|a| *a != Action::Concede)
+                    .filter(|a| **a != Action::Concede)
+                    .cloned()
                     .collect();
                 // A living creature always has a legal attack, even when only the opposing
                 // provocateurs may be targeted: provocation never exhausts a player.
@@ -529,7 +628,7 @@ mod tests {
                     );
                 }
                 assert!(!playable.is_empty(), "seed {seed}: exhausted yet not over");
-                let action = playable[policy.random_range(0..playable.len())];
+                let action = playable[policy.random_range(0..playable.len())].clone();
                 if let Action::Attack {
                     target: Target::Creature(victim),
                     ..
@@ -543,7 +642,7 @@ mod tests {
                     attacks_on_provocateurs += 1;
                 }
                 let before = potential(&state);
-                apply(&mut state, action).unwrap();
+                apply(&mut state, action.clone()).unwrap();
                 assert!(
                     potential(&state) < before,
                     "seed {seed}: Φ did not fall on {action:?}"

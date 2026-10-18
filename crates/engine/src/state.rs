@@ -204,7 +204,7 @@ mod tests {
         state.one.deck.clear();
         state.one.hand.truncate(1);
         let card = state.one.hand[0].id;
-        apply(&mut state, Action::Play { card }).unwrap();
+        apply(&mut state, Action::play(card)).unwrap();
         assert_eq!(state.winner(), None);
         assert_eq!(state.active(), PlayerId::One);
         assert!(legal_actions(&state).contains(&Action::Attack {
@@ -220,7 +220,7 @@ mod tests {
         let creature = state.two.hand.remove(0);
         state.two.hand.clear();
         state.two.board.push(creature);
-        apply(&mut state, Action::Activate { effect: 0 }).unwrap();
+        apply(&mut state, Action::activate(0)).unwrap();
         assert_eq!(state.active(), PlayerId::Two);
         assert_eq!(state.winner(), None);
     }
@@ -230,7 +230,7 @@ mod tests {
         let mut state = running(vec![draw(8, 1)]);
         state.two.deck.clear();
         state.two.hand.clear();
-        let events = apply(&mut state, Action::Activate { effect: 0 }).unwrap();
+        let events = apply(&mut state, Action::activate(0)).unwrap();
         assert_eq!(state.winner(), Some((PlayerId::One, WinReason::Exhaustion)));
         assert_eq!(state.active(), PlayerId::Two);
         let tail: Vec<_> = events.iter().rev().take(3).rev().cloned().collect();
@@ -519,20 +519,20 @@ mod tests {
         state.one.deck.clear();
         let before = state.clone();
         assert_eq!(
-            apply(&mut state, Action::Activate { effect: 0 }),
+            apply(&mut state, Action::activate(0)),
             Err(RuleError::EffectNotApplicable)
         );
         assert_eq!(state, before);
-        assert!(!legal_actions(&state).contains(&Action::Activate { effect: 0 }));
+        assert!(!legal_actions(&state).contains(&Action::activate(0)));
     }
 
     #[test]
     fn apply_never_consumes_the_generator() {
         let mut state = running(vec![draw(1, 1), draw(9, 3)]);
         let rng_before = state.rng.clone();
-        apply(&mut state, Action::Activate { effect: 1 }).unwrap();
+        apply(&mut state, Action::activate(1)).unwrap();
         assert_eq!(state.rng, rng_before);
-        let _ = apply(&mut state, Action::Activate { effect: 77 });
+        let _ = apply(&mut state, Action::activate(77));
         assert_eq!(state.rng, rng_before);
     }
 
@@ -564,12 +564,12 @@ mod tests {
                 let legal = legal_actions(&state);
                 let playable: Vec<_> = legal
                     .iter()
-                    .copied()
-                    .filter(|a| *a != Action::Concede)
+                    .filter(|a| **a != Action::Concede)
+                    .cloned()
                     .collect();
                 let pick = playable
                     .get(policy.next_u32() as usize % playable.len().max(1))
-                    .copied()
+                    .cloned()
                     .unwrap_or(Action::Concede);
                 apply(&mut state, pick).unwrap();
                 steps += 1;
@@ -600,7 +600,7 @@ mod tests {
                     .collect();
                 let pick = playable
                     .get(policy.next_u32() as usize % playable.len().max(1))
-                    .copied()
+                    .cloned()
                     .unwrap_or(Action::Concede);
                 match pick {
                     Action::Attack {
@@ -611,7 +611,7 @@ mod tests {
                     _ => {}
                 }
                 let before = potential(&state);
-                let events = apply(&mut state, pick).unwrap();
+                let events = apply(&mut state, pick.clone()).unwrap();
                 deaths += events
                     .iter()
                     .filter(|e| matches!(e, Event::Died { .. }))
@@ -672,7 +672,7 @@ mod tests {
                     }
                     let pick = playable
                         .get(policy.next_u32() as usize % playable.len().max(1))
-                        .copied()
+                        .cloned()
                         .unwrap_or(Action::Concede);
                     if matches!(
                         pick,
@@ -684,7 +684,7 @@ mod tests {
                         hero_hits += 1;
                     }
                     let before = potential(&state);
-                    let events = apply(&mut state, pick).unwrap();
+                    let events = apply(&mut state, pick.clone()).unwrap();
                     deaths += events
                         .iter()
                         .filter(|e| matches!(e, Event::Died { .. }))
@@ -779,7 +779,7 @@ mod tests {
         state.two.hand.clear();
         state.one.hand[0].stats.cost = 8;
         let card = state.one.hand[0].id;
-        let events = apply(&mut state, Action::Play { card }).unwrap();
+        let events = apply(&mut state, Action::play(card)).unwrap();
         assert_eq!(state.winner(), Some((PlayerId::One, WinReason::Exhaustion)));
         assert_eq!(state.active(), PlayerId::Two);
         let tail: Vec<_> = events.iter().rev().take(3).rev().cloned().collect();
@@ -899,7 +899,7 @@ mod tests {
         apply(&mut state, doomed_strike()).unwrap();
         assert_eq!(state.winner(), None);
         assert_eq!(state.active(), PlayerId::One);
-        assert!(legal_actions(&state).contains(&Action::Activate { effect: 0 }));
+        assert!(legal_actions(&state).contains(&Action::activate(0)));
     }
 
     /// Both creatures die (force 1 against 1 health, riposte 1 against 1 health), the attack
@@ -1043,9 +1043,9 @@ mod tests {
                     .filter(|a| *a != Action::Concede)
                     .collect();
                 assert!(!playable.is_empty(), "seed {seed}: exhausted yet not over");
-                let pick = playable[policy.next_u32() as usize % playable.len()];
+                let pick = playable[policy.next_u32() as usize % playable.len()].clone();
                 let before = potential(&state);
-                let events = apply(&mut state, pick).unwrap();
+                let events = apply(&mut state, pick.clone()).unwrap();
                 assert!(
                     potential(&state) < before,
                     "seed {seed}: {pick:?} did not decrease the potential"

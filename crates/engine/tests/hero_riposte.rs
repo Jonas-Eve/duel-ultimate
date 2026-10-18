@@ -83,8 +83,8 @@ fn arena(
         7,
     )
     .unwrap();
-    apply(&mut state, Action::Play { card: id(0) }).unwrap();
-    apply(&mut state, Action::Play { card: id(30) }).unwrap();
+    apply(&mut state, Action::play(id(0))).unwrap();
+    apply(&mut state, Action::play(id(30))).unwrap();
     assert_eq!((state.active(), state.budget()), (PlayerId::One, k));
     state
 }
@@ -256,7 +256,7 @@ fn an_attack_on_a_creature_is_unaffected_by_the_option() {
             target: Target::Creature(id(30)),
         };
         let mut log = Vec::new();
-        while let Ok(events) = apply(&mut state, attack) {
+        while let Ok(events) = apply(&mut state, attack.clone()) {
             log.extend(events);
             if state.winner().is_some() || state.active() != PlayerId::One {
                 break;

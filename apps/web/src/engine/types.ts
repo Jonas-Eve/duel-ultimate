@@ -12,8 +12,14 @@ export interface GameResult {
 }
 
 export type Target = "hero" | { creature: number };
-export type PlayAction = { play: { card: number } };
-export type ActivateAction = { activate: { effect: number } };
+/** A choice carried by an action (#128): a seat's hero or a creature in play. */
+export type Pick = { hero: Seat } | { creature: number };
+// `picks` and `source` are additive (#128): the client never emits them, it hands back the `action` of
+// the previews unchanged, and no legal action carries them. They exist so that the type of a hostile
+// or future action is honest; the engine refuses them today (`invalid_picks`, `too_many_picks`,
+// `source_not_on_board`). `source` absent means the hero.
+export type PlayAction = { play: { card: number; picks?: Pick[] } };
+export type ActivateAction = { activate: { effect: number; source?: number; picks?: Pick[] } };
 export type AttackAction = { attack: { attacker: number; target: Target } };
 export type Action = PlayAction | ActivateAction | AttackAction | "concede";
 

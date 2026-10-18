@@ -63,7 +63,7 @@ mod view;
 pub use data::{DataError, game_setup_from_data, player_setup};
 pub use observation::{ActionOutcome, Observation};
 pub use preview::{ActionPreview, preview_legal_actions};
-pub use rules::{Action, Event, RuleError, Target, apply, legal_actions};
+pub use rules::{Action, Event, MAX_PICKS, Pick, RuleError, Target, apply, legal_actions};
 pub use ruleset::{MAX_BOARD_LIMIT, RuleSet, RuleSetError};
 pub use setup::{GameSetup, PlayerSetup, SetupError, new_game};
 pub use state::{CardInstanceId, GameState, PlayerId, WinReason};

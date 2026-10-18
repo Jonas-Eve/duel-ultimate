@@ -113,7 +113,7 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
   Rust casse `tests/error-codes.test.ts` : ajouter son texte français** (et son code dans
   `ENGINE_CODES`). Les erreurs de règle laissent l'état intact ; les codes `internal_error`,
   `serialization_failed`, `computer_stuck` et `computer_chain_limit` sont fatals. `not_active_seat`,
-  `invalid_policy` et `computer_stuck` viennent du binding (`ENGINE_CODES`) ; `computer_chain_limit` est un code du client.
+  `invalid_policy` et `computer_stuck` viennent du binding (`ENGINE_CODES`) ; `computer_chain_limit` est un code du client. Depuis #180, `too_many_picks`, `invalid_picks` et `source_not_on_board` (champs additifs `picks` et `source` d'une action, que le client n'émet jamais ; `Pick`, `PlayAction.picks?`, `ActivateAction.source?`/`picks?` dans `src/engine/types.ts`) sont aussi des codes du moteur, non fatals, avec leur texte français.
 - **Contrat JSON** : `EVENT_KINDS` doit égaler les variantes de `enum Event`
   (`crates/engine/src/rules.rs`) ; `tests/wasm.contract.test.ts` vérifie les clés exactes de chaque
   événement, action et aperçu sur 160 parties réelles (80 par jeu de règles). Ajouter une variante côté Rust

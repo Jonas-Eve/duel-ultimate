@@ -240,7 +240,7 @@ mod tests {
                 else {
                     break;
                 };
-                apply(&mut state, **action).unwrap();
+                apply(&mut state, (*action).clone()).unwrap();
                 assert_names_follow_stats(&state, &format!("seed {seed} step {step}"));
                 seen_board |= !state.one.board.is_empty() || !state.two.board.is_empty();
                 seen_discard |= !state.one.discard.is_empty() || !state.two.discard.is_empty();

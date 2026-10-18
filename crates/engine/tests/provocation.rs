@@ -103,10 +103,10 @@ fn arena(one: &[CreatureStats], two: &[CreatureStats], k: u32, pile: u32) -> Are
             continue;
         }
         for card in &wanted_one {
-            apply(&mut state, Action::Play { card: *card }).unwrap();
+            apply(&mut state, Action::play(*card)).unwrap();
         }
         for card in &wanted_two[..m as usize] {
-            apply(&mut state, Action::Play { card: *card }).unwrap();
+            apply(&mut state, Action::play(*card)).unwrap();
         }
         assert_eq!((state.active(), state.budget()), (PlayerId::One, k));
         let board_two = state.board(PlayerId::Two);
@@ -154,7 +154,7 @@ fn creatures(ids: &[CardInstanceId]) -> Vec<Target> {
 /// Refused with `error`, nothing changed (the generator included, `GameState: PartialEq`).
 fn assert_refused(state: &GameState, action: Action, error: RuleError) {
     let mut clone = state.clone();
-    assert_eq!(apply(&mut clone, action), Err(error), "{action:?}");
+    assert_eq!(apply(&mut clone, action.clone()), Err(error), "{action:?}");
     assert_eq!(&clone, state, "{action:?} changed the state");
 }
 
@@ -289,7 +289,7 @@ fn a_provocateur_summoned_between_two_attacks_restricts_at_once() {
     assert!(legal_actions(s).contains(&strike(mine, Target::Hero)));
     apply(s, hit(mine, theirs)).unwrap(); // hands the token over (cost 1 = budget 1)
     assert_eq!(s.active(), PlayerId::Two);
-    apply(s, Action::Play { card: spare }).unwrap(); // a provocateur, no summoning sickness
+    apply(s, Action::play(spare)).unwrap(); // a provocateur, no summoning sickness
     assert_eq!(s.active(), PlayerId::One);
     assert_eq!(offered(s), vec![(mine, creatures(&[spare]))]);
     assert_refused(

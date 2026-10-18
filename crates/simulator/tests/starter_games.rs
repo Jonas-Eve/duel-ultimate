@@ -122,7 +122,7 @@ fn scripted(state: &GameState) -> Action {
         .into_iter()
         .filter(|action| *action != Action::Concede)
         .collect();
-    let first = |wanted: fn(&Action) -> bool| actions.iter().copied().find(&wanted);
+    let first = |wanted: fn(&Action) -> bool| actions.iter().find(|a| wanted(a)).cloned();
     first(|a| matches!(a, Action::Play { .. }))
         .or_else(|| first(|a| matches!(a, Action::Attack { .. })))
         .or_else(|| first(|a| matches!(a, Action::Activate { .. })))

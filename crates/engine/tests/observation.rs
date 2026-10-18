@@ -46,7 +46,7 @@ fn for_every_state(seed: u64, mut check: impl FnMut(&GameState)) -> GameState {
             .into_iter()
             .filter(|a| *a != Action::Concede)
             .collect();
-        apply(&mut state, playable[rng.below(playable.len())]).unwrap();
+        apply(&mut state, playable[rng.below(playable.len())].clone()).unwrap();
     }
     state
 }
@@ -124,10 +124,13 @@ fn observing_does_not_change_what_follows() {
         let (mut watched, _) = new_game(setup.clone(), seed).unwrap();
         let (mut plain, _) = new_game(setup, seed).unwrap();
         while plain.winner().is_none() {
-            let action = legal_actions(&plain)[0];
+            let action = legal_actions(&plain)[0].clone();
             let obs = Observation::of(&watched).unwrap();
             let _ = obs.view();
-            assert_eq!(apply(&mut watched, action), apply(&mut plain, action));
+            assert_eq!(
+                apply(&mut watched, action.clone()),
+                apply(&mut plain, action)
+            );
         }
         assert_eq!(watched, plain);
     }
@@ -155,7 +158,7 @@ fn after_a_suicidal_hit_the_outcome_has_the_attacker_in_its_discard_not_on_its_b
                     continue;
                 };
                 let mut real = state.clone();
-                let dies = apply(&mut real, *action)
+                let dies = apply(&mut real, action.clone())
                     .unwrap()
                     .iter()
                     .any(|e| matches!(e, Event::Died { creature, .. } if creature == attacker));
@@ -173,9 +176,22 @@ fn after_a_suicidal_hit_the_outcome_has_the_attacker_in_its_discard_not_on_its_b
                 }
             }
             let playable = obs.actions().to_vec();
-            apply(&mut state, playable[rng.below(playable.len())]).unwrap();
+            apply(&mut state, playable[rng.below(playable.len())].clone()).unwrap();
         }
     }
     assert!(suicides > 20, "suicidal hits seen: {suicides}");
     assert!(safe_hits > 0, "lethal hits seen: {safe_hits}");
+}
+
+#[test]
+fn into_actions_is_actions_without_copy() {
+    for seed in 0..10 {
+        let mut states = Vec::new();
+        for_every_state(seed, |state| states.push(state.clone()));
+        for state in &states {
+            let observation = Observation::of(state).expect("a running game");
+            let expected = observation.actions().to_vec();
+            assert_eq!(observation.into_actions(), expected, "seed {seed}");
+        }
+    }
 }

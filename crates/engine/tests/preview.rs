@@ -68,13 +68,16 @@ fn check_step(state: &GameState) {
     let previews = preview_legal_actions(state);
     assert_eq!(*state, before, "the preview must leave the state intact");
     assert_eq!(
-        previews.iter().map(|p| p.action).collect::<Vec<_>>(),
+        previews
+            .iter()
+            .map(|p| p.action.clone())
+            .collect::<Vec<_>>(),
         legal,
         "same actions, same order as legal_actions"
     );
     for preview in &previews {
         let mut copy = state.clone();
-        let events = apply(&mut copy, preview.action).unwrap();
+        let events = apply(&mut copy, preview.action.clone()).unwrap();
         assert_eq!(
             preview.hands_over,
             copy.active() != state.active(),
@@ -117,7 +120,7 @@ fn the_preview_matches_a_real_application_at_every_step_of_whole_games() {
                 if actions.is_empty() {
                     break;
                 }
-                apply(&mut state, actions[rng.below(actions.len())]).unwrap();
+                apply(&mut state, actions[rng.below(actions.len())].clone()).unwrap();
             }
         }
     }
@@ -247,7 +250,7 @@ fn summoning(cost: u32, two_max: u32) -> ActionPreview {
         side(two_hero(two_max), creature(1, 1, 1, 3, 0)),
     );
     let play = first_play(&state);
-    let preview = preview_of(&state, play);
+    let preview = preview_of(&state, play.clone());
     assert_eq!(preview.action, play);
     preview
 }
@@ -256,28 +259,28 @@ fn summoning(cost: u32, two_max: u32) -> ActionPreview {
 fn a_cost_below_the_budget_stays_with_what_is_left() {
     // b = 3, c = 2 = b - 1: One keeps the token with 1.
     let p = summoning(2, 8);
-    assert_eq!(p, expect(p.action, Some(2), false, Some(1), None));
+    assert_eq!(p, expect(p.action.clone(), Some(2), false, Some(1), None));
 }
 
 #[test]
 fn a_cost_equal_to_the_budget_hands_over_and_the_receiver_gets_one() {
     // b = 3, c = 3: Two receives 3 - 3 + 1 = 1.
     let p = summoning(3, 8);
-    assert_eq!(p, expect(p.action, Some(3), true, Some(1), None));
+    assert_eq!(p, expect(p.action.clone(), Some(3), true, Some(1), None));
 }
 
 #[test]
 fn a_cost_above_the_budget_gives_the_excess_plus_one() {
     // b = 3, c = 5: Two receives 5 - 3 + 1 = 3.
     let p = summoning(5, 8);
-    assert_eq!(p, expect(p.action, Some(5), true, Some(3), None));
+    assert_eq!(p, expect(p.action.clone(), Some(5), true, Some(3), None));
 }
 
 #[test]
 fn the_receivers_max_time_caps_the_budget_after() {
     // b = 3, c = 9: 9 - 3 + 1 = 7, capped by Two's max_time 5 (One's own is 8).
     let p = summoning(9, 5);
-    assert_eq!(p, expect(p.action, Some(9), true, Some(5), None));
+    assert_eq!(p, expect(p.action.clone(), Some(9), true, Some(5), None));
 }
 
 #[test]
@@ -288,7 +291,7 @@ fn a_cost_above_the_senders_own_max_time_is_not_capped_by_it() {
         side(two_hero(10), creature(1, 1, 1, 3, 0)),
     );
     let p = preview_of(&state, first_play(&state));
-    assert_eq!(p, expect(p.action, Some(7), true, Some(5), None));
+    assert_eq!(p, expect(p.action.clone(), Some(7), true, Some(5), None));
 }
 
 #[test]
@@ -301,7 +304,7 @@ fn hero_effects_follow_the_same_rule_with_their_own_cost() {
         ),
         side(two_hero(5), creature(1, 1, 1, 3, 0)),
     );
-    let a = |effect| Action::Activate { effect };
+    let a = |effect| Action::activate(effect);
     assert_eq!(
         preview_of(&state, a(0)),
         expect(a(0), Some(1), false, Some(2), None)
@@ -335,10 +338,10 @@ fn attacking_state_with(rules: RuleSet, two_health: u32) -> (GameState, Action) 
             creature(1, 1, 1, 3, 0),
         ),
     );
-    let Action::Play { card } = first_play(&state) else {
+    let Action::Play { card, .. } = first_play(&state) else {
         unreachable!()
     };
-    apply(&mut state, Action::Play { card }).unwrap();
+    apply(&mut state, Action::play(card)).unwrap();
     assert_eq!((state.active(), state.budget()), (PlayerId::One, 4));
     (
         state,
@@ -354,7 +357,7 @@ fn a_lethal_attack_on_the_hero_spends_nothing_and_does_not_hand_over() {
     // Displayed cost 7 (the attack cost), but no time is spent: no token move, hero_down.
     let (state, attack) = attacking_state(1);
     assert_eq!(
-        preview_of(&state, attack),
+        preview_of(&state, attack.clone()),
         expect(
             attack,
             Some(7),
@@ -372,12 +375,12 @@ fn a_non_lethal_attack_on_the_hero_pays_and_hands_over() {
     // hits back and the preview says so.
     let (state, attack) = attacking_state_with(RuleSet::legacy(), 2);
     assert_eq!(
-        preview_of(&state, attack),
+        preview_of(&state, attack.clone()),
         expect(attack, Some(7), true, Some(4), None)
     );
     let (state, attack) = attacking_state(2);
     assert_eq!(
-        preview_of(&state, attack),
+        preview_of(&state, attack.clone()),
         ActionPreview {
             attacker_destroyed: true,
             ..expect(attack, Some(7), true, Some(4), None)
@@ -395,7 +398,7 @@ fn a_handover_to_a_player_with_nothing_to_do_ends_the_game_by_exhaustion() {
     );
     let play = first_play(&state);
     assert_eq!(
-        preview_of(&state, play),
+        preview_of(&state, play.clone()),
         expect(
             play,
             Some(10),
@@ -429,10 +432,10 @@ fn an_attacker_killed_by_the_riposte_still_pays_its_cost() {
         target: Target::Creature(target),
     };
     assert_eq!(
-        preview_of(&state, attack),
+        preview_of(&state, attack.clone()),
         ActionPreview {
             attacker_destroyed: true,
-            ..expect(attack, Some(2), true, Some(2), None)
+            ..expect(attack.clone(), Some(2), true, Some(2), None)
         }
     );
     // Control through the real application: the attacker did die.
@@ -541,8 +544,8 @@ fn previewing_does_not_change_how_the_game_continues() {
                 if actions.is_empty() {
                     break;
                 }
-                let action = actions[rng.below(actions.len())];
-                let a = serde_json::to_string(&apply(&mut plain, action).unwrap()).unwrap();
+                let action = actions[rng.below(actions.len())].clone();
+                let a = serde_json::to_string(&apply(&mut plain, action.clone()).unwrap()).unwrap();
                 let b = serde_json::to_string(&apply(&mut observed, action).unwrap()).unwrap();
                 assert_eq!(a, b, "same events byte for byte");
             }
@@ -595,10 +598,10 @@ fn hitting_state(rules: RuleSet, two_health: u32) -> (GameState, Action) {
             creature(1, 1, 1, 3, 0),
         ),
     );
-    let Action::Play { card } = first_play(&state) else {
+    let Action::Play { card, .. } = first_play(&state) else {
         unreachable!()
     };
-    apply(&mut state, Action::Play { card }).unwrap();
+    apply(&mut state, Action::play(card)).unwrap();
     (
         state,
         Action::Attack {
@@ -704,7 +707,7 @@ fn attacker_destroyed_is_the_death_of_the_attacker_in_the_real_journal() {
                     for _ in 0..400 {
                         for preview in preview_legal_actions(&state) {
                             let mut copy = state.clone();
-                            let events = apply(&mut copy, preview.action).unwrap();
+                            let events = apply(&mut copy, preview.action.clone()).unwrap();
                             let expected = match preview.action {
                                 Action::Attack { attacker, .. } => events.iter().any(|e| {
                                     matches!(e, Event::Died { creature, .. } if *creature == attacker)
@@ -732,7 +735,7 @@ fn attacker_destroyed_is_the_death_of_the_attacker_in_the_real_journal() {
                         if actions.is_empty() {
                             break;
                         }
-                        apply(&mut state, actions[rng.below(actions.len())]).unwrap();
+                        apply(&mut state, actions[rng.below(actions.len())].clone()).unwrap();
                     }
                 }
             }

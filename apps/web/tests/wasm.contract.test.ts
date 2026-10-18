@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, test } from "vitest";
 import { EVENT_KINDS, eventKind } from "../src/engine/types";
 import type { Action, ActionPreview, EngineEvent, PlayerView } from "../src/engine/types";
 import { DATA_VERSION } from "../src/data/starter";
-import { CLIENT_CODES, ENGINE_CODES } from "../src/engine/errors";
+import { CLIENT_CODES, ENGINE_CODES, EngineError } from "../src/engine/errors";
 import { PAIRS, initTestEngine, newSession, randomPolicy, rulesFactory, testFactory } from "./support/engine";
 import { repoRoot } from "./support/paths";
 
@@ -242,6 +242,73 @@ describe("the optional rules of Game.from_data (#147)", () => {
       expect(body.code).toBe(expected);
       expect(body.message.length).toBeGreaterThan(0);
       expect(ENGINE_CODES).toContain(body.code);
+    }
+  });
+});
+
+describe("Action additive (#128)", () => {
+  const refusal = (fn: () => unknown): EngineError => {
+    try {
+      fn();
+    } catch (e) {
+      expect(e).toBeInstanceOf(EngineError);
+      return e as EngineError;
+    }
+    throw new Error("expected a refusal");
+  };
+  const firstPlay = (actions: Action[]) => actions.find((a): a is { play: { card: number } } => typeof a === "object" && "play" in a)!;
+  const picks = (n: number) => Array.from({ length: n }, () => ({ hero: "One" as const }));
+
+  test("no legal action carries picks or source", () => {
+    for (const [one, two] of PAIRS) {
+      const s = newSession(one, two, 3);
+      try {
+        for (let i = 0; i < 200 && s.view("One").result === null; i++) {
+          const legal = s.legalActions();
+          for (const a of legal) {
+            const text = JSON.stringify(a);
+            expect(text).not.toContain("picks");
+            expect(text).not.toContain("source");
+          }
+          s.apply(randomPolicy(i)(legal));
+        }
+      } finally {
+        s.dispose();
+      }
+    }
+  });
+
+  test("an empty picks list is accepted", () => {
+    const s = newSession("rush", "bulwark", 1);
+    try {
+      const play = firstPlay(s.legalActions());
+      expect(() => s.apply({ play: { card: play.play.card, picks: [] } })).not.toThrow();
+    } finally {
+      s.dispose();
+    }
+  });
+
+  test("hostile picks and sources get their stable non-fatal codes, and the game goes on", () => {
+    const s = newSession("rush", "bulwark", 1);
+    try {
+      const card = firstPlay(s.legalActions()).play.card;
+      const before = JSON.stringify(s.view("One"));
+      const cases: [Action, string][] = [
+        [{ play: { card, picks: picks(1) } }, "invalid_picks"],
+        [{ activate: { effect: 0, picks: picks(1) } }, "invalid_picks"],
+        [{ play: { card, picks: picks(9) } }, "too_many_picks"],
+        [{ activate: { effect: 0, source: 10000 } }, "source_not_on_board"],
+      ];
+      for (const [action, code] of cases) {
+        const error = refusal(() => s.apply(action));
+        expect(error.code).toBe(code);
+        expect(error.fatal).toBe(false);
+        expect(ENGINE_CODES).toContain(code);
+      }
+      expect(JSON.stringify(s.view("One"))).toBe(before);
+      expect(() => s.apply({ play: { card } })).not.toThrow();
+    } finally {
+      s.dispose();
     }
   });
 });

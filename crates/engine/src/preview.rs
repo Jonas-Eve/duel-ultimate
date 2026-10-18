@@ -51,7 +51,7 @@ pub fn preview_legal_actions(state: &GameState) -> Vec<ActionPreview> {
     legal_actions(state)
         .into_iter()
         .map(|action| {
-            let run = dry_run(state, action);
+            let run = dry_run(state, action.clone());
             preview_of(action, run.as_ref().map(|(_, events)| events.as_slice()))
         })
         .collect()
@@ -167,7 +167,7 @@ mod tests {
         for (preview, action) in previews.iter().zip(&legal) {
             assert_eq!(preview.action, *action);
             let mut copy = state.clone();
-            let events = apply(&mut copy, *action).unwrap();
+            let events = apply(&mut copy, action.clone()).unwrap();
             let expected_cost = events.iter().find_map(|e| match e {
                 crate::Event::Attacked { cost, .. } => Some(*cost),
                 _ => None,

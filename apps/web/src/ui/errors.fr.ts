@@ -11,6 +11,9 @@ export const ERROR_TEXT: Record<ErrorCode, string> = {
   target_forbidden_by_provocation: "Une créature adverse avec provocation doit être attaquée en premier.",
   // Neutral and without the number of the limit: valid in two camps, and for whatever limit a setting gives.
   board_full: "Le plateau est plein : aucune créature de plus ne peut y être posée.",
+  too_many_picks: "Cette action contient trop de choix : huit au plus sont acceptés.",
+  invalid_picks: "Cette action n'attend pas ces choix : retirez-les puis réessayez.",
+  source_not_on_board: "Cette source n'est pas une créature de votre plateau.",
   invalid_setup: "Les données de la partie sont invalides. Rechargez la page.",
   invalid_json: "La demande n'a pas pu être lue. Rechargez la page et recommencez.",
   unknown_deck: "Ce deck n'existe pas. Choisissez un deck de la liste.",
