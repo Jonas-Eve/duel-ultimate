@@ -1,7 +1,7 @@
 //! Plays seeded AI-vs-AI games between the decks of an embedded data set and prints the
 //! balance report. Usage: `duel-simulator [games] [--set <name>[@<version>]] [--seed <u64>]
 //! [--hero-riposte <on|off>] [--board-limit <none|N>] [--timing] [--against <name>[@<version>]]
-//! [--policy <name>[,<name>...]] [--noise <0..=100>]`, in any order: `games` per matchup (1000
+//! [--policy <name>[,<name>...]] [--noise <0..=100>] [--versus <candidate>,<reference>]`, in any order: `games` per matchup (1000
 //! by default), the `starter` set (its latest version by default), seed 0 by default, and the
 //! engine's default rules for each rule option not given (the report names them in its header).
 //! `--hero-riposte on` changes the games (#170), and so does `--board-limit` (#171). The
@@ -38,7 +38,7 @@ use duel_ai::{POLICIES, Policy, noisy, policy_named};
 use duel_engine::RuleSet;
 use duel_simulator::{
     BatchConfig, DEFAULT_MAX_ACTIONS, GameRecord, NamedPolicy, Report, contenders_from,
-    diff_reports, run_batch_observed,
+    diff_reports, run_batch_observed, run_versus_observed,
 };
 use std::time::Instant;
 
@@ -77,7 +77,7 @@ const SETS: [Set; 3] = [
 const DEFAULT_GAMES: u64 = 1000;
 const DEFAULT_SEED: u64 = 0;
 const DEFAULT_SET: &str = "starter";
-const USAGE: &str = "[games] [--set <name>[@<version>]] [--seed <u64>] [--hero-riposte <on|off>] [--board-limit <none|N>] [--timing] [--against <name>[@<version>]] [--policy <name>[,<name>...]] [--noise <0..=100>]";
+const USAGE: &str = "[games] [--set <name>[@<version>]] [--seed <u64>] [--hero-riposte <on|off>] [--board-limit <none|N>] [--timing] [--against <name>[@<version>]] [--policy <name>[,<name>...]] [--noise <0..=100>] [--versus <candidate>,<reference>]";
 
 /// What the command line asks for.
 #[derive(Debug, PartialEq, Eq)]
@@ -93,6 +93,10 @@ struct Config {
     timing: bool,
     /// `--policy` (default `random`), `--noise` applied: the sections of the report, in order.
     policies: Vec<PolicySpec>,
+    /// `--versus`: the candidate and the reference policy (registry names) of a confrontation,
+    /// which replaces the batch of sections; incompatible with `--policy`, `--noise` and
+    /// `--against`.
+    versus: Option<(&'static str, &'static str)>,
 }
 
 /// One section of the report: a registry policy and the noise wrapped around it.
@@ -153,6 +157,41 @@ fn parse_policies(value: &str) -> Result<Vec<&'static str>, String> {
         names.push(name);
     }
     Ok(names)
+}
+
+/// The value of `--versus`: exactly two distinct registry names, `candidate,reference`.
+fn parse_versus(value: &str) -> Result<(&'static str, &'static str), String> {
+    let parts: Vec<&str> = value.split(',').collect();
+    let [candidate, reference] = parts[..] else {
+        return Err(format!(
+            "--versus: expected two policy names, candidate,reference (got \"{value}\")"
+        ));
+    };
+    let resolve = |name: &str| -> Result<&'static str, String> {
+        if name.is_empty() {
+            return Err(format!(
+                "--versus: empty policy name in \"{value}\" (available: {})",
+                available_policies()
+            ));
+        }
+        POLICIES
+            .iter()
+            .map(|(known, _)| *known)
+            .find(|known| *known == name)
+            .ok_or_else(|| {
+                format!(
+                    "--versus: unknown policy \"{name}\" (available: {})",
+                    available_policies()
+                )
+            })
+    };
+    let (candidate, reference) = (resolve(candidate)?, resolve(reference)?);
+    if candidate == reference {
+        return Err(format!(
+            "--versus: the two policies must be distinct (both \"{candidate}\")"
+        ));
+    }
+    Ok((candidate, reference))
 }
 
 /// The value of `--noise`: an integer from 0 to 100.
@@ -248,6 +287,7 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
     let mut timing = false;
     let mut policy_names = None;
     let mut noise = None;
+    let mut versus = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         if arg == "--set" {
@@ -308,6 +348,16 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
             if noise.replace(parse_noise(value)?).is_some() {
                 return Err("--noise given twice".to_owned());
             }
+        } else if arg == "--versus" {
+            let value = rest.next().ok_or_else(|| {
+                format!(
+                    "--versus needs a value, candidate,reference (available: {})",
+                    available_policies()
+                )
+            })?;
+            if versus.replace(parse_versus(value)?).is_some() {
+                return Err("--versus given twice".to_owned());
+            }
         } else if arg == "--timing" {
             if std::mem::replace(&mut timing, true) {
                 return Err("--timing given twice".to_owned());
@@ -325,6 +375,17 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
                 return Err(format!(
                     "the number of games is given twice (again: \"{arg}\")"
                 ));
+            }
+        }
+    }
+    if versus.is_some() {
+        for (given, flag) in [
+            (policy_names.is_some(), "--policy"),
+            (noise.is_some(), "--noise"),
+            (against.is_some(), "--against"),
+        ] {
+            if given {
+                return Err(format!("--versus is incompatible with {flag}"));
             }
         }
     }
@@ -359,6 +420,7 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
         },
         timing,
         policies,
+        versus,
     })
 }
 
@@ -371,6 +433,10 @@ fn main() {
             std::process::exit(2);
         }
     };
+    if let Some((candidate, reference)) = config.versus {
+        run_versus_command(&config, candidate, reference);
+        return;
+    }
     let owned = resolve_policies(&config.policies);
     let policies: Vec<NamedPolicy> = owned
         .iter()
@@ -403,6 +469,60 @@ fn main() {
         Ok(text) => print!("{text}"),
         Err(message) => {
             eprintln!("duel-simulator: {message}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// `--versus`: plays the confrontation and prints its report (exit code 2 for a number of games
+/// that is not a multiple of 4, 1 for an inconsistent report). The clock is read around the games
+/// only, as for a batch.
+fn run_versus_command(config: &Config, candidate: &'static str, reference: &'static str) {
+    let resolve =
+        |name: &'static str| policy_named(name).expect("the name comes from the registry");
+    let (candidate_policy, reference_policy) = (resolve(candidate), resolve(reference));
+    let contenders =
+        contenders_from(config.set.cards, config.set.decks).expect("the embedded data is valid");
+    let batch = BatchConfig {
+        games: config.games,
+        seed: config.seed,
+        max_actions: DEFAULT_MAX_ACTIONS,
+        data_versions: vec![format!("{}@{}", config.set.name, config.set.version)],
+        rules: config.rules,
+    };
+    let (mut games, mut actions) = (0u64, 0u64);
+    let start = Instant::now();
+    let result = run_versus_observed(
+        &contenders,
+        &batch,
+        NamedPolicy {
+            name: candidate,
+            policy: &candidate_policy,
+        },
+        NamedPolicy {
+            name: reference,
+            policy: &reference_policy,
+        },
+        |game| {
+            games += 1;
+            actions += u64::from(game.record.actions);
+        },
+    );
+    let elapsed = start.elapsed();
+    let report = match result {
+        Ok(report) => report,
+        Err(message) => {
+            eprintln!("duel-simulator: {message}");
+            std::process::exit(2);
+        }
+    };
+    if config.timing {
+        eprintln!("{}", timing_line(games, actions, elapsed.as_secs_f64()));
+    }
+    match report.check() {
+        Ok(()) => print!("{}", report.render()),
+        Err(message) => {
+            eprintln!("duel-simulator: inconsistent report: {message}");
             std::process::exit(1);
         }
     }
