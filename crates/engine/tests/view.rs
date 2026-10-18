@@ -3,10 +3,12 @@
 //! written here from the events only, and with the conservation of cards. The leak tests
 //! (which need the identifiers of the piles) live inside the crate, in `view.rs`.
 
-use duel_cards::{parse_cards, parse_decks};
+use duel_cards::{
+    Op, PickKind, PickRole, PickSlot, Polarity, Selector, Side, Trigger, parse_cards, parse_decks,
+};
 use duel_engine::{
-    Action, CardInstanceId, CardView, Event, GameSetup, GameState, PlayerId, WinReason, apply,
-    game_setup_from_data, legal_actions, new_game, player_view,
+    Action, CardInstanceId, CardKindView, CardView, EffectLine, Event, GameSetup, GameState,
+    OpLine, PlayerId, WinReason, apply, game_setup_from_data, legal_actions, new_game, player_view,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -32,6 +34,35 @@ fn matchups() -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
 
 fn setup_of(m: (&str, &str, &str, &str)) -> GameSetup {
     game_setup_from_data(m.0, m.1, m.2, m.3, vec!["test@1".into()]).unwrap()
+}
+
+/// The normal attack of a plain unit, written out from the stats alone (the tracker never reads
+/// the engine): an activated effect of the attack cost, one `attack` of `force` on the opposing
+/// hero or unit, a bonus, one target to pick.
+fn attack_line(force: u32, attack_cost: u32) -> EffectLine {
+    EffectLine {
+        index: None,
+        trigger: Trigger::Activated,
+        cost: Some(attack_cost),
+        ops: vec![OpLine {
+            op: Op::Attack {
+                target: Selector::HeroOrUnit {
+                    side: Side::Opposing,
+                },
+                amount: force,
+                ignores_provocation: false,
+                scales_with_force: false,
+                attackers: 1,
+                mode: None,
+            },
+            polarity: Polarity::Bonus,
+        }],
+        picks: vec![PickSlot {
+            role: PickRole::Target,
+            kind: PickKind::HeroOrUnit,
+            side: Side::Opposing,
+        }],
+    }
 }
 
 struct Xorshift(u64);
@@ -127,6 +158,10 @@ impl Tracker {
             health: self.health[&id],
             provocation: stats.provocation,
             riposte: stats.riposte,
+            kind: CardKindView::Unit,
+            immobile: false,
+            tags: Vec::new(),
+            effects: vec![attack_line(stats.force, stats.attack_cost)],
             unavailable: None,
         }
     }
@@ -1022,10 +1057,6 @@ mod new_kinds {
             filler(30),
         );
         let text = view_text(&state, PlayerId::One);
-        let find = |needle: &str| {
-            text.find(needle)
-                .unwrap_or_else(|| panic!("{needle} in {text}"))
-        };
 
         let imm = hand_card(&state, PlayerId::One, "c0");
         assert_eq!(imm["kind"], "unit");
@@ -1041,15 +1072,25 @@ mod new_kinds {
         assert!(pl.get("tags").is_none(), "omitted when empty: {pl}");
         assert!(pl.get("effects").is_some(), "always written");
 
-        // Order of the keys: riposte, kind, immobile, tags, effects.
-        let (r, k, i, t, e) = (
-            find(r#""riposte":0,"kind":"unit","immobile":true"#),
-            find(r#""kind":"unit","immobile":true"#),
-            find(r#""immobile":true,"tags":["bâtiment","machine"],"effects":[]"#),
-            find(r#""tags":["bâtiment","machine"],"effects":[]"#),
-            find(r#""effects":[]"#),
-        );
-        assert!(r <= k && k < i && i < t && t < e, "{text}");
+        // Order of the keys of the tagged immobile card: riposte, kind, immobile, tags, effects.
+        let card = &text[text.find(r#""name":"c0""#).unwrap()..];
+        let at = |needle: &str| {
+            card.find(needle)
+                .unwrap_or_else(|| panic!("{needle} in {card}"))
+        };
+        let order = [
+            at(r#""riposte":0"#),
+            at(r#""kind":"unit""#),
+            at(r#""immobile":true"#),
+            at(r#""tags":["bâtiment","machine"]"#),
+            at(r#""effects":[]"#),
+        ];
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "{card}");
+        // And the spell (kind, tags, effects; no immobile key) and the plain unit (kind, effects).
+        let spell = &text[text.find(r#""name":"c1""#).unwrap()..];
+        assert!(spell.contains(r#""riposte":0,"kind":"spell","tags":["rituel"],"effects":["#));
+        let plain = &text[text.find(r#""name":"c2""#).unwrap()..];
+        assert!(plain.contains(r#""riposte":1,"kind":"unit","effects":["#));
     }
 
     #[test]

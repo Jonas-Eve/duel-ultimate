@@ -80,15 +80,13 @@ impl CardInstance {
         self.kind() == CardKind::Spell
     }
 
-    /// Carried for #129, which gives the keyword its reason: the engine does not read it yet (an
-    /// immobile unit has a force of 0, which is all that keeps it from attacking).
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Read by the view (`immobile` of a card); #129 gives the keyword its reason (an immobile
+    /// unit has a force of 0, which is all that keeps it from attacking until then).
     pub(crate) fn immobile(&self) -> bool {
         self.extras.as_ref().is_some_and(|e| e.immobile)
     }
 
     /// Display text: read by the view alone (guard `tests/engine_never_reads_names_or_tags.rs`).
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn tags(&self) -> &[String] {
         self.extras.as_ref().map_or(&[], |e| &e.tags)
     }

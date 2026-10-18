@@ -13,11 +13,17 @@
 //! The JSON shape is a contract (the client reads it): snake_case keys, seats and `active`
 //! as `"One"` / `"Two"` (as [`PlayerId`] serializes everywhere else), reasons as
 //! `hero_down`, `exhaustion`, `concede`.
+//!
+//! A card carries, after its eight original keys, `kind`, `immobile`, `tags`, `effects` and
+//! `unavailable` (#209, see [`CardView`]). Tags and effects are public for every card the view
+//! shows; the hidden hand of the other seat is not in the view, so neither are its tags.
 
 use crate::effects::effective;
 use crate::rules;
-use crate::state::{CardInstance, CardInstanceId, GameState, PlayerId, PlayerState, WinReason};
-use duel_cards::HeroEffect;
+use crate::state::{
+    CardInstance, CardInstanceId, CardKind, GameState, PlayerId, PlayerState, WinReason,
+};
+use duel_cards::{CardEffect, HeroEffect, Op, PickSlot, Polarity, Selector, Side, Trigger};
 use serde::Serialize;
 
 /// How a finished game ended.
@@ -36,8 +42,48 @@ pub struct HeroView {
     pub effects: Vec<HeroEffect>,
 }
 
+/// The kind of a card as shown (`unit` | `spell`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CardKindView {
+    Unit,
+    Spell,
+}
+
+/// An operation of an effect as the data writes it (`Op` flattened), plus its `polarity` for the
+/// owner of the card (`Op::polarity`, the single derivation).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OpLine {
+    #[serde(flatten)]
+    pub op: Op,
+    pub polarity: Polarity,
+}
+
+/// One line of effect of a card, the same shape for the normal attack and for any declared effect
+/// (the display does not tell them apart): `index` is the position in the **declared** `effects`
+/// of the card (the `effect` field of a future `Activate`) and is absent for the normal attack,
+/// which is synthesised at read time and never written in the data; `cost` is present for an
+/// activated effect only; `picks` are the choices the effect expects (`CardEffect::expected_picks`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EffectLine {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
+    pub trigger: Trigger,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<u32>,
+    pub ops: Vec<OpLine>,
+    pub picks: Vec<PickSlot>,
+}
+
 /// A card as shown: `health` is the instance's current health (0 in a discard); `name` is
-/// `null` when the setup gave no names.
+/// `null` when the setup gave no names. The keys keep this order (a contract): the original eight,
+/// then `kind` (always), `immobile` (`true`, omitted when false), `tags` (omitted when empty),
+/// `effects` (always, possibly empty), then `unavailable` (omitted when absent, always last).
+///
+/// The numbers are the **effective** values (0 for the force and the attack cost of a spell or of
+/// an immobile unit, 0 for the health of a spell): none is optional. A card of the hand of the seat
+/// asked, or of its board, is the only one that may carry `unavailable`; the hidden hand of the
+/// other seat is not in the view at all, so neither are its tags nor its effects.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CardView {
     pub id: CardInstanceId,
@@ -48,8 +94,17 @@ pub struct CardView {
     pub health: u32,
     pub provocation: bool,
     pub riposte: u32,
-    /// Why the card cannot be played right now (an engine code, the same table as the errors),
-    /// absent when it can; only ever set on the cards of the hand of the seat asked.
+    pub kind: CardKindView,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub immobile: bool,
+    /// Display text of the card (the raw strings of the tag list of the set).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    pub effects: Vec<EffectLine>,
+    /// Why the card cannot be used now for its main purpose (an engine code, the same table as the
+    /// errors): to play it for a card of the hand of the seat asked (`rules::play_blocker_of`), to
+    /// attack for a unit with an attack of the board of that seat (`rules::attack_blocker`); absent
+    /// when it can. Never on the other board, a discard or in an [`OutcomeView`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unavailable: Option<&'static str>,
 }
@@ -91,10 +146,11 @@ pub struct PlayerView {
 /// action. No field can carry a drawn card (id, name or stats), so the leak is impossible by
 /// construction.
 ///
-/// `hand_known` cards never carry `unavailable` (always `None`, unlike `PlayerView::hand`): that
-/// reason is derived from the public board, so nothing leaks by leaving it out, and the AI that
-/// reads the outcome sees the playable actions from `Observation::actions`, never an unplayable
-/// card.
+/// No card of an outcome ever carries `unavailable` (always `None`, unlike the hand and the board
+/// of `PlayerView`): that reason is derived from the public board, so nothing leaks by leaving it
+/// out, and the AI that reads the outcome sees the playable actions from `Observation::actions`,
+/// never an unplayable card. A `hand_known` card keeps its public `kind`, `immobile`, `tags` and
+/// `effects` (it was already known); a drawn card shows none of them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct OutcomeOwnSide {
     pub hero: HeroView,
@@ -130,23 +186,41 @@ pub fn player_view(state: &GameState, seat: PlayerId) -> PlayerView {
             hero: hero_view(you),
             hand: hand_views(state, seat),
             deck_count: you.deck.len(),
-            board: card_views(state, &you.board),
+            board: own_board_views(state, seat),
             discard: card_views(state, &you.discard),
         },
         opponent: opponent_side(state, seat),
     }
 }
 
-/// The hand of `seat`, each card with the reason it cannot be played, if there is one. The
-/// reason is the same for every card (it reads the public board of the seat), computed once.
+/// The hand of `seat`, each card with the reason it cannot be played, if there is one: the answer of
+/// `rules::play_blocker_of` for that card (the predicate `effects::usable` reads), so a spell and a
+/// unit may differ.
 fn hand_views(state: &GameState, seat: PlayerId) -> Vec<CardView> {
-    let unavailable = rules::play_blocker(state, seat).map(|e| e.code());
     state
         .player(seat)
         .hand
         .iter()
         .map(|card| CardView {
-            unavailable,
+            unavailable: rules::play_blocker_of(state, seat, card).map(|e| e.code()),
+            ..card_view(state, card)
+        })
+        .collect()
+}
+
+/// The board of `seat`, each unit that has an attack line with the reason it cannot attack, if
+/// there is one (`rules::attack_blocker`, the predicate `effects::usable` reads). An immobile unit
+/// has no attack line, so nothing to blame (#129 gives it its own reason).
+fn own_board_views(state: &GameState, seat: PlayerId) -> Vec<CardView> {
+    state
+        .player(seat)
+        .board
+        .iter()
+        .map(|card| CardView {
+            unavailable: has_attack_line(card)
+                .then(|| rules::attack_blocker(state, card))
+                .flatten()
+                .map(|e| e.code()),
             ..card_view(state, card)
         })
         .collect()
@@ -215,6 +289,67 @@ fn card_views(state: &GameState, cards: &[CardInstance]) -> Vec<CardView> {
     cards.iter().map(|card| card_view(state, card)).collect()
 }
 
+/// Whether the card shows a normal attack: a unit that is not immobile. A spell has none, and the
+/// attack of an immobile unit does not exist.
+fn has_attack_line(card: &CardInstance) -> bool {
+    card.kind() == CardKind::Unit && !card.immobile()
+}
+
+/// The normal attack, synthesised at read time (never written in the data) in the very format of a
+/// special attack: an activated effect of cost `attack_cost` with one `attack` operation on the
+/// opposing hero or unit of amount `force`, both effective values.
+fn normal_attack_line(state: &GameState, card: &CardInstance) -> EffectLine {
+    let values = effective(state, card);
+    let effect = CardEffect {
+        trigger: Trigger::Activated,
+        cost: Some(values.attack_cost),
+        ops: vec![Op::Attack {
+            target: Selector::HeroOrUnit {
+                side: Side::Opposing,
+            },
+            amount: values.force,
+            ignores_provocation: false,
+            scales_with_force: false,
+            attackers: 1,
+            mode: None,
+        }],
+    };
+    effect_line(None, &effect, false)
+}
+
+fn effect_line(index: Option<u32>, effect: &CardEffect, is_spell: bool) -> EffectLine {
+    EffectLine {
+        index,
+        trigger: effect.trigger,
+        cost: effect.cost,
+        ops: effect
+            .ops
+            .iter()
+            .map(|op| OpLine {
+                op: op.clone(),
+                polarity: op.polarity(),
+            })
+            .collect(),
+        picks: effect.expected_picks(is_spell),
+    }
+}
+
+/// The lines of effect of a card: the normal attack first (a unit that is not immobile, no index),
+/// then the declared effects in the order of the data, each with its index. The same for a card of
+/// any zone: it is the content of the card, not an action.
+fn effect_lines(state: &GameState, card: &CardInstance) -> Vec<EffectLine> {
+    let mut lines = Vec::new();
+    if has_attack_line(card) {
+        lines.push(normal_attack_line(state, card));
+    }
+    let is_spell = card.is_spell();
+    lines.extend(card.effects().iter().enumerate().map(|(i, effect)| {
+        // At most `MAX_CARD_EFFECTS` (validated at setup), so the index always fits.
+        effect_line(u32::try_from(i).ok(), effect, is_spell)
+    }));
+    lines
+}
+
 fn card_view(state: &GameState, card: &CardInstance) -> CardView {
     let values = effective(state, card);
     CardView {
@@ -226,6 +361,13 @@ fn card_view(state: &GameState, card: &CardInstance) -> CardView {
         health: card.stats.health,
         provocation: values.provocation,
         riposte: values.riposte,
+        kind: match card.kind() {
+            CardKind::Unit => CardKindView::Unit,
+            CardKind::Spell => CardKindView::Spell,
+        },
+        immobile: card.immobile(),
+        tags: card.tags().to_vec(),
+        effects: effect_lines(state, card),
         unavailable: None,
     }
 }

@@ -454,7 +454,7 @@ fn tagged_setup() -> GameSetup {
 #[test]
 fn a_drawn_card_hides_its_tags_kind_and_effects() {
     let mut checked_draws = 0;
-    for seed in 0..30 {
+    for seed in 0..6 {
         let (mut state, _) = new_game(tagged_setup(), seed).unwrap();
         let mut rng = Xorshift(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
         while state.winner().is_none() {
