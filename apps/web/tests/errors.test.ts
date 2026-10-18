@@ -104,11 +104,12 @@ describe("real engine errors", () => {
     live(start(), (g) => {
       const active = (JSON.parse(g.view("One")) as { active: string }).active;
       const idle = active === "One" ? "Two" : "One";
-      expectCode(thrown(() => g.computer_action(active, "greedy", 0)), "invalid_policy");
+      expectCode(thrown(() => g.computer_action(active, "unknown", 0)), "invalid_policy");
       expectCode(thrown(() => g.computer_action(idle, "random", 0)), "not_active_seat");
       expectCode(thrown(() => g.computer_action("one", "random", 0)), "invalid_seat");
       expectCode(thrown(() => g.computer_action(active, "x".repeat(1024 * 1024 + 1), 0)), "input_too_large");
       expect(JSON.parse(g.computer_action(active, "random", 0))).not.toBe("concede");
+      expect(JSON.parse(g.computer_action(active, "greedy", 0))).not.toBe("concede");
       g.apply(JSON.stringify("concede"));
       expectCode(thrown(() => g.computer_action(active, "random", 0)), "game_over");
     });

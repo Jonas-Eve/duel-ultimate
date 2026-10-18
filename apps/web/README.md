@@ -161,8 +161,8 @@ les deux sièges, aucun pilote).
   ni bandeau d'erreur ; hors tour, `not-your-turn`. Le moteur reste le juge : une erreur de règle
   (`refused`) laisse état, vues et `legal` inchangés et pose `snapshot.error`.
 - **Ordinateur** : **le moteur choisit**, le client ne contient ni politique ni règle. Le pilote appelle
-  `GameSession.computerAction(seat, draw)` (`Game.computer_action(seat, "random", draw)` du binding, la
-  politique `"random"` étant la constante `COMPUTER_POLICY` de `engine/wasm-session.ts`, jamais de `game/` ni
+  `GameSession.computerAction(seat, draw)` (`Game.computer_action(seat, "greedy", draw)` du binding, la
+  politique gloutonne du simulateur (#126) étant la constante `COMPUTER_POLICY` de `engine/wasm-session.ts`, jamais de `game/` ni
   de `ui/`) : l'action rendue est toujours une action légale, **jamais `"concede"`** ; si seule `"concede"`
   reste, le binding lève `computer_stuck` (fatal : phase `fatal`, partie intacte), jamais un abandon
   silencieux. `draw` est un `u32` validé côté client (sinon `internal_error`, jamais réduit en silence par le
@@ -172,9 +172,9 @@ les deux sièges, aucun pilote).
   ensuite un snapshot et un `yield` toutes les `COMPUTER_SLICE_MS` ms pour que le navigateur reste réactif
   (garantie de non-gel, pas une nécessité). **Une tirée de `mulberry32(deriveAiSeed(seed))` par action de
   l'ordinateur** (`Math.floor(rng() * 2 ** 32)`) : même graine et mêmes actions humaines = même partie,
-  ordinateur compris. **Depuis #121/#142 la suite d'actions de l'ordinateur pour une graine donnée n'est
-  plus celle d'avant** (le moteur tire par `ChaCha8Rng`, plus par `floor(mulberry32() * n)`) : changement
-  unique, rien n'est persisté. Tout test qui épingle une séquence de l'ordinateur doit être une propriété ou
+  ordinateur compris. **Depuis #121/#142 puis #126 la suite d'actions de l'ordinateur pour une graine donnée
+  n'est plus celle d'avant** (#142 : le moteur tire par `ChaCha8Rng`, plus par `floor(mulberry32() * n)` ;
+  #126 : la gloutonne ne lit pas la tirée `draw`, qui reste fournie et validée) : rien n'est persisté. Tout test qui épingle une séquence de l'ordinateur doit être une propriété ou
   chercher sa graine (`seedWithComputerOpening`, `seedWithQuietHumanAction` dans `tests/support/policies.ts`).
   `ControllerDeps.chooseAction` (et `App({ deps }).chooseAction`) est un point d'injection **réservé aux
   tests** (absent en production).
