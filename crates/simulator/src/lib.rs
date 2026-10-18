@@ -23,10 +23,11 @@ pub mod batch;
 pub mod diff;
 pub mod report;
 pub mod stats;
+pub mod versus;
 
 pub use batch::{
     BatchConfig, Contender, DEFAULT_MAX_ACTIONS, GameRecord, NamedPolicy, contenders_from,
-    game_seed, play_game, run_batch, run_batch_observed,
+    game_seed, play_game, play_game_seats, run_batch, run_batch_observed,
 };
 pub use diff::diff_reports;
 pub use duel_ai::{Policy, TAG_POLICY_ONE, TAG_POLICY_TWO, derive_seed, policy_rng, random_policy};
@@ -36,6 +37,10 @@ pub use report::{
     PolicyReport, PolicySummary, Report, rules_label,
 };
 pub use stats::{fmt_mean, fmt_share, percent, wilson_95};
+pub use versus::{
+    StepCounts, VersusGame, VersusMatchup, VersusReport, VersusSide, VersusTally, run_versus,
+    run_versus_observed, step_counts,
+};
 
 use duel_cards::{parse_cards, parse_decks};
 use duel_engine::{GameSetup, PlayerSetup, RuleSet, player_setup};
