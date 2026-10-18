@@ -16,6 +16,8 @@ export const ENGINE_CODES = [
   "too_many_picks",
   "invalid_picks",
   "source_not_on_board",
+  "attack_force_zero",
+  "unsupported_effect",
   "invalid_setup",
   "invalid_json",
   "unknown_deck",

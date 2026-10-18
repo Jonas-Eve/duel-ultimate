@@ -1,10 +1,11 @@
 //! The game state: private to the crate, observed through minimal accessors.
 
 use crate::ruleset::RuleSet;
-use duel_cards::{CreatureStats, Hero};
+use duel_cards::{CardEffect, CreatureStats, Hero};
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlayerId {
@@ -44,6 +45,58 @@ pub(crate) struct CardInstance {
     pub(crate) stats: CreatureStats,
     /// Presentation only (from the setup's `card_names`); no rule, formula or draw reads it.
     pub(crate) name: Option<String>,
+    /// What a card carries beyond its stats (#208): `None` for a plain unit (the only kind of
+    /// card before #137), so that the clone per action of the preview costs what it always did
+    /// for the games of plain units. Shared, never mutated after setup.
+    pub(crate) extras: Option<Arc<CardExtras>>,
+}
+
+/// The kind of a card of a game.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CardKind {
+    Unit,
+    Spell,
+}
+
+/// What an instance carries beyond its [`CreatureStats`]: its kind, the keyword `immobile`, its
+/// tags and its declared effects. Carried, not interpreted: at this stage the engine reads none
+/// of them to decide anything beyond the kind (a spell is not playable yet), the immobile unit
+/// having a force of 0 and tags being display text that no rule reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CardExtras {
+    pub(crate) kind: CardKind,
+    pub(crate) immobile: bool,
+    pub(crate) tags: Vec<String>,
+    pub(crate) effects: Vec<CardEffect>,
+}
+
+impl CardInstance {
+    /// A plain unit when the instance carries no extras.
+    pub(crate) fn kind(&self) -> CardKind {
+        self.extras.as_ref().map_or(CardKind::Unit, |e| e.kind)
+    }
+
+    pub(crate) fn is_spell(&self) -> bool {
+        self.kind() == CardKind::Spell
+    }
+
+    /// Carried for #129, which gives the keyword its reason: the engine does not read it yet (an
+    /// immobile unit has a force of 0, which is all that keeps it from attacking).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn immobile(&self) -> bool {
+        self.extras.as_ref().is_some_and(|e| e.immobile)
+    }
+
+    /// Display text: read by the view alone (guard `tests/engine_never_reads_names_or_tags.rs`).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn tags(&self) -> &[String] {
+        self.extras.as_ref().map_or(&[], |e| &e.tags)
+    }
+
+    /// The effects the card declares, in order (none for a plain unit).
+    pub(crate) fn effects(&self) -> &[CardEffect] {
+        self.extras.as_ref().map_or(&[], |e| &e.effects)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -422,6 +475,7 @@ mod tests {
             id: CardInstanceId(id),
             stats: stats(1, 1, 1, health),
             name: None,
+            extras: None,
         }
     }
 
@@ -809,6 +863,7 @@ mod tests {
             id: CardInstanceId(id),
             stats: stats_with(1, force, attack_cost, health, false, riposte),
             name: None,
+            extras: None,
         }
     }
 

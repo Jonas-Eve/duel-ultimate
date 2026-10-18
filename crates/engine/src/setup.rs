@@ -2,12 +2,15 @@
 
 use crate::rules::{self, Event};
 use crate::ruleset::{RuleSet, RuleSetError};
-use crate::state::{CardInstance, CardInstanceId, GameState, PlayerId, PlayerState};
+use crate::state::{
+    CardExtras, CardInstance, CardInstanceId, CardKind, GameState, PlayerId, PlayerState,
+};
 use duel_cards::{
     CardSpec, CardsError, CreatureStats, Hero, validate_card_names, validate_card_spec,
     validate_deck_shape, validate_hero,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// One side of a game: a hero and the validated cards (`CardSpec`) of its 30 slots, in deck order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,17 +48,13 @@ pub enum SetupError {
     Invalid(#[from] CardsError),
     #[error("invalid rules: {0}")]
     InvalidRules(#[from] RuleSetError),
-    /// Temporary guard (#206): a valid card the engine cannot play yet (`immobile`, tags).
-    /// Lifted by task 3 of #137.
-    #[error("unsupported card: {0}")]
-    Unsupported(&'static str),
 }
 
 impl SetupError {
     /// Stable machine-readable code.
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Invalid(_) | Self::InvalidRules(_) | Self::Unsupported(_) => "invalid_setup",
+            Self::Invalid(_) | Self::InvalidRules(_) => "invalid_setup",
         }
     }
 }
@@ -65,19 +64,6 @@ fn validate_side(side: &PlayerSetup) -> Result<(), CardsError> {
     validate_deck_shape(&side.hero, side.cards.len())?;
     validate_card_names(&side.card_names, side.cards.len())?;
     side.cards.iter().try_for_each(validate_card_spec)
-}
-
-/// Temporary fail-closed guard (#206, extended by #207, lifted by task 3 of #137): refuses a valid
-/// spec the engine cannot play properly yet. An `immobile` unit would still have its attack
-/// enumerated (force effective 0), a tag has no meaning for the engine, and neither a spell nor an
-/// effect can be resolved yet.
-fn ensure_playable(side: &PlayerSetup) -> Result<(), SetupError> {
-    match side.cards.iter().find(|spec| !spec.is_plain_unit()) {
-        Some(_) => Err(SetupError::Unsupported(
-            "only plain units (neither `immobile`, tags nor effects) can be played for now",
-        )),
-        None => Ok(()),
-    }
 }
 
 /// Builds a player's pile in deck order; `next_id` runs on across both players so that ids
@@ -90,18 +76,36 @@ fn build_side(side: PlayerSetup, next_id: &mut u32) -> PlayerState {
         .cards
         .into_iter()
         .map(|spec| {
-            // The guard refuses a spell before this point; a spell would carry its cost and
-            // zeros, the shape of an instance.
-            let stats = match spec {
-                CardSpec::Unit(unit) => unit.stats,
-                CardSpec::Spell(spell) => CreatureStats {
-                    cost: spell.cost,
-                    force: 0,
-                    attack_cost: 0,
-                    health: 0,
-                    provocation: false,
-                    riposte: 0,
-                },
+            // `validate_side` revalidated every spec: a spell carries its cost and zeros (the
+            // shape of an instance, with no health: Φ), an immobile unit has a force and an attack
+            // cost of 0. A plain unit has no extras, so a game of plain units clones what it did.
+            let plain = spec.is_plain_unit();
+            let (stats, extras) = match spec {
+                CardSpec::Unit(unit) => (
+                    unit.stats,
+                    CardExtras {
+                        kind: CardKind::Unit,
+                        immobile: unit.immobile,
+                        tags: unit.tags,
+                        effects: unit.effects,
+                    },
+                ),
+                CardSpec::Spell(spell) => (
+                    CreatureStats {
+                        cost: spell.cost,
+                        force: 0,
+                        attack_cost: 0,
+                        health: 0,
+                        provocation: false,
+                        riposte: 0,
+                    },
+                    CardExtras {
+                        kind: CardKind::Spell,
+                        immobile: false,
+                        tags: spell.tags,
+                        effects: spell.effects,
+                    },
+                ),
             };
             let id = CardInstanceId(*next_id);
             *next_id += 1;
@@ -109,6 +113,7 @@ fn build_side(side: PlayerSetup, next_id: &mut u32) -> PlayerState {
                 id,
                 stats,
                 name: names.next(),
+                extras: (!plain).then(|| Arc::new(extras)),
             }
         })
         .collect();
@@ -157,8 +162,6 @@ fn deal(state: &mut GameState, player: PlayerId) {
 pub fn new_game(setup: GameSetup, seed: u64) -> Result<(GameState, Vec<Event>), SetupError> {
     validate_side(&setup.one)?;
     validate_side(&setup.two)?;
-    ensure_playable(&setup.one)?;
-    ensure_playable(&setup.two)?;
     setup.rules.validate()?;
     let mut next_id = 0;
     let one = build_side(setup.one, &mut next_id);
@@ -303,5 +306,74 @@ mod tests {
             let n = 31 - card.stats.cost;
             assert_eq!(card.name.as_deref(), Some(format!("c{n}").as_str()));
         }
+    }
+
+    #[test]
+    fn a_plain_unit_carries_no_extras_and_the_other_cards_carry_theirs() {
+        use crate::state::CardKind;
+        use crate::testing::{immobile, on_play_draw, spell};
+        let mut s = setup(hero(2, 3, 8, vec![]), hero(1, 1, 8, vec![]));
+        let mut tagged = s.one.cards[2].clone();
+        if let duel_cards::CardSpec::Unit(unit) = &mut tagged {
+            unit.tags = vec!["bâtiment".into()];
+        }
+        s.one.cards[0] = spell(7);
+        s.one.cards[1] = immobile(6, 5);
+        s.one.cards[2] = tagged;
+        let (state, _) = new_game(s, 3).unwrap();
+        let all = all_cards(&state);
+        let spells: Vec<_> = all.iter().filter(|c| c.is_spell()).collect();
+        let immobiles: Vec<_> = all.iter().filter(|c| c.immobile()).collect();
+        let tagged: Vec<_> = all.iter().filter(|c| !c.tags().is_empty()).collect();
+        assert_eq!((spells.len(), immobiles.len(), tagged.len()), (1, 1, 1));
+        assert_eq!(spells[0].kind(), CardKind::Spell);
+        assert_eq!(immobiles[0].kind(), CardKind::Unit);
+        assert_eq!(tagged[0].tags(), ["bâtiment".to_owned()]);
+        // Only those three carry extras: the 57 other cards are plain units.
+        assert_eq!(all.iter().filter(|c| c.extras.is_some()).count(), 3);
+        // Every instance of a plain-unit deck has none: the clone per action costs what it did.
+        let (plain_state, _) =
+            new_game(setup(hero(2, 3, 8, vec![]), hero(1, 1, 8, vec![])), 3).unwrap();
+        assert!(all_cards(&plain_state).iter().all(|c| c.extras.is_none()));
+        // The accessors give the defaults of a plain unit.
+        let card = all_cards(&plain_state)[0];
+        assert_eq!(card.kind(), CardKind::Unit);
+        assert!(!card.is_spell() && !card.immobile());
+        assert!(card.tags().is_empty() && card.effects().is_empty());
+        // A spell has the shape of a card with a cost and zeros, and a declared effect is kept.
+        let mut with_effect = setup(hero(2, 3, 8, vec![]), hero(1, 1, 8, vec![]));
+        with_effect.one.cards[0] = crate::testing::unit_with_effects(
+            crate::testing::stats(4, 1, 1, 2),
+            vec![on_play_draw()],
+        );
+        let (state, _) = new_game(with_effect, 3).unwrap();
+        let carrier = all_cards(&state)
+            .into_iter()
+            .find(|c| !c.effects().is_empty())
+            .unwrap();
+        assert_eq!(carrier.effects(), &[on_play_draw()]);
+        assert_eq!(carrier.stats.cost, 4);
+    }
+
+    #[test]
+    fn a_spell_instance_has_its_cost_and_zeros() {
+        let mut s = setup(hero(2, 3, 8, vec![]), hero(1, 1, 8, vec![]));
+        s.one.cards[0] = crate::testing::spell(9);
+        let (state, _) = new_game(s, 3).unwrap();
+        let spell = all_cards(&state)
+            .into_iter()
+            .find(|c| c.is_spell())
+            .unwrap();
+        assert_eq!(
+            spell.stats,
+            duel_cards::CreatureStats {
+                cost: 9,
+                force: 0,
+                attack_cost: 0,
+                health: 0,
+                provocation: false,
+                riposte: 0
+            }
+        );
     }
 }

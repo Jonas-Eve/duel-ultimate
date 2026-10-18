@@ -477,6 +477,7 @@ mod tests {
             id: CardInstanceId(id),
             stats: stats_with(3, 4, 2, health, true, 1),
             name: name.map(str::to_owned),
+            extras: None,
         }
     }
 

@@ -7,16 +7,16 @@
 //! every candidate [`Use`] in the order of the legal actions, [`usable`] is the only judge of
 //! legality (called by `validate`, `legal_actions` and `check_exhaustion`), and [`decode`] /
 //! [`encode`] turn the wire [`Action`] into a [`Use`] and back. The attack is an intrinsic
-//! effect, synthesized for every creature of the board (never a line of data); a creature
-//! declares no effect at this stage.
+//! effect, synthesized for every creature of the board (never a line of data); a unit may declare
+//! effects (#208), carried by its instance but never resolved yet (`unsupported_effect`).
 
 use crate::combat;
 use crate::rules::{
-    Action, Event, Pick, RuleError, Target, board_position, hand_position, hero_effect,
-    opposing_board_position, play_blocker, provocation_allows,
+    Action, Event, Pick, RuleError, Target, attack_blocker, board_position, hand_position,
+    hero_effect, opposing_board_position, play_blocker_of, provocation_allows,
 };
 use crate::state::{CardInstance, CardInstanceId, GameState, PlayerId, WinReason};
-use duel_cards::Effect;
+use duel_cards::{Effect, Trigger};
 
 /// The values of a card the rules read: cost, force, attack cost, riposte and provocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,7 +53,7 @@ pub(crate) enum Source {
 }
 
 /// Which effect of a source: summoning a card, the intrinsic attack of a creature, or the effect
-/// of the hero's list at this index (a creature declares none).
+/// of the hero's list at this index (the effects a unit declares are not listed here yet).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EffectRef {
     Play,
@@ -83,7 +83,7 @@ pub(crate) enum Use<'a> {
 
 /// The effects a source of this kind carries, without looking for it in the state: `Play` for a
 /// card of the hand, `Attack` for a creature of the board, `Declared(i)` for the `declared`
-/// effects of the hero's list. A creature declares none.
+/// effects of the hero's list. The effects a unit declares are not listed here yet (#129).
 fn carried(source: Source, declared: usize) -> impl Iterator<Item = EffectRef> {
     let intrinsic = match source {
         Source::Hand(_) => Some(EffectRef::Play),
@@ -101,6 +101,10 @@ fn carried(source: Source, declared: usize) -> impl Iterator<Item = EffectRef> {
 /// The effects `source` carries for the active player: `Play` for a card of the hand, `Attack`
 /// for a creature of the board, `Declared(i)` for each effect of the hero's list, in order.
 /// Empty for a source that is not where it claims to be. The single accessor of this list.
+///
+/// Since #208 `usable` no longer asks it for the declared effects of a board unit (it reads the
+/// instance it already holds); #129 gives the units their listed effects back.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn effects_of(
     state: &GameState,
     source: Source,
@@ -264,7 +268,7 @@ pub(crate) fn encode(used: &Use<'_>) -> Option<Action> {
 
 /// The single legality predicate: whether the active player may use this now. The checks and
 /// their order are those `validate` always had (the game being over and the size of the picks
-/// are judged before, by `validate`). An attack adds no check of the force of the attacker.
+/// are judged before, by `validate`). An attack checks the force of its attacker (`attack_blocker`) right after the attacker.
 pub(crate) fn usable(state: &GameState, used: &Use<'_>) -> Result<(), RuleError> {
     let Use::Effect {
         source,
@@ -277,19 +281,26 @@ pub(crate) fn usable(state: &GameState, used: &Use<'_>) -> Result<(), RuleError>
     match (source, effect, choice) {
         (Source::Hand(card), EffectRef::Play, Choice::Picks(picks)) => {
             // The hand first: an id that is not in it gets `CardNotInHand` whatever the board.
-            hand_position(state, card).ok_or(RuleError::CardNotInHand)?;
+            let card = hand_position(state, card)
+                .and_then(|i| state.player(state.active).hand.get(i))
+                .ok_or(RuleError::CardNotInHand)?;
             // No summoning takes a choice at this stage.
             if !picks.is_empty() {
                 return Err(RuleError::InvalidPicks);
             }
-            play_blocker(state, state.active).map_or(Ok(()), Err)
+            play_blocker_of(state, state.active, card).map_or(Ok(()), Err)
         }
         (Source::Board(attacker), EffectRef::Attack, Choice::Target(target)) => {
-            // Order of the checks: the attacker, then the target on the opposing board, then
-            // the provocation. Every id that is not an opposing creature gets `TargetNotOnBoard`
+            // Order of the checks: the attacker, its force, then the target on the opposing
+            // board, then the provocation. Every id that is not an opposing creature gets `TargetNotOnBoard`
             // whatever zone (hidden or not) it is in, even when a provocateur exists: the
             // provocation error only ever speaks of the public board.
-            board_position(state, attacker).ok_or(RuleError::AttackerNotOnBoard)?;
+            let attacker = board_position(state, attacker)
+                .and_then(|i| state.player(state.active).board.get(i))
+                .ok_or(RuleError::AttackerNotOnBoard)?;
+            if let Some(blocked) = attack_blocker(state, attacker) {
+                return Err(blocked);
+            }
             if let Target::Creature(creature) = target {
                 opposing_board_position(state, creature).ok_or(RuleError::TargetNotOnBoard)?;
             }
@@ -311,15 +322,23 @@ pub(crate) fn usable(state: &GameState, used: &Use<'_>) -> Result<(), RuleError>
                 Err(RuleError::EffectNotApplicable)
             }
         }
-        (Source::Board(creature), EffectRef::Declared(_), _) => {
+        (Source::Board(creature), EffectRef::Declared(index), _) => {
             // One code for every id that is not a creature of my board (hand, pile, discard,
             // opposing board, unknown): no hidden zone is told apart.
-            board_position(state, creature).ok_or(RuleError::SourceNotOnBoard)?;
-            // A creature declares no effect at this stage: the board carries none to find.
-            if effects_of(state, source).any(|carried| carried == effect) {
-                Ok(())
-            } else {
-                Err(RuleError::UnknownEffect)
+            let unit = board_position(state, creature)
+                .and_then(|i| state.player(state.active).board.get(i))
+                .ok_or(RuleError::SourceNotOnBoard)?;
+            // A declared `activated` effect exists but is not resolved yet (temporary code, until
+            // #129); any other index, or an effect that is not `activated`, is no effect to
+            // activate.
+            let declared = usize::try_from(index)
+                .ok()
+                .and_then(|i| unit.effects().get(i));
+            match declared {
+                Some(declared) if declared.trigger == Trigger::Activated => {
+                    Err(RuleError::UnsupportedEffect)
+                }
+                _ => Err(RuleError::UnknownEffect),
             }
         }
         // A combination `decode` never builds (a card of the hand that attacks, a hero that
@@ -1017,7 +1036,9 @@ mod tests {
     }
 
     #[test]
-    fn a_force_zero_attacker_is_still_legal() {
+    fn a_force_zero_attacker_is_refused_whatever_the_target() {
+        // #208: an effective force of 0 cannot attack (`attack_force_zero`, before the target
+        // checks). `validate` refuses it and `legal_actions` never lists it.
         for seed in 0..5u64 {
             let mut state = with_boards(seed, rules_of(seed), 2, 1);
             let active = state.active;
@@ -1026,26 +1047,90 @@ mod tests {
                 side.board[0].stats.force = 0;
                 side.board[0].id
             };
-            // Whatever the provocation, one target is legal: the hero, or a provocateur.
-            let legal = legal_actions(&state);
-            let zero_attacks: Vec<&Action> = legal
-                .iter()
-                .filter(|a| matches!(a, Action::Attack { attacker: id, .. } if *id == attacker))
-                .collect();
             assert!(
-                !zero_attacks.is_empty(),
-                "seed {seed}: the force-0 attacker is not listed"
+                !legal_actions(&state)
+                    .iter()
+                    .any(|a| matches!(a, Action::Attack { attacker: id, .. } if *id == attacker)),
+                "seed {seed}: the force-0 attacker is listed"
             );
-            // Accepted by `validate` (listed); applying one is out of reach until #131
-            // (`plan_damage` debug-asserts a force of 1).
-            for action in zero_attacks {
+            let unknown = Target::Creature(crate::CardInstanceId(9_999));
+            for target in [Target::Hero, unknown] {
                 assert_eq!(
-                    crate::rules::validate(&state, action),
-                    Ok(()),
+                    crate::rules::validate(&state, &Action::Attack { attacker, target }),
+                    Err(RuleError::AttackForceZero),
                     "seed {seed}"
                 );
             }
+            // The other creature of the board keeps attacking.
+            let other = state.player(active).board[1].id;
+            assert!(
+                legal_actions(&state)
+                    .iter()
+                    .any(|a| matches!(a, Action::Attack { attacker: id, .. } if *id == other))
+            );
         }
+    }
+
+    #[test]
+    fn the_declared_effects_of_a_board_unit() {
+        use crate::state::CardExtras;
+        let mut state = with_boards(3, rules_of(3), 1, 0);
+        let active = state.active;
+        let id = state.player(active).board[0].id;
+        let make = |trigger: &str| -> duel_cards::CardEffect {
+            let cost = if trigger == "activated" {
+                r#""cost":2,"#
+            } else {
+                ""
+            };
+            serde_json::from_str(&format!(
+                r#"{{"trigger":"{trigger}",{cost}"ops":[{{"op":"draw","target":{{"select":"hero","side":"own"}},"count":1}}]}}"#
+            ))
+            .unwrap()
+        };
+        let continuous: duel_cards::CardEffect = serde_json::from_str(
+            r#"{"trigger":"continuous","ops":[{"op":"grant_keyword","target":{"select":"self"},"keyword":"ranged"}]}"#,
+        )
+        .unwrap();
+        // Index 0 is `on_play`, 2 `continuous` and index 1 `activated`: the trigger is what makes it activable.
+        state.player_mut(active).board[0].extras = Some(std::sync::Arc::new(CardExtras {
+            kind: crate::state::CardKind::Unit,
+            immobile: false,
+            tags: Vec::new(),
+            effects: vec![make("on_play"), make("activated"), continuous],
+        }));
+        let activate = |index: u32| Action::Activate {
+            effect: index,
+            source: Some(id),
+            picks: Vec::new(),
+        };
+        let judged = |action: &Action| crate::rules::validate(&state, action);
+        // An `activated` effect is declared, not yet resolvable: the temporary code.
+        assert_eq!(judged(&activate(1)), Err(RuleError::UnsupportedEffect));
+        // An `on_play` or `continuous` effect is not activable, an index past the list is no
+        // effect at all.
+        assert_eq!(judged(&activate(0)), Err(RuleError::UnknownEffect));
+        assert_eq!(judged(&activate(2)), Err(RuleError::UnknownEffect));
+        assert_eq!(judged(&activate(3)), Err(RuleError::UnknownEffect));
+        assert_eq!(judged(&activate(u32::MAX)), Err(RuleError::UnknownEffect));
+        // A source that is not on the board: the same code whatever the zone, before the index.
+        let elsewhere = state.player(active).hand[0].id;
+        for source in [elsewhere, crate::CardInstanceId(9_999)] {
+            let action = Action::Activate {
+                effect: 1,
+                source: Some(source),
+                picks: Vec::new(),
+            };
+            assert_eq!(judged(&action), Err(RuleError::SourceNotOnBoard));
+        }
+        // None of it is a legal action.
+        assert!(!legal_actions(&state).iter().any(|a| matches!(
+            a,
+            Action::Activate {
+                source: Some(_),
+                ..
+            }
+        )));
     }
 
     #[test]

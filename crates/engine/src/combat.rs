@@ -223,6 +223,7 @@ mod tests {
             id: CardInstanceId(id),
             stats: stats_with(1, force, 1, health, false, riposte),
             name: None,
+            extras: None,
         };
         state.one.board = vec![card(100, attacker)];
         state.two.board = vec![card(101, target)];
