@@ -431,7 +431,12 @@ tactile par défaut (`apps/web/playwright.config.ts`), interactions par `tap()`.
   annoncé et payé), `two-camps.e2e.ts` (cas 4 à 6 : provocation, riposte, deux camps, les trois fins),
   `layout.e2e.ts` (cas 7 et 8 : 360 px, CSP du build, 1280 px), `cards.e2e.ts` (#95, cartes compactes :
   boîte fixe de la face, contenu, symboles de deck, interactions, défausse « Détruite », contrôles mobiles),
-  `detail.e2e.ts` (#107, détail de carte : huit cas, voir ci-dessous).
+  `detail.e2e.ts` (#107, détail de carte : huit cas, voir ci-dessous), `greedy-computer.e2e.ts` (#162,
+  l'ordinateur gourmand : duels entiers sur les graines 42, 7 et 1234 avec chaque deck sans blocage ni abandon de
+  l'ordinateur, une seule annonce de fin de chaîne observée par `MutationObserver` avec son nombre d'actions égal
+  aux lignes du journal, même graine et mêmes choix humains donnent le même journal, « Rejouer » et retour à
+  l'accueil, 360 x 640 sans défilement horizontal, aucun appel à `Math.random` pendant une partie ; le bruit, `--policy`
+  et le rapport du simulateur sont couverts par les tests CLI, pas ici).
 - **Le détail de carte dans les e2e (#107)** : une tuile n'est plus un critère de jouabilité (toute tuile de main ou
   de plateau est un bouton qui ouvre le détail, même au tour de l'ordinateur) : ce qu'autorise le moteur se lit
   sur l'état de « Jouer (N temps) » (`aria-disabled`) et de la ligne « Attaque (N) : inflige D dégâts »
