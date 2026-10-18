@@ -5,7 +5,7 @@
 
 use crate::ruleset::RuleSet;
 use crate::setup::{GameSetup, PlayerSetup};
-use duel_cards::{Card, CardsError, Deck, parse_cards, parse_decks, resolve_deck_named};
+use duel_cards::{Card, CardSpec, CardsError, Deck, parse_cards, parse_decks, resolve_deck_named};
 
 /// Why a setup could not be built from data.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -33,7 +33,7 @@ pub fn player_setup(deck: &Deck, cards: &[Card]) -> Result<PlayerSetup, CardsErr
     let (stats, card_names) = resolve_deck_named(deck, cards)?;
     Ok(PlayerSetup {
         hero: deck.hero.clone(),
-        cards: stats,
+        cards: stats.into_iter().map(CardSpec::from).collect(),
         card_names,
     })
 }

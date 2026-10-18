@@ -80,12 +80,12 @@ fn arena(one: &[CreatureStats], two: &[CreatureStats], k: u32, pile: u32) -> Are
             GameSetup {
                 one: PlayerSetup {
                     hero: hero(2, n, 30 - pile),
-                    cards: one_cards.clone(),
+                    cards: one_cards.clone().into_iter().map(Into::into).collect(),
                     card_names: Vec::new(),
                 },
                 two: PlayerSetup {
                     hero: hero(1, 1, 30 - pile),
-                    cards: two_cards.clone(),
+                    cards: two_cards.clone().into_iter().map(Into::into).collect(),
                     card_names: Vec::new(),
                 },
                 data_versions: vec!["fixture@1.0.0".into()],

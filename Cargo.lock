@@ -135,6 +135,7 @@ dependencies = [
 name = "duel-ai"
 version = "0.1.0"
 dependencies = [
+ "duel-cards",
  "duel-engine",
  "rand 0.10.3",
  "rand_chacha 0.10.0",

@@ -41,7 +41,11 @@ fn by_hand(cards: &str, decks: &str, one: &str, two: &str, versions: &[&str]) ->
         let deck = decks.iter().find(|d| d.id == id).unwrap();
         PlayerSetup {
             hero: deck.hero.clone(),
-            cards: resolve_deck(deck, &cards).unwrap(),
+            cards: resolve_deck(deck, &cards)
+                .unwrap()
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             card_names: Vec::new(),
         }
     };

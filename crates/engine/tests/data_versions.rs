@@ -45,12 +45,12 @@ fn setup_with(versions: &[&str]) -> GameSetup {
     GameSetup {
         one: PlayerSetup {
             hero: hero(2, 3, 4, true),
-            cards: cards(),
+            cards: cards().into_iter().map(Into::into).collect(),
             card_names: Vec::new(),
         },
         two: PlayerSetup {
             hero: hero(1, 1, 4, true),
-            cards: cards(),
+            cards: cards().into_iter().map(Into::into).collect(),
             card_names: Vec::new(),
         },
         data_versions: versions.iter().map(|v| (*v).to_owned()).collect(),

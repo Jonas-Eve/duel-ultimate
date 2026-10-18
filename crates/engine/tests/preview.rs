@@ -179,7 +179,7 @@ fn hero(
 fn side(hero: Hero, card: CreatureStats) -> PlayerSetup {
     PlayerSetup {
         hero,
-        cards: vec![card; 30],
+        cards: vec![card; 30].into_iter().map(Into::into).collect(),
         card_names: Vec::new(),
     }
 }

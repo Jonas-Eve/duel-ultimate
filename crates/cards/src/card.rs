@@ -67,3 +67,47 @@ pub struct CreatureStats {
     #[serde(default)]
     pub riposte: u32,
 }
+
+/// A card as the engine setup consumes it: validated by `duel-cards`
+/// ([`validate_card_spec`](crate::validate_card_spec)), so that new kinds of card (buildings,
+/// spells) join as variants without touching the contract between crates.
+///
+/// A single variant for now. Its JSON is exactly the JSON of [`CreatureStats`]: `Serialize` and
+/// `Deserialize` are written by hand and delegate to it, so `deny_unknown_fields`, the optional
+/// `provocation` and `riposte` (four or six keys read, six always written) and the text of every
+/// serde error stay those of `CreatureStats` (`#[serde(untagged)]` would change the messages, and
+/// `transparent` does not apply to enums).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CardSpec {
+    Creature(CreatureStats),
+}
+
+impl CardSpec {
+    /// The creature stats of the card. Temporary: it exists because there is one variant; the
+    /// day another kind joins (#137), callers `match` on the kind instead.
+    pub fn creature(&self) -> &CreatureStats {
+        match self {
+            CardSpec::Creature(stats) => stats,
+        }
+    }
+}
+
+impl From<CreatureStats> for CardSpec {
+    fn from(stats: CreatureStats) -> Self {
+        CardSpec::Creature(stats)
+    }
+}
+
+impl Serialize for CardSpec {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            CardSpec::Creature(stats) => stats.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for CardSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        CreatureStats::deserialize(deserializer).map(CardSpec::Creature)
+    }
+}

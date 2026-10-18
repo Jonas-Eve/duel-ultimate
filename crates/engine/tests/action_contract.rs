@@ -161,7 +161,7 @@ fn hero(initiative: u32, start_budget: u32, starting_hand: u32) -> Hero {
 fn game(rules: RuleSet, starting_hand: u32, budget: u32) -> GameState {
     let side = |initiative| PlayerSetup {
         hero: hero(initiative, budget, starting_hand),
-        cards: vec![unit(); 30],
+        cards: vec![unit(); 30].into_iter().map(Into::into).collect(),
         card_names: Vec::new(),
     };
     new_game(
@@ -458,12 +458,12 @@ fn legal_actions_never_carry_picks_or_source() {
             GameSetup {
                 one: PlayerSetup {
                     hero: hero(2, 3, 4),
-                    cards: vec![unit(); 30],
+                    cards: vec![unit(); 30].into_iter().map(Into::into).collect(),
                     card_names: Vec::new(),
                 },
                 two: PlayerSetup {
                     hero: hero(1, 3, 4),
-                    cards: vec![unit(); 30],
+                    cards: vec![unit(); 30].into_iter().map(Into::into).collect(),
                     card_names: Vec::new(),
                 },
                 data_versions: Vec::new(),

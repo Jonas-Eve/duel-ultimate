@@ -319,6 +319,7 @@ fn greedy_sees_nothing_hidden() {
         // Same hero, same counts, other cards in another order.
         b.two.cards.rotate_left(1 + (seed as usize % 7));
         for card in b.two.cards.iter_mut().step_by(3) {
+            let duel_cards::CardSpec::Creature(card) = card;
             card.force += 1;
             card.health += 1;
         }

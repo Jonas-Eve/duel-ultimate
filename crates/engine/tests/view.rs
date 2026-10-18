@@ -108,7 +108,7 @@ impl Tracker {
 
     fn stats(&self, id: CardInstanceId) -> duel_cards::CreatureStats {
         let (side, i) = self.side(id);
-        side.cards[i].clone()
+        side.cards[i].creature().clone()
     }
 
     fn name(&self, id: CardInstanceId) -> Option<String> {
@@ -565,12 +565,15 @@ mod unavailable {
         GameSetup {
             one: PlayerSetup {
                 hero: hero(2, 20),
-                cards: vec![unit(1, 3); 30],
+                cards: vec![unit(1, 3); 30].into_iter().map(Into::into).collect(),
                 card_names: Vec::new(),
             },
             two: PlayerSetup {
                 hero: hero(1, 1),
-                cards: vec![unit(1, two_health); 30],
+                cards: vec![unit(1, two_health); 30]
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
                 card_names: Vec::new(),
             },
             data_versions: Vec::new(),

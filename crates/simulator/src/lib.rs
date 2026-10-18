@@ -67,6 +67,7 @@ pub fn setup_from(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use duel_cards::CardSpec;
     use duel_engine::{Event, WinReason, new_game};
 
     fn fixture_setup() -> GameSetup {
@@ -134,6 +135,7 @@ mod tests {
         let mut setup = fixture_setup();
         for side in [&mut setup.one, &mut setup.two] {
             for (n, card) in side.cards.iter_mut().enumerate() {
+                let CardSpec::Creature(card) = card;
                 card.riposte = u32::try_from(n % 5).expect("a small index");
                 card.provocation = n % 3 == 0;
             }

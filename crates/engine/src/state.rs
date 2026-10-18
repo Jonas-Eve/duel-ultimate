@@ -1025,8 +1025,8 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
         };
-        s.one.cards = cards(0);
-        s.two.cards = cards(2);
+        s.one.cards = cards(0).into_iter().map(Into::into).collect();
+        s.two.cards = cards(2).into_iter().map(Into::into).collect();
         new_game(s, seed).unwrap().0
     }
 
