@@ -196,3 +196,33 @@ fn is_plain_unit_is_false_for_a_spell_and_for_a_unit_with_effects() {
     assert!(!unit.is_plain_unit());
     assert_eq!(unit.creature(), Some(&stats()));
 }
+
+#[test]
+fn a_null_value_is_refused_except_for_the_attack_stats_and_the_kind() {
+    // `null` was never a value of `cost`, `health`, `provocation`, `riposte` (wasm test
+    // `a_setup_with_provocation_and_riposte_starts_and_hostile_forms_are_refused`), and still is
+    // not now that every field is read as an option.
+    for field in ["cost", "health", "provocation", "riposte", "immobile"] {
+        let mut json: serde_json::Value =
+            serde_json::from_str(r#"{"cost":1,"force":1,"attack_cost":1,"health":1}"#).unwrap();
+        json[field] = serde_json::Value::Null;
+        let error = serde_json::from_value::<CardSpec>(json).unwrap_err();
+        assert!(
+            error.to_string().contains("invalid type: null"),
+            "{field}: {error}"
+        );
+        let spell = serde_json::json!({"kind":"spell","cost":1,field:null,"effects":[]});
+        assert!(
+            serde_json::from_value::<CardSpec>(spell).is_err(),
+            "{field}"
+        );
+    }
+    // As since #206, `force`, `attack_cost` and `kind` read `null` as absent.
+    let json = r#"{"kind":null,"cost":1,"force":null,"attack_cost":null,"health":1}"#;
+    assert!(
+        serde_json::from_str::<CardSpec>(json)
+            .unwrap_err()
+            .to_string()
+            .contains("missing field `force`")
+    );
+}

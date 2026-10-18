@@ -253,25 +253,36 @@ enum SpecKind {
     Spell,
 }
 
+/// Reads a field that may be absent but never `null`: `Some` of the value, so that `"riposte":null`
+/// stays the serde error it always was. (`force`, `attack_cost` and `kind` keep reading `null` as
+/// absent, as since #206.)
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
 /// Read side of the wire form (flat, every field optional).
 #[derive(Deserialize)]
 #[serde(rename = "CardSpec", deny_unknown_fields)]
 struct SpecIn {
     #[serde(default)]
     kind: Option<SpecKind>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     cost: Option<u32>,
     #[serde(default)]
     force: Option<u32>,
     #[serde(default)]
     attack_cost: Option<u32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     health: Option<u32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     provocation: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     riposte: Option<u32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     immobile: Option<bool>,
     #[serde(default)]
     tags: Vec<String>,
