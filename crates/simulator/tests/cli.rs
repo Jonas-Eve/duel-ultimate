@@ -521,3 +521,128 @@ fn greedy_works_with_against_and_timing() {
     assert!(plain.status.success() && timed.status.success());
     assert_eq!(timed.stdout, plain.stdout);
 }
+
+// `--versus <candidate>,<reference>` (#190).
+
+fn refused(args: &[&str]) -> String {
+    let output = run(args);
+    assert_eq!(output.status.code(), Some(2), "{args:?}");
+    assert!(output.stdout.is_empty(), "{args:?}");
+    String::from_utf8(output.stderr).expect("utf-8 message")
+}
+
+#[test]
+fn cli_versus_prints_the_confrontation_report() {
+    let args = [
+        "8",
+        "--set",
+        "fixture",
+        "--seed",
+        "3",
+        "--versus",
+        "random,greedy",
+    ];
+    let output = run(&args);
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert!(output.stderr.is_empty());
+    let text = stdout(&output);
+    assert!(
+        text.starts_with(
+            "versus | set: fixture@1.0.0 | seed: 3 | games per matchup: 8 | action cap: "
+        ),
+        "{text:?}"
+    );
+    assert!(
+        text.lines().next().is_some_and(|line| line
+            .contains("| candidate: random | reference: greedy | rules: hero_riposte=on")),
+        "{text:?}"
+    );
+    assert!(
+        text.lines().any(|line| line.starts_with("total ")),
+        "{text:?}"
+    );
+    assert!(text.ends_with('\n'));
+    assert_eq!(text, stdout(&run(&args)), "deterministic");
+}
+
+#[test]
+fn cli_versus_keeps_the_rule_options_and_the_timing_line() {
+    let output = run(&[
+        "4",
+        "--set",
+        "fixture",
+        "--versus",
+        "greedy,random",
+        "--hero-riposte",
+        "off",
+        "--board-limit",
+        "none",
+        "--timing",
+    ]);
+    assert!(output.status.success());
+    let text = stdout(&output);
+    assert!(
+        text.lines()
+            .next()
+            .is_some_and(|line| line.ends_with("rules: hero_riposte=off board_limit=none")),
+        "{text:?}"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("utf-8");
+    assert!(stderr.starts_with("timing: 12 games, "), "{stderr:?}");
+}
+
+#[test]
+fn cli_versus_refuses_a_number_of_games_not_a_multiple_of_4() {
+    let message = refused(&["10", "--set", "fixture", "--versus", "random,greedy"]);
+    assert!(message.contains("multiple of 4"), "{message}");
+}
+
+#[test]
+fn cli_versus_refuses_bad_values() {
+    for (value, expected) in [
+        ("random,nope", "unknown policy \"nope\""),
+        ("random,random", "distinct"),
+        ("random", "two"),
+        ("random,greedy,random", "two"),
+        ("random,", "empty"),
+    ] {
+        let message = refused(&["8", "--versus", value]);
+        assert!(message.contains("--versus"), "{value}: {message}");
+        assert!(message.contains(expected), "{value}: {message}");
+    }
+    let message = refused(&["8", "--versus"]);
+    assert!(message.contains("--versus needs a value"), "{message}");
+    let message = refused(&[
+        "8",
+        "--versus",
+        "random,greedy",
+        "--versus",
+        "greedy,random",
+    ]);
+    assert!(message.contains("--versus given twice"), "{message}");
+}
+
+#[test]
+fn cli_versus_is_incompatible_with_policy_noise_and_against() {
+    for (flag, value) in [
+        ("--policy", "greedy"),
+        ("--noise", "10"),
+        ("--against", "fixture"),
+    ] {
+        let message = refused(&["8", "--versus", "random,greedy", flag, value]);
+        assert!(
+            message.contains("incompatible")
+                && message.contains("--versus")
+                && message.contains(flag),
+            "{flag}: {message}"
+        );
+        // In the other order too.
+        let message = refused(&["8", flag, value, "--versus", "random,greedy"]);
+        assert!(
+            message.contains("incompatible")
+                && message.contains("--versus")
+                && message.contains(flag),
+            "{flag}: {message}"
+        );
+    }
+}
