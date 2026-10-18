@@ -140,9 +140,9 @@ mod tests {
         let mut setup = fixture_setup();
         for side in [&mut setup.one, &mut setup.two] {
             for (n, card) in side.cards.iter_mut().enumerate() {
-                let CardSpec::Creature(card) = card;
-                card.riposte = u32::try_from(n % 5).expect("a small index");
-                card.provocation = n % 3 == 0;
+                let CardSpec::Unit(unit) = card;
+                unit.stats.riposte = u32::try_from(n % 5).expect("a small index");
+                unit.stats.provocation = n % 3 == 0;
             }
         }
         setup

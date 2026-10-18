@@ -19,11 +19,7 @@ fn expected_side(cards: &str, decks: &str, id: &str) -> PlayerSetup {
     let deck = decks.iter().find(|d| d.id == id).unwrap();
     PlayerSetup {
         hero: deck.hero.clone(),
-        cards: resolve_deck(deck, &cards)
-            .unwrap()
-            .into_iter()
-            .map(Into::into)
-            .collect(),
+        cards: resolve_deck(deck, &cards).unwrap(),
         card_names: deck
             .cards
             .iter()

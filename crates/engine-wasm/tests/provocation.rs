@@ -16,11 +16,7 @@ fn setup() -> Value {
     let decks = parse_decks(DECKS).unwrap();
     let side = |i: usize| PlayerSetup {
         hero: decks[i].hero.clone(),
-        cards: resolve_deck(&decks[i], &cards)
-            .unwrap()
-            .into_iter()
-            .map(Into::into)
-            .collect(),
+        cards: resolve_deck(&decks[i], &cards).unwrap(),
         card_names: Vec::new(),
     };
     let mut setup = serde_json::to_value(GameSetup {

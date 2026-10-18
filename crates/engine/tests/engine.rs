@@ -1369,7 +1369,7 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 /// The stats of a card, to edit them in place (`CardSpec` has a single variant for now).
 fn stats_mut(spec: &mut CardSpec) -> &mut CreatureStats {
     match spec {
-        CardSpec::Creature(stats) => stats,
+        CardSpec::Unit(unit) => &mut unit.stats,
     }
 }
 
