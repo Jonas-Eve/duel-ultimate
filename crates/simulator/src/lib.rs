@@ -23,6 +23,7 @@ pub mod batch;
 pub mod diff;
 pub mod report;
 pub mod stats;
+pub mod versus;
 
 pub use batch::{
     BatchConfig, Contender, DEFAULT_MAX_ACTIONS, GameRecord, NamedPolicy, contenders_from,
@@ -36,6 +37,10 @@ pub use report::{
     PolicyReport, PolicySummary, Report, rules_label,
 };
 pub use stats::{fmt_mean, fmt_share, percent, wilson_95};
+pub use versus::{
+    StepCounts, VersusGame, VersusMatchup, VersusReport, VersusSide, VersusTally, run_versus,
+    run_versus_observed, step_counts,
+};
 
 use duel_cards::{parse_cards, parse_decks};
 use duel_engine::{GameSetup, PlayerSetup, RuleSet, player_setup};

@@ -171,7 +171,7 @@ pub fn play_game_seats(
 
 /// The matchups of `decks` decks: every cross pair `i < j` in lexicographic order, then every
 /// mirror in deck order. The order is part of the determinism contract (it enters the seeds).
-fn matchups(decks: usize) -> Vec<(usize, usize)> {
+pub(crate) fn matchups(decks: usize) -> Vec<(usize, usize)> {
     let mut list = Vec::new();
     for i in 0..decks {
         for j in i + 1..decks {
@@ -276,7 +276,12 @@ pub fn run_batch_observed(
 
 /// The setup of a duel between contenders `one` (seat One) and `two` (seat Two): their decks,
 /// the data versions and the rules of the batch.
-fn game_setup(contenders: &[Contender], config: &BatchConfig, one: usize, two: usize) -> GameSetup {
+pub(crate) fn game_setup(
+    contenders: &[Contender],
+    config: &BatchConfig,
+    one: usize,
+    two: usize,
+) -> GameSetup {
     GameSetup {
         one: contenders[one].player.clone(),
         two: contenders[two].player.clone(),
