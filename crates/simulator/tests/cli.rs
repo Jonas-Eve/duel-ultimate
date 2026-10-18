@@ -394,7 +394,7 @@ fn section(text: &str, name: &str) -> String {
         .iter()
         .position(|line| line.starts_with("policy: "))
         .map_or(lines.len(), |offset| start + 1 + offset);
-    lines[start..end].join("\n")
+    lines[start..end].join("\n").trim_end().to_owned()
 }
 
 fn section_names(text: &str) -> Vec<&str> {
@@ -429,7 +429,7 @@ fn policy_greedy_prints_a_greedy_section_and_is_deterministic() {
 fn policy_list_prints_one_section_per_policy_in_the_given_order() {
     let both = stdout(&run(&["10", "--seed", "4", "--policy", "greedy,random"]));
     assert_eq!(section_names(&both), ["greedy", "random"]);
-    assert!(both.contains("policies: greedy,random"), "{both:?}");
+    assert!(both.contains("policies: greedy, random"), "{both:?}");
     let random_alone = stdout(&run(&["10", "--seed", "4", "--policy", "random"]));
     let greedy_alone = stdout(&run(&["10", "--seed", "4", "--policy", "greedy"]));
     assert_eq!(section(&both, "random"), section(&random_alone, "random"));
