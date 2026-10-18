@@ -27,7 +27,7 @@ fn resolved(id: &str) -> Vec<CreatureStats> {
     resolve_deck(deck(&decks, id), &cards())
         .expect("deck resolves")
         .iter()
-        .map(|spec| spec.creature().clone())
+        .map(|spec| spec.creature().unwrap().clone())
         .collect()
 }
 

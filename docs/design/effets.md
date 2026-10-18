@@ -227,7 +227,6 @@ de carte, même aperçu). Une carte liste ses effets d'attaque.
   "op": "attack",
   "target": "<sélecteur>",
   "amount": 3,
-  "cost": 2,
   "ignores_provocation": false,
   "attackers": 2,
   "mode": "simultaneous",
@@ -240,11 +239,20 @@ de carte, même aperçu). Une carte liste ses effets d'attaque.
 | `op` | chaîne | `attack`. |
 | `target` | sélecteur | Un seul pour tous les attaquants ; typiquement `hero_or_creature(camp)`. |
 | `amount` | u32 | >= 1 (zéro refusé). |
-| `cost` | u32 | >= 1, coût propre de l'effet. |
+| `cost` | u32 | porté par l'effet (une seule fois), absent de l'opération : voir ci-dessous. |
 | `ignores_provocation` | booléen | Défaut faux ; lu par le filtre unique `provocation_allows`. |
 | `attackers` | entier | 1 à 2 en vague 1, défaut 1. |
 | `mode` | `simultaneous` ou `chained` | Exigé si `attackers` >= 2, refusé si `attackers` = 1. |
 | `scales_with_force` | booléen | Défaut faux (décision validée n° 3). |
+
+**Où est écrit le coût (précision de #137, D1).** Le coût d'une attaque spéciale est le coût de
+**l'effet** `activated` qui la contient (>= 1, écrit une seule fois : `{"trigger":"activated",
+"cost":2,"ops":[{"op":"attack",...}]}`) ; l'opération `attack` n'a pas de clé `cost`, parce qu'un
+effet à plusieurs opérations n'a qu'un coût. La décision n° 4 est respectée sur le fond (un coût
+>= 1 propre à l'effet), seule la place de la clé est précisée. **D4** : en vague 1, le `side` du
+sélecteur d'une opération `attack` vaut `opposing` seulement (une attaque ne vise jamais son
+propre camp) ; relâcher plus tard est additif. **D2** : une unité immobile ne déclare aucun effet
+`attack` en vague 1 (elle peut déclarer tout autre effet).
 
 **`ModifyStat` sur la force.** Il s'applique aux effets d'attaque **dérivés du champ plat `force`**
 (l'attaque normale). Une attaque spéciale explicite utilise **son propre montant**, insensible à
@@ -336,9 +344,12 @@ données** et est normalisé vers le type d'effet unifié.
 
 ## 13. Bornes de combinatoire
 
-- `MAX_CARD_EFFECTS` d'environ 4 et `MAX_OPS_PER_EFFECT` d'environ 3 ; valeurs finales fixées par
-  #137.
-- `picks` : au plus 8.
+- Valeurs finales fixées par #137 : `MAX_CARD_EFFECTS` = 4, `MAX_OPS_PER_EFFECT` = 3 et
+  `MAX_EFFECT_PICKS` = 3 (choix attendus par effet : une attaque à deux attaquants et une cible, ou
+  trois choix simples). Avec `board_limit` = 5, chaque choix a environ 12 cibles, soit environ
+  1 700 actions par usage à 3 choix ; à 8 l'aperçu (un clone par action légale) exploserait.
+- `picks` d'une action : au plus 8 (constante de sécurité du moteur, `MAX_PICKS`) ;
+  `MAX_EFFECT_PICKS` <= `MAX_PICKS`, gardé par un test du moteur.
 - Un plafond dur de résolutions par action sera posé avec `on_event`, en défense en profondeur.
 - Les valeurs de carte et les `picks` sont **non fiables** : le moteur les valide toujours.
 
@@ -352,3 +363,92 @@ de classe S ou N avec compteur d'usage ; type équipement.
 
 Hors périmètre de ce document : tout code moteur, les enums Rust et la validation `CardsError`
 (#137), le prix (#133), les nouvelles cartes, les illustrations.
+
+## 15. Écriture JSON (#137)
+
+Les effets s'écrivent dans `cards.json`, sur une unité (`kind` `unit`, lu aussi `creature`) ou sur
+un sort (`kind` `spell`). Un effet est `{ "trigger", "cost"?, "ops" }` : `cost` seulement pour un
+effet `activated` ; la durée est dérivée du déclencheur et jamais écrite (`on_play` et `activated`
+: `instant`, `continuous` : `while_source_in_play`). Une opération est un objet à clé `op`
+(`attack`, `deal_damage`, `draw`, `modify_stat`, `grant_keyword`) ; son sélecteur est
+`{ "select": ..., "side": ... }` (`self` n'a pas de `side`). Les valeurs par défaut sont omises
+(`ignores_provocation` et `scales_with_force` faux, `attackers` 1, pas de `mode`). Bornes : 4
+effets par carte, 3 opérations par effet, 3 choix attendus par effet. L'attaque normale d'une unité
+n'est jamais écrite : elle reste dérivée de `force` et `attack_cost`. Un sort s'écrit avec `cost` et
+des effets `on_play` seulement (au moins un), sans `force`, `health` ni les autres champs d'une
+unité.
+
+Un sort de dégâts directs puis pioche, et une unité qui pioche à la pose :
+
+```json
+[
+  {
+    "kind": "spell", "id": "eclair", "name": "Éclair", "cost": 2,
+    "effects": [
+      { "trigger": "on_play", "ops": [
+        { "op": "deal_damage", "target": { "select": "hero_or_unit", "side": "opposing" }, "amount": 2 },
+        { "op": "draw", "target": { "select": "hero", "side": "own" }, "count": 1 }
+      ] }
+    ]
+  },
+  {
+    "kind": "unit", "id": "eclaireur", "name": "Éclaireur",
+    "cost": 2, "force": 1, "attack_cost": 1, "health": 2,
+    "effects": [
+      { "trigger": "on_play", "ops": [
+        { "op": "draw", "target": { "select": "hero", "side": "own" }, "count": 1 }
+      ] }
+    ]
+  }
+]
+```
+
+Une unité à attaque spéciale activée : le coût est celui de l'effet, l'opération n'a pas de
+`cost`, et `mode` est exigé parce que `attackers` vaut 2.
+
+```json
+[
+  {
+    "kind": "unit", "id": "duelliste", "name": "Duelliste",
+    "cost": 4, "force": 2, "attack_cost": 2, "health": 4,
+    "effects": [
+      { "trigger": "activated", "cost": 3, "ops": [
+        { "op": "attack", "target": { "select": "hero_or_unit", "side": "opposing" }, "amount": 3,
+          "ignores_provocation": true, "scales_with_force": true,
+          "attackers": 2, "mode": "simultaneous" }
+      ] }
+    ]
+  }
+]
+```
+
+Une unité aux effets continus, et un bâtiment (unité `immobile` portant l'étiquette `bâtiment`,
+déclarée dans la liste fermée du jeu) qui n'a ni `force` ni `attack_cost` et aucun effet `attack` :
+
+```json
+[
+  {
+    "kind": "unit", "id": "etendard", "name": "Étendard",
+    "cost": 3, "force": 1, "attack_cost": 2, "health": 3,
+    "effects": [
+      { "trigger": "continuous", "ops": [
+        { "op": "modify_stat", "target": { "select": "all_units", "side": "own" }, "stat": "force", "delta": 1 },
+        { "op": "grant_keyword", "target": { "select": "self" }, "keyword": "ranged" }
+      ] }
+    ]
+  },
+  {
+    "kind": "unit", "id": "tour", "name": "Tour de guet",
+    "cost": 3, "health": 6, "immobile": true, "tags": ["bâtiment"],
+    "effects": [
+      { "trigger": "activated", "cost": 2, "ops": [
+        { "op": "deal_damage", "target": { "select": "hero_or_unit", "side": "opposing" }, "amount": 1 }
+      ] }
+    ]
+  }
+]
+```
+
+La polarité (`bonus`, `malus` ou `neutre`, du point de vue du propriétaire de la carte) se dérive
+du signe de l'opération pour le camp affecté et de ce camp, jamais stockée ; la liste de choix d'un
+effet (`expected_picks`) est dérivée de ses opérations : les attaquants d'abord, puis la cible.

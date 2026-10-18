@@ -1,0 +1,82 @@
+[
+  {
+    "kind": "spell", "id": "eclair", "name": "Éclair", "cost": 2,
+    "effects": [
+      {"trigger": "on_play", "ops": [
+        {"op": "deal_damage", "target": {"select": "hero_or_unit", "side": "opposing"}, "amount": 2},
+        {"op": "draw", "target": {"select": "hero", "side": "own"}, "count": 1}
+      ]}
+    ]
+  },
+  {
+    "kind": "spell", "id": "charge", "name": "Charge conjointe", "cost": 3,
+    "effects": [
+      {"trigger": "on_play", "ops": [
+        {"op": "attack", "target": {"select": "hero_or_unit", "side": "opposing"}, "amount": 2, "attackers": 2, "mode": "chained"}
+      ]}
+    ]
+  },
+  {
+    "kind": "unit", "id": "eclaireur", "name": "Éclaireur", "cost": 2, "force": 1, "attack_cost": 1, "health": 2,
+    "effects": [
+      {"trigger": "on_play", "ops": [
+        {"op": "draw", "target": {"select": "hero", "side": "own"}, "count": 1}
+      ]}
+    ]
+  },
+  {
+    "kind": "unit", "id": "duelliste", "name": "Duelliste", "cost": 4, "force": 2, "attack_cost": 2, "health": 4,
+    "effects": [
+      {"trigger": "activated", "cost": 3, "ops": [
+        {"op": "attack", "target": {"select": "hero_or_unit", "side": "opposing"}, "amount": 3,
+         "ignores_provocation": true, "scales_with_force": true, "attackers": 2, "mode": "simultaneous"}
+      ]}
+    ]
+  },
+  {
+    "kind": "unit", "id": "etendard", "name": "Étendard", "cost": 3, "force": 1, "attack_cost": 2, "health": 3,
+    "effects": [
+      {"trigger": "continuous", "ops": [
+        {"op": "modify_stat", "target": {"select": "all_units", "side": "own"}, "stat": "force", "delta": 1},
+        {"op": "grant_keyword", "target": {"select": "self"}, "keyword": "ranged"}
+      ]}
+    ]
+  },
+  {
+    "kind": "unit", "id": "tour", "name": "Tour de guet", "cost": 3, "health": 6, "immobile": true, "tags": ["bâtiment"],
+    "effects": [
+      {"trigger": "on_play", "ops": [
+        {"op": "draw", "target": {"select": "hero", "side": "own"}, "count": 1}
+      ]},
+      {"trigger": "activated", "cost": 2, "ops": [
+        {"op": "deal_damage", "target": {"select": "hero_or_unit", "side": "opposing"}, "amount": 1}
+      ]}
+    ]
+  },
+  {
+    "kind": "unit", "id": "orage", "name": "Orage", "cost": 5, "force": 2, "attack_cost": 3, "health": 4,
+    "effects": [
+      {"trigger": "activated", "cost": 3, "ops": [
+        {"op": "deal_damage", "target": {"select": "all_units", "side": "opposing"}, "amount": 1}
+      ]}
+    ]
+  },
+  {
+    "kind": "unit", "id": "malediction", "name": "Malédiction", "cost": 2, "force": 1, "attack_cost": 1, "health": 2,
+    "effects": [
+      {"trigger": "continuous", "ops": [
+        {"op": "modify_stat", "target": {"select": "unit", "side": "opposing"}, "stat": "force", "delta": -1}
+      ]}
+    ]
+  },
+  {
+    "kind": "unit", "id": "forge", "name": "Forge", "cost": 4, "force": 2, "attack_cost": 2, "health": 3,
+    "effects": [
+      {"trigger": "continuous", "ops": [
+        {"op": "modify_stat", "target": {"select": "all_units", "side": "own"}, "stat": "riposte", "delta": 2},
+        {"op": "modify_stat", "target": {"select": "all_units", "side": "own"}, "stat": "cost", "delta": -1},
+        {"op": "modify_stat", "target": {"select": "all_units", "side": "opposing"}, "stat": "attack_cost", "delta": 1}
+      ]}
+    ]
+  }
+]

@@ -53,7 +53,7 @@ fn the_frozen_sets_are_read_unchanged() {
         for card in &cards {
             let spec = card.spec();
             assert!(spec.is_plain_unit(), "{}", card.id());
-            assert_eq!(spec.creature(), &card.stats(), "{}", card.id());
+            assert_eq!(spec.creature().unwrap(), &card.stats(), "{}", card.id());
         }
     }
 }
@@ -73,7 +73,7 @@ fn a_spec_with_kind_unit_or_creature_is_read() {
             r#"{{"kind":"{kind}","cost":1,"force":2,"attack_cost":3,"health":4,"riposte":2}}"#
         );
         let spec: CardSpec = serde_json::from_str(&json).unwrap();
-        assert_eq!(spec.creature().riposte, 2, "{kind}");
+        assert_eq!(spec.creature().unwrap().riposte, 2, "{kind}");
         let written = serde_json::to_string(&spec).unwrap();
         assert!(!written.contains("kind"), "{written}");
     }
@@ -194,7 +194,15 @@ fn immobile_spec() -> CardSpec {
         },
         immobile: true,
         tags: vec![],
+        effects: vec![],
     })
+}
+
+fn unit_of(spec: CardSpec) -> UnitSpec {
+    match spec {
+        CardSpec::Unit(unit) => unit,
+        CardSpec::Spell(_) => panic!("a unit was expected"),
+    }
 }
 
 #[test]
@@ -210,9 +218,7 @@ fn an_immobile_spec_is_written_without_force_and_attack_cost() {
     );
     let tagged = CardSpec::Unit(UnitSpec {
         tags: vec!["bâtiment".into()],
-        ..match immobile_spec() {
-            CardSpec::Unit(unit) => unit,
-        }
+        ..unit_of(immobile_spec())
     });
     assert_eq!(
         serde_json::to_string(&tagged).unwrap(),
@@ -255,7 +261,7 @@ fn a_mobile_spec_without_force_is_refused_by_serde() {
 #[test]
 fn validate_card_spec_refuses_an_immobile_spec_with_a_force() {
     // Defence in depth: built by hand, never through serde.
-    let CardSpec::Unit(mut unit) = immobile_spec();
+    let mut unit = unit_of(immobile_spec());
     assert_eq!(validate_card_spec(&CardSpec::Unit(unit.clone())), Ok(()));
     unit.stats.force = 3;
     assert_eq!(

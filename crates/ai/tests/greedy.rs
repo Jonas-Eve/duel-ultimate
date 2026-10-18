@@ -319,7 +319,9 @@ fn greedy_sees_nothing_hidden() {
         // Same hero, same counts, other cards in another order.
         b.two.cards.rotate_left(1 + (seed as usize % 7));
         for card in b.two.cards.iter_mut().step_by(3) {
-            let duel_cards::CardSpec::Unit(unit) = card;
+            let duel_cards::CardSpec::Unit(unit) = card else {
+                panic!("a unit was expected");
+            };
             unit.stats.force += 1;
             unit.stats.health += 1;
         }

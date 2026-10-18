@@ -36,6 +36,7 @@ fn card(id: &str, provocation: bool, riposte: u32) -> Card {
         riposte,
         immobile: false,
         tags: vec![],
+        effects: vec![],
     }
 }
 
@@ -214,9 +215,9 @@ fn resolve_deck_passes_both_fields_through_in_deck_order() {
     ids[0] = "a";
     ids[1] = "c";
     let resolved = resolve_deck(&deck_of(&ids), &cards).unwrap();
-    assert_eq!(resolved[0].creature(), &stats(true, 2));
-    assert_eq!(resolved[1].creature(), &stats(false, 9));
-    assert_eq!(resolved[2].creature(), &stats(false, 0));
+    assert_eq!(resolved[0].creature().unwrap(), &stats(true, 2));
+    assert_eq!(resolved[1].creature().unwrap(), &stats(false, 9));
+    assert_eq!(resolved[2].creature().unwrap(), &stats(false, 0));
 }
 
 #[test]
@@ -230,8 +231,8 @@ fn the_fixture_has_no_provocation_and_no_riposte_anywhere() {
     }
     for deck in parse_decks(FIXTURE_DECKS).unwrap() {
         for s in resolve_deck(&deck, &cards).unwrap() {
-            assert!(!s.creature().provocation);
-            assert_eq!(s.creature().riposte, 0);
+            assert!(!s.creature().unwrap().provocation);
+            assert_eq!(s.creature().unwrap().riposte, 0);
         }
     }
 }
