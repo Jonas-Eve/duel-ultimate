@@ -7,6 +7,12 @@
 //! attacker); `board_limit` acts since #171 (`rules::play_blocker`: a full board refuses a
 //! summoning, `RuleError::BoardFull`). Neither is read by a potential formula, and neither
 //! touches the generator.
+//!
+//! Since #172 (story #127) the engine default is [`RuleSet::standard`] (hero riposte on, board
+//! limit 5), and [`RuleSet::legacy`] (every option off, the behaviour before the options) is
+//! frozen as the reference. This breaks the replay of journals recorded with the old default:
+//! a game's `GameStarted` carries `rules` only when it is not the default, so a missing key
+//! means "the default of the engine that replays it".
 
 use duel_cards::DECK_SIZE;
 use serde::{Deserialize, Serialize};
@@ -37,9 +43,10 @@ pub struct RuleSet {
 }
 
 impl Default for RuleSet {
-    /// The engine default. Written by hand, not derived: the switch of the default changes this body (and only it).
+    /// The engine default: [`RuleSet::standard`] since #127 (before: `legacy`). Written by hand,
+    /// not derived: a later change of the default changes this body (and only it).
     fn default() -> Self {
-        Self::legacy()
+        Self::standard()
     }
 }
 

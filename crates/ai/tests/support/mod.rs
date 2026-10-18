@@ -161,6 +161,18 @@ pub fn game_from(one: Value, two: Value) -> GameState {
     new_game(setup, 1).expect("a valid scenario game").0
 }
 
+/// `game_from` with the options off (`RuleSet::legacy()`): for a scenario that needs an attacker
+/// to survive a hit on the hero, which the default rules (hero riposte) no longer allow.
+#[allow(dead_code)]
+pub fn legacy_game_from(one: Value, two: Value) -> GameState {
+    let setup: GameSetup = serde_json::from_value(json!({
+        "one": one, "two": two, "data_versions": [],
+        "rules": {"hero_riposte": false, "board_limit": null},
+    }))
+    .expect("a valid scenario setup");
+    new_game(setup, 1).expect("a valid scenario game").0
+}
+
 /// The id of the first card called `name` in the hand of `seat`.
 pub fn in_hand(state: &GameState, seat: PlayerId, name: &str) -> CardInstanceId {
     player_view(state, seat)

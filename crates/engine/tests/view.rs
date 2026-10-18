@@ -239,7 +239,17 @@ fn check_views(state: &GameState, t: &Tracker, context: &str) {
             view.opponent.hero.health, t.hero_health[theirs],
             "{context}"
         );
-        let mut hand = view.you.hand.clone();
+        // The tracker knows the cards, not the reason a card cannot be played (a full board
+        // under the standard rules): that reason is pinned by the `unavailable` module below.
+        let mut hand: Vec<_> = view
+            .you
+            .hand
+            .iter()
+            .map(|c| CardView {
+                unavailable: None,
+                ..c.clone()
+            })
+            .collect();
         hand.sort_by_key(|c| c.id);
         assert_eq!(
             hand,

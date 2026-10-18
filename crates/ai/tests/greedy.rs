@@ -254,7 +254,9 @@ fn never_hands_over_into_a_loss_by_exhaustion_when_another_action_exists() {
     let mut two = Hero::second(30);
     two.start_budget = 3;
     let hitter = card("hitter", 1, 1, 1).attack_cost(3);
-    let mut state = game_from(
+    // The options off: the hitter survives its hit on the hero (the scenario is a trap by
+    // exhaustion; the sacrifice by hero riposte is weighed by the dry run, measured in #127 T4).
+    let mut state = legacy_game_from(
         clones(&one, &hitter, 1),
         side(&two, &[card("t", 1, 5, 1).riposte(5)], 30),
     );

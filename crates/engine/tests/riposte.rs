@@ -42,6 +42,17 @@ fn hero(initiative: u32, start_budget: u32, max_time: u32) -> Hero {
 /// time units. The other cards are plain creatures left in hand, so nobody is exhausted.
 /// Two's `max_time` is `two_max` (at least `two.len()`).
 fn arena(one: &[CreatureStats], two: &[CreatureStats], k: u32, two_max: u32) -> GameState {
+    arena_with(RuleSet::default(), one, two, k, two_max)
+}
+
+/// `arena` under the given rules.
+fn arena_with(
+    rules: RuleSet,
+    one: &[CreatureStats],
+    two: &[CreatureStats],
+    k: u32,
+    two_max: u32,
+) -> GameState {
     let (n, m) = (one.len() as u32, two.len() as u32);
     assert!(n >= 1 && m >= 1 && n < 30 && m < 30 && m <= two_max);
     let mut one_cards = one.to_vec();
@@ -63,7 +74,7 @@ fn arena(one: &[CreatureStats], two: &[CreatureStats], k: u32, two_max: u32) -> 
                 card_names: Vec::new(),
             },
             data_versions: vec!["fixture@1.0.0".into()],
-            rules: RuleSet::default(),
+            rules,
         },
         7,
     )
@@ -81,6 +92,10 @@ fn arena(one: &[CreatureStats], two: &[CreatureStats], k: u32, two_max: u32) -> 
 /// One creature (id 0) facing one creature (id 30), One active with `k` time units.
 fn duel(a: CreatureStats, x: CreatureStats, k: u32) -> GameState {
     arena(&[a], &[x], k, 30)
+}
+
+fn duel_with(rules: RuleSet, a: CreatureStats, x: CreatureStats, k: u32) -> GameState {
+    arena_with(rules, &[a], &[x], k, 30)
 }
 
 fn strike(attacker: CardInstanceId, victim: CardInstanceId) -> Action {
@@ -271,8 +286,10 @@ fn simultaneous_deaths_with_a_handover_end_the_log_with_the_token_crossing() {
 
 #[test]
 fn the_active_player_two_is_riposted_too_and_dies_in_id_order() {
-    // One hits the hero with its whole budget (attack cost 1 of 1) to give Two the token.
-    let mut state = duel(unit(1, 3, 3, 1), unit(3, 3, 3, 1), 1);
+    // One hits the hero with its whole budget (attack cost 1 of 1) to give Two the token. The
+    // options off: the creature of One survives that hit (under the standard rules the hero
+    // would destroy it, and there would be nothing left for Two to strike).
+    let mut state = duel_with(RuleSet::legacy(), unit(1, 3, 3, 1), unit(3, 3, 3, 1), 1);
     apply(&mut state, hit(id(0))).unwrap();
     assert_eq!((state.active(), state.budget()), (PlayerId::Two, 1));
     let events = apply(&mut state, strike(id(30), id(0))).unwrap();
@@ -320,8 +337,11 @@ fn a_riposte_far_above_the_attackers_health_saturates_without_panicking() {
 
 #[test]
 fn an_attack_on_the_hero_never_provokes_a_riposte() {
+    // Creatures never riposte a hit on the hero. With the options off the hero has no riposte
+    // either, so the attacker is untouched: the rules before the hero riposte (#170).
     // Two's board is full of ripostants, none with provocation.
-    let mut state = arena(
+    let mut state = arena_with(
+        RuleSet::legacy(),
         &[unit(3, 5, 0, 1)],
         &[unit(1, 5, 4, 1), unit(1, 5, 4, 1)],
         3,
@@ -340,6 +360,26 @@ fn an_attack_on_the_hero_never_provokes_a_riposte() {
         ]
     );
     assert_eq!(state.creature_health(id(0)), Some(5));
+}
+
+#[test]
+fn under_the_standard_rules_only_the_hero_ripostes_a_hit_on_the_hero() {
+    // The same attack under the default rules: the ripostants of Two's board stay silent (no
+    // `riposted`), the hero alone destroys the attacker (`hero_riposted`).
+    let mut state = arena(
+        &[unit(3, 5, 0, 1)],
+        &[unit(1, 5, 4, 1), unit(1, 5, 4, 1)],
+        3,
+        30,
+    );
+    let events = apply(&mut state, hit(id(0))).unwrap();
+    assert!(!events.iter().any(|e| matches!(e, Event::Riposted { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::HeroRiposted { .. }))
+    );
+    assert_eq!(state.creature_health(id(0)), None);
 }
 
 #[test]
