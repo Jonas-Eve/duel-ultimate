@@ -75,7 +75,9 @@ Règles propres à ce repo :
   les aides de `e2e/support.ts` (`openDetail`, `playFromDetail`, `tapCard`, `selectAttacker`, `attackWith`) ouvrent le détail puis
   touchent « Jouer » ou la ligne d'attaque et lisent leur `aria-disabled`, et `e2e/detail.e2e.ts` (#107, huit cas : ouvrir et
   fermer, jouer avec passation, attaque face à un provocateur, détail adverse en lecture seule, choix de cible, tour de
-  l'ordinateur, deux camps, 360 x 640) couvre le détail ; seul le cas du tour de l'ordinateur retient les `setTimeout` à zéro de
+  l'ordinateur, deux camps, 360 x 640) couvre le détail, et `e2e/greedy-computer.e2e.ts` (#162, quinze cas contre
+  l'ordinateur gourmand : duels entiers graines 42, 7 et 1234 avec chaque deck, une seule annonce de fin de chaîne
+  (`MutationObserver`), déterminisme du journal par graine, « Rejouer », 360 x 640, `Math.random` jamais appelé en partie) ; seul le cas du tour de l'ordinateur retient les `setTimeout` à zéro de
   la page jusqu'à ce que le test les relâche. **Dérogation à « dernière version stable » (§3), consignée et validée
   par le propriétaire** : `@playwright/test` est épinglé à **1.56.1** (avec `playwright-core` 1.56.1,
   pair de `@axe-core/playwright`), la dernière version exécutable avec le Chromium 141 préinstallé
