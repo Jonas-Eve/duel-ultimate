@@ -18,12 +18,14 @@
 //! `ends_game`) and the budget after it, obtained by a dry run on a clone
 //! (`duel_engine::preview_legal_actions`); `legal_actions` and `apply` are unchanged.
 //! `computer_action(seat, policy, draw)` is the computer's choice (`duel_ai::choose`): a pure function
-//! of the state, the active seat, a policy of the closed list (`"random"`) and a caller-supplied
-//! `u32`, so no generator lives in the binding and nothing is read from the system.
+//! of the state, the active seat, a policy of the closed list (`"random"`, `"greedy"`, each
+//! resolved by `duel_ai::policy_named`) and a caller-supplied `u32`, so no generator lives in the
+//! binding and nothing is read from the system. `"greedy"` ignores `draw` (a pure function of the
+//! state, the same code as the simulator), `"random"` depends on it.
 //! [`Duel`] holds the logic and is testable natively; [`Game`] only converts its errors
 //! to `JsError` (which cannot be built off the wasm target).
 
-use duel_ai::{AiError, choose, random_policy, rng_from_draw};
+use duel_ai::{AiError, choose, policy_named, rng_from_draw};
 use duel_engine::{
     Action, Event, GameSetup, GameState, PlayerId, RuleSet, apply, game_setup_from_data,
     legal_actions, new_game, player_view, preview_legal_actions,
@@ -140,8 +142,8 @@ impl Duel {
     /// policy, `game_over`, `not_active_seat`, then the choice (`computer_stuck` when nothing but
     /// `Concede` is playable).
     ///
-    /// The choice is a pure function of (state, seat, policy, `draw`): `draw` is supplied by the
-    /// caller, the policy's generator is built fresh from it at every call
+    /// The choice is a pure function of (state, seat, policy, `draw`) (`"greedy"` ignores `draw`,
+    /// `"random"` depends on it): `draw` is supplied by the caller, the policy's generator is built fresh from it at every call
     /// ([`duel_ai::rng_from_draw`]), and neither the state nor the engine's generator moves
     /// (`&self`: `apply` stays the only mutation). No entropy is read.
     ///
@@ -159,7 +161,10 @@ impl Duel {
         if !COMPUTER_POLICIES.contains(&policy) {
             return Err(error_json(
                 "invalid_policy",
-                "the computer policy must be one of: random",
+                &format!(
+                    "the computer policy must be one of: {}",
+                    COMPUTER_POLICIES.join(", ")
+                ),
             ));
         }
         if self.state.winner().is_some() {
@@ -171,9 +176,11 @@ impl Duel {
                 "the seat is not the active player",
             ));
         }
-        // Only "random" is in the list, so it is the policy to run.
+        // Every entry of the list resolves in the AI registry; `None` is a bug, never a panic.
+        let policy_fn = policy_named(policy)
+            .ok_or_else(|| error_json("internal_error", "the computer policy is not registered"))?;
         let action =
-            choose(&self.state, &random_policy, &mut rng_from_draw(draw)).map_err(ai_error_json)?;
+            choose(&self.state, &policy_fn, &mut rng_from_draw(draw)).map_err(ai_error_json)?;
         to_json(&action)
     }
 
@@ -187,7 +194,7 @@ impl Duel {
 }
 
 /// The computer policies a client may ask for: a closed list, matched exactly.
-pub const COMPUTER_POLICIES: [&str; 1] = ["random"];
+pub const COMPUTER_POLICIES: [&str; 2] = ["random", "greedy"];
 
 /// `"One"` or `"Two"` exactly, anything else (another case included) is `invalid_seat`.
 fn parse_seat(seat: &str) -> Result<PlayerId, String> {
@@ -298,7 +305,7 @@ impl Game {
     }
 
     /// The action the computer plays for `seat` ("One" or "Two", the active seat), under the
-    /// closed policy list ("random"), as the JSON `apply` accepts, never "concede". `draw` is the
+    /// closed policy list ("random", "greedy"), as the JSON `apply` accepts, never "concede". `draw` is the
     /// `u32` the caller supplies for this one action; the same inputs give the same action, and
     /// neither the state nor the engine's generator moves. WARNING: like `view`, this does not
     /// authenticate the seat: a local adapter for a client that plays against the computer, a
@@ -899,6 +906,31 @@ mod tests {
             let direct = choose(&game.state, &duel_ai::greedy_policy, &mut rng).unwrap();
             assert_eq!(from_binding, to_json(&direct).unwrap());
         }
+    }
+
+    /// Manual measurement (#126): `cargo test -p duel-engine-wasm --release -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "manual timing of the greedy decision"]
+    fn measure_greedy_decision_time() {
+        let (mut worst, mut total, mut count) =
+            (std::time::Duration::ZERO, std::time::Duration::ZERO, 0u32);
+        for seed in 0..20u32 {
+            let mut game = starter(seed);
+            while !is_over(&game) {
+                let seat = active_seat(&game);
+                let t = std::time::Instant::now();
+                let action = game.computer_action_json(seat, "greedy", 0).unwrap();
+                let dt = t.elapsed();
+                worst = worst.max(dt);
+                total += dt;
+                count += 1;
+                game.apply_json(&action).unwrap();
+            }
+        }
+        println!(
+            "greedy: {count} decisions, mean {:?}, worst {worst:?}",
+            total / count
+        );
     }
 
     #[test]
