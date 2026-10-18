@@ -50,6 +50,7 @@ describe("full games against the computer (real WASM, random computer)", () => {
     let computerDrawLines = 0;
     let namedAtPlayOnly = 0;
     let ripostes = 0;
+    let heroRipostesSeen = 0;
     let humanDrawLines = 0;
     let chains = 0;
 
@@ -108,9 +109,14 @@ describe("full games against the computer (real WASM, random computer)", () => {
           }
 
           // 5. A riposte line exists exactly when the engine emitted a riposte (never for riposte 0).
+          // The match is on the damage wording: a hero named "... garde" would contain "de riposte".
           const riposteEvents = record.events.filter((e) => "riposted" in e).length;
           ripostes += riposteEvents;
-          expect(recLines.filter((l) => l.text.includes("de riposte")).length, where).toBe(riposteEvents);
+          expect(recLines.filter((l) => /dégâts? de riposte/.test(l.text)).length, where).toBe(riposteEvents);
+          // 5b. Likewise one line per riposte of the hero (#170), which destroys, without damage.
+          const heroRipostes = record.events.filter((e) => "hero_riposted" in e).length;
+          heroRipostesSeen += heroRipostes;
+          expect(recLines.filter((l) => /riposte et détruit/.test(l.text)).length, where).toBe(heroRipostes);
         }
 
         // 6. The computer's chains are titled and grouped: one block per run of computer records.
@@ -131,6 +137,7 @@ describe("full games against the computer (real WASM, random computer)", () => {
     expect(chains).toBeGreaterThan(0);
     // Riposte scenario by bounded search over the 80 games (Loup hérissé is the only riposte >= 1 card).
     expect(ripostes, "no riposte seen in 80 games: widen the search").toBeGreaterThan(0);
+    expect(heroRipostesSeen, "no hero riposte seen in 80 games").toBeGreaterThan(0);
   }, 120_000);
 });
 

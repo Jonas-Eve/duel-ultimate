@@ -182,21 +182,28 @@ fn a_single_provocateur_is_the_only_target_of_every_attacker_in_summoning_order(
 
 #[test]
 fn several_provocateurs_are_all_offered_in_board_order() {
-    for count in [2usize, 3] {
-        let mut two = vec![plain(3)];
-        for _ in 0..count {
-            two.push(taunt(3));
-            two.push(plain(3));
-        }
+    // Layouts of Two's board (true = provocateur), at most five creatures (the standard board
+    // limit): the provocateurs are not contiguous and not always at the ends.
+    for layout in [
+        &[false, true, false, true][..],
+        &[true, false, true, false, true][..],
+    ] {
+        let two: Vec<_> = layout
+            .iter()
+            .map(|&taunting| if taunting { taunt(3) } else { plain(3) })
+            .collect();
         let a = arena(&[plain(3), plain(3)], &two, 2, 0);
-        let provocateurs: Vec<_> = (0..count).map(|i| a.two[1 + 2 * i]).collect();
+        let provocateurs: Vec<_> = (0..layout.len())
+            .filter(|&i| layout[i])
+            .map(|i| a.two[i])
+            .collect();
         assert_eq!(
             offered(&a.state),
             vec![
                 (a.one[0], creatures(&provocateurs)),
                 (a.one[1], creatures(&provocateurs)),
             ],
-            "{count} provocateurs"
+            "{layout:?}"
         );
     }
 }

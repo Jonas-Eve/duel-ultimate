@@ -156,6 +156,19 @@ fn mentioned_ids<'a>(text: &'a str, marker: &'a str) -> impl Iterator<Item = u32
     })
 }
 
+/// The cards of a hand without their `unavailable` reason: `PlayerView` computes it for the seat
+/// (a full board under the standard rules), `hand_known` is the stable part of the card (id,
+/// name, stats), so the comparison is on what was already in the hand, not on the reason.
+fn without_availability(cards: &[duel_engine::CardView]) -> Vec<duel_engine::CardView> {
+    cards
+        .iter()
+        .map(|c| duel_engine::CardView {
+            unavailable: None,
+            ..c.clone()
+        })
+        .collect()
+}
+
 fn outcomes(state: &GameState) -> Vec<ActionOutcome> {
     let obs = Observation::of(state).unwrap();
     (0..obs.actions().len())
@@ -313,12 +326,18 @@ fn the_hand_after_an_action_splits_into_what_was_there_and_what_was_drawn() {
                             draws += 1;
                         }
                         assert_eq!(after.you.hand_unseen, drawn);
-                        assert_eq!(after.you.hand_known, before.you.hand);
+                        assert_eq!(
+                            without_availability(&after.you.hand_known),
+                            without_availability(&before.you.hand)
+                        );
                     }
                     Action::Attack { .. } => {
                         attacks += 1;
                         assert_eq!(after.you.hand_unseen, 0);
-                        assert_eq!(after.you.hand_known, before.you.hand);
+                        assert_eq!(
+                            without_availability(&after.you.hand_known),
+                            without_availability(&before.you.hand)
+                        );
                     }
                     Action::Concede => unreachable!("the observation omits Concede"),
                 }

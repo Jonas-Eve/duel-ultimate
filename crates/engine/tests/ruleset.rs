@@ -86,18 +86,24 @@ fn started_json(events: &[Event]) -> String {
 // ---- The type ---------------------------------------------------------------------------------
 
 #[test]
-fn the_default_is_the_legacy_behaviour() {
-    // #127 changes this test, and only the body of `Default`: `legacy()` never moves.
-    assert_eq!(RuleSet::default(), RuleSet::legacy());
+fn the_default_is_the_standard_rules() {
+    assert_eq!(RuleSet::default(), RuleSet::standard());
+    assert_ne!(RuleSet::legacy(), RuleSet::default());
+    assert!(RuleSet::default().is_default());
+    assert!(RuleSet::standard().is_default());
+    assert!(!RuleSet::legacy().is_default());
+    assert!(!flipped().is_default());
+}
+
+#[test]
+fn standard_is_hero_riposte_on_and_board_limit_five() {
     assert_eq!(
-        RuleSet::default(),
+        RuleSet::standard(),
         RuleSet {
-            hero_riposte: false,
-            board_limit: None
+            hero_riposte: true,
+            board_limit: Some(5)
         }
     );
-    assert!(RuleSet::default().is_default());
-    assert!(!flipped().is_default());
 }
 
 #[test]
@@ -377,6 +383,22 @@ fn the_key_is_there_with_empty_versions_too() {
             rules_text(flipped())
         )
     );
+}
+
+#[test]
+fn a_legacy_game_records_its_rules_and_a_standard_game_does_not() {
+    let legacy_text = r#""rules":{"hero_riposte":false,"board_limit":null}"#;
+    for versions in [&[][..], &["fixture@1.0.0"][..]] {
+        let (_, events) = start(versions, RuleSet::legacy());
+        let json = started_json(&events);
+        assert!(json.ends_with(&format!("{legacy_text}}}}}")), "{json}");
+        if !versions.is_empty() {
+            let at = |needle: &str| json.find(needle).unwrap();
+            assert!(at(r#""data_versions""#) < at(r#""rules""#), "{json}");
+        }
+        let (_, events) = start(versions, RuleSet::standard());
+        assert!(!started_json(&events).contains("rules"));
+    }
 }
 
 #[test]

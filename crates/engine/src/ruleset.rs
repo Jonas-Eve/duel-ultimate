@@ -7,12 +7,22 @@
 //! attacker); `board_limit` acts since #171 (`rules::play_blocker`: a full board refuses a
 //! summoning, `RuleError::BoardFull`). Neither is read by a potential formula, and neither
 //! touches the generator.
+//!
+//! Since #172 (story #127) the engine default is [`RuleSet::standard`] (hero riposte on, board
+//! limit 5), and [`RuleSet::legacy`] (every option off, the behaviour before the options) is
+//! frozen as the reference. This breaks the replay of journals recorded with the old default:
+//! a game's `GameStarted` carries `rules` only when it is not the default, so a missing key
+//! means "the default of the engine that replays it".
 
 use duel_cards::DECK_SIZE;
 use serde::{Deserialize, Serialize};
 
 /// Largest `board_limit`: the size of a deck, past which a limit could never bind.
 pub const MAX_BOARD_LIMIT: u32 = DECK_SIZE as u32;
+
+/// The board limit of [`RuleSet::standard`] (a value decided by the owner, adjustable by
+/// measurement in #135).
+pub const STANDARD_BOARD_LIMIT: u32 = 5;
 
 /// The options of one game. In JSON a partial object is read with the engine default for each
 /// absent field (the default of the time, so an explicit `"board_limit": null` is how to write
@@ -33,13 +43,23 @@ pub struct RuleSet {
 }
 
 impl Default for RuleSet {
-    /// The engine default. Written by hand, not derived: the switch of the default changes this body (and only it).
+    /// The engine default: [`RuleSet::standard`] since #127 (before: `legacy`). Written by hand,
+    /// not derived: a later change of the default changes this body (and only it).
     fn default() -> Self {
-        Self::legacy()
+        Self::standard()
     }
 }
 
 impl RuleSet {
+    /// The rules of a game played with the options on: the hero hits back and a board holds
+    /// at most [`STANDARD_BOARD_LIMIT`] creatures.
+    pub const fn standard() -> Self {
+        Self {
+            hero_riposte: true,
+            board_limit: Some(STANDARD_BOARD_LIMIT),
+        }
+    }
+
     /// Every option off: the behaviour of the engine before the options existed. Never
     /// modified, whatever the default becomes: it is the "options disabled" reference.
     pub const fn legacy() -> Self {

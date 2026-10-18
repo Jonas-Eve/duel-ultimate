@@ -67,6 +67,14 @@ fn fixture() -> Value {
     .unwrap()
 }
 
+/// The same setup with the options off (`RuleSet::legacy()` written out in `rules`): for a test
+/// that states the behaviour before the options of #127 (a hit on the hero costs the attacker
+/// nothing, a board has no limit). The default of the engine is the standard rules.
+fn legacy(mut setup: Value) -> Value {
+    setup["rules"] = json!({"hero_riposte": false, "board_limit": null});
+    setup
+}
+
 fn start(setup: &Value, seed: u32) -> Duel {
     Duel::from_json(&setup.to_string(), seed).expect("a valid setup starts")
 }
@@ -211,7 +219,12 @@ type Step = (String, Value, Vec<Value>);
 /// Plays a whole fixture duel with the scripted policy (after an opening activation of the
 /// hero's first effect, so draws are part of every duel), until no action is legal.
 fn run_duel(seed: u32) -> Vec<Step> {
-    let mut game = start(&fixture(), seed);
+    run_duel_with(&fixture(), seed)
+}
+
+/// `run_duel` on a given setup.
+fn run_duel_with(setup: &Value, seed: u32) -> Vec<Step> {
+    let mut game = start(setup, seed);
     let mut journal = Vec::new();
     loop {
         let offered = game.legal_actions_json().unwrap();
@@ -754,7 +767,9 @@ fn conceding_gives_the_win_to_the_opponent_and_ends_the_game() {
 fn the_journal_of_each_action_type_is_ordered() {
     // One: max_time 10, budget 10, a "draw 2 for 1" effect; every card costs 1 to play and 1
     // to attack with, so nothing hands the token over.
-    let mut setup = fixture();
+    // The options off: the attacker survives the hit on the hero (the journal under the
+    // standard rules is pinned by `the_journal_of_a_hit_on_the_hero_ends_with_the_hero_riposte`).
+    let mut setup = legacy(fixture());
     uniform_cards(&mut setup, 1, 1);
     setup["one"]["hero"]["effects"] = json!([draw_effect(1, 2)]);
     setup["one"]["hero"]["max_time"] = 10.into();
@@ -973,6 +988,46 @@ fn opening_hands_budgets_and_the_absence_of_auto_draw_or_pass() {
     }
 }
 
+#[test]
+fn the_journal_of_a_hit_on_the_hero_ends_with_the_hero_riposte() {
+    // The default rules: a non-lethal hit on the hero destroys the attacker, after `damaged`
+    // and before the time moves; the JSON shape of `hero_riposted` is the one of `riposted`
+    // without an amount.
+    let mut setup = fixture();
+    uniform_cards(&mut setup, 1, 1);
+    setup["one"]["hero"]["effects"] = json!([draw_effect(1, 2)]);
+    setup["one"]["hero"]["max_time"] = 10.into();
+    setup["one"]["hero"]["start_budget"] = 10.into();
+    setup["two"]["hero"]["health"] = 100.into();
+    let mut game = start(&setup, 5);
+    let card = plays(&legal(&game))[0];
+    apply(&mut game, &play(card));
+    let events = apply(
+        &mut game,
+        &json!({"attack": {"attacker": card, "target": "hero"}}),
+    );
+    assert_eq!(
+        kinds(&events),
+        [
+            "attacked",
+            "damaged",
+            "hero_riposted",
+            "died",
+            "token_moved"
+        ]
+    );
+    assert_eq!(
+        events[2],
+        json!({"hero_riposted": {"player": "One", "creature": card}})
+    );
+    assert_eq!(
+        events[3],
+        json!({"died": {"player": "One", "creature": card}})
+    );
+    // The creature is gone: it is not offered again.
+    assert!(!legal(&game).iter().any(|a| kind(a) == "attack"));
+}
+
 // ---------------------------------------------------------------------------------------
 // Non-lethal attack crossing the budget, several attackers
 // ---------------------------------------------------------------------------------------
@@ -980,8 +1035,8 @@ fn opening_hands_budgets_and_the_absence_of_auto_draw_or_pass() {
 #[test]
 fn a_non_lethal_attack_can_cross_the_budget_and_each_creature_can_attack() {
     // Every card costs 1 to play, 2 to attack with; One has 10 time units, hero health is
-    // large enough for non-lethal hits.
-    let mut setup = fixture();
+    // large enough for non-lethal hits. The options off: the attacker survives the hit.
+    let mut setup = legacy(fixture());
     uniform_cards(&mut setup, 1, 2);
     setup["one"]["hero"]["effects"] = json!([draw_effect(1, 1)]);
     setup["one"]["hero"]["max_time"] = 10.into();
@@ -1889,9 +1944,11 @@ fn assert_a_creature_duel_is_sound(what: &str, journal: &[Step]) -> usize {
                     assert!(summoned.contains(&creature), "{what}: died before summoned");
                     assert!(!dead.contains(&creature), "{what}: died twice");
                     dead.push(creature);
+                    // A wound, or the riposte of the hero that destroys the attacker.
                     let wound = events[..at].iter().position(|e| {
-                        kind(e) == "creature_damaged"
-                            && e["creature_damaged"]["creature"] == event["died"]["creature"]
+                        ["creature_damaged", "hero_riposted"].iter().any(|k| {
+                            kind(e) == *k && e[*k]["creature"] == event["died"]["creature"]
+                        })
                     });
                     assert!(wound.is_some(), "{what} step {i}: died without a wound");
                     assert!(!names[..at].contains(&"token_moved".to_owned()));
@@ -1971,8 +2028,11 @@ fn a_hero_only_duel_never_touches_a_creature() {
     // The S1 policy (`run_duel`: attack, else summon, else activate) always takes the hero,
     // offered first, as its target: no creature is ever wounded, killed or discarded, and
     // the duel ends the S1 way. (Cases 1 to 11 above run unchanged.)
+    // With the options off: under the standard rules the hero destroys its attacker (a `died`
+    // without a wound), which `the_journal_of_a_hit_on_the_hero_ends_with_the_hero_riposte` pins.
+    let setup = legacy(fixture());
     for seed in 0..20 {
-        let journal = run_duel(seed);
+        let journal = run_duel_with(&setup, seed);
         for (_, action, events) in &journal {
             if kind(action) == "attack" {
                 assert_eq!(action["attack"]["target"], "hero", "seed {seed}");
@@ -2415,7 +2475,11 @@ fn a_target_forbidden_by_provocation_is_identifiable_and_hidden_zones_stay_indis
     // One: creatures 0 and 1. Two: provocateurs 30 (1 health) and 31, plain 32; one card of
     // its deck stays in the pile. 30 dies before the position under test, so a dead
     // provocateur and a live one are both around.
-    let mut setup = arena(vec![plain(3), plain(3)], vec![taunt(1), taunt(5), plain(5)]);
+    // The options off: the hero is attacked in the checks below and its attackers must survive.
+    let mut setup = legacy(arena(
+        vec![plain(3), plain(3)],
+        vec![taunt(1), taunt(5), plain(5)],
+    ));
     setup["two"]["hero"]["starting_hand"] = 29.into();
     let mut t = Table::new(&setup, 6);
     t.act(&play(0));
@@ -2557,7 +2621,8 @@ fn killing_the_provocateur_between_two_attacks_gives_the_hero_back() {
 #[test]
 fn summoning_a_provocateur_between_two_attacks_restricts_the_targets_at_once() {
     for seed in 0..4 {
-        let setup = arena(vec![plain(5), plain(5)], vec![plain(5), taunt(5)]);
+        // The options off: the attackers survive their hits on the hero.
+        let setup = legacy(arena(vec![plain(5), plain(5)], vec![plain(5), taunt(5)]));
         let mut t = deploy_ids(&setup, seed, &[0, 1], &[30]);
         let filler_id = t.boards[1][1];
         assert_eq!(
@@ -2622,7 +2687,8 @@ fn each_side_aims_only_at_the_provocateurs_of_the_other() {
 
 #[test]
 fn a_provocateur_attacks_freely_when_the_opponent_has_none() {
-    let setup = arena(vec![taunt(5)], vec![plain(5)]);
+    // The options off: the provocateur survives its hit on the hero.
+    let setup = legacy(arena(vec![taunt(5)], vec![plain(5)]));
     let mut t = deploy_ids(&setup, 3, &[0], &[30]);
     assert_eq!(
         attacks(&legal(&t.game)),
@@ -2649,7 +2715,8 @@ fn a_provocateur_attacks_freely_when_the_opponent_has_none() {
 #[test]
 fn a_ripostant_hits_back_in_the_journal_and_the_attacker_dies_of_a_later_riposte() {
     // A (id 0): 5 health. X (id 30): 5 health, riposte 2. Z (id 31): riposte 0.
-    let setup = arena(vec![plain(5)], vec![riposter(5, 2), plain(9)]);
+    // The options off: the hero fork below hits the hero without losing its attacker.
+    let setup = legacy(arena(vec![plain(5)], vec![riposter(5, 2), plain(9)]));
     let mut t = deploy_ids(&setup, 5, &[0], &[30, 31]);
     let zero = t.fork();
     let mut hero = t.fork();
@@ -3300,9 +3367,11 @@ fn assert_a_provocation_duel_is_sound(what: &str, setup: &Value, journal: &[Step
                     dead.push(id);
                     seen.deaths += 1;
                     let wounded = events[..at].iter().any(|e| {
-                        ["creature_damaged", "riposted"].iter().any(|k| {
-                            kind(e) == *k && e[*k]["creature"] == event["died"]["creature"]
-                        })
+                        ["creature_damaged", "riposted", "hero_riposted"]
+                            .iter()
+                            .any(|k| {
+                                kind(e) == *k && e[*k]["creature"] == event["died"]["creature"]
+                            })
                     });
                     assert!(wounded, "{what} step {i}: died without a wound");
                     assert!(!kinds(&events[..at]).contains(&"token_moved".to_owned()));
@@ -3849,7 +3918,8 @@ struct Profile {
 /// creature so no provocation) and attacks the opposing hero with each, reading the costs and
 /// the damage from the events. The foe has no hand, no effect and a health no attack empties.
 fn observe(deck: &str, foe: &str) -> Profile {
-    let mut setup = starter_of(deck, foe);
+    // No board limit: the 30 cards of the deck are all summoned (the profile is about the data).
+    let mut setup = legacy(starter_of(deck, foe));
     for (side, hand, initiative) in [("one", 30, 9), ("two", 0, 1)] {
         let hero = &mut setup[side]["hero"];
         hero["effects"] = json!([]);
@@ -4156,7 +4226,8 @@ fn a_spiked_wolf_ripostes_each_attacker_until_one_dies_of_it() {
 
 #[test]
 fn an_attack_on_the_hero_or_on_a_bulwark_creature_is_never_riposted() {
-    let setup = alternating_starter("rush", "bulwark");
+    // The options off: neither hero hits back.
+    let setup = legacy(alternating_starter("rush", "bulwark"));
     let wolf = ids_of("rush", 0, "spiked_wolf")[0];
     let pike = ids_of("bulwark", 30, "pikeman")[0];
     let mut t = Table::new(&setup, 5);

@@ -41,6 +41,20 @@ fn play_scripted(setup: duel_engine::GameSetup, seed: u64) -> (GameState, Vec<Ev
     (state, log)
 }
 
+/// The journal as JSON **without** the `rules` key that `GameStarted` now records for a legacy
+/// game (legacy is no longer the default, #127): the fingerprints below are those of the
+/// journals written before the options existed, byte for byte.
+fn legacy_journal_json(log: &[Event]) -> String {
+    const KEY: &str = r#","rules":{"hero_riposte":false,"board_limit":null}"#;
+    let json = serde_json::to_string(log).unwrap();
+    assert_eq!(
+        json.matches(KEY).count(),
+        1,
+        "GameStarted records the legacy rules"
+    );
+    json.replacen(KEY, "", 1)
+}
+
 /// `(winner, reason, number of events, FNV-1a of the events as JSON)` per seed 0..20 for
 /// `rush` (One) against `bulwark` (Two) of `starter@1.1.0`, `RuleSet::legacy()` written out.
 const STARTER_1_1_0_LEGACY_GOLDEN: [(PlayerId, WinReason, usize, u64); 20] = [
@@ -81,9 +95,56 @@ fn starter_1_1_0_legacy_journals_are_unchanged() {
             setup.rules = RuleSet::legacy();
             let (state, log) = play_scripted(setup, seed);
             let (winner, reason) = state.winner().unwrap();
-            let json = serde_json::to_string(&log).unwrap();
+            let json = legacy_journal_json(&log);
             (winner, reason, log.len(), fnv1a(json.as_bytes()))
         })
         .collect();
     assert_eq!(observed, STARTER_1_1_0_LEGACY_GOLDEN);
+}
+
+/// The same twenty games under `RuleSet::standard()` written out, recorded on the engine of
+/// #172 (the switch of the default, #127).
+const STARTER_1_1_0_STANDARD_GOLDEN: [(PlayerId, WinReason, usize, u64); 20] = [
+    (PlayerId::One, WinReason::HeroDown, 180, 0x7be45c59cc2a04c7),
+    (PlayerId::One, WinReason::HeroDown, 221, 0x23e6111f5d75c9b1),
+    (PlayerId::One, WinReason::HeroDown, 260, 0x02f42f63e8d6a838),
+    (PlayerId::One, WinReason::HeroDown, 232, 0x58b0498da07a9ba2),
+    (PlayerId::One, WinReason::HeroDown, 278, 0xe1d7d0094a2ade0a),
+    (PlayerId::One, WinReason::HeroDown, 209, 0x18c14afb2324663f),
+    (PlayerId::One, WinReason::HeroDown, 210, 0xdf11854fe79dd089),
+    (PlayerId::One, WinReason::HeroDown, 175, 0x346a90f992338343),
+    (PlayerId::Two, WinReason::HeroDown, 190, 0xbd96df4880021f34),
+    (PlayerId::One, WinReason::HeroDown, 280, 0x4f6581da4fcbfdfb),
+    (PlayerId::One, WinReason::HeroDown, 141, 0x1ea09dbb02d2dad3),
+    (PlayerId::One, WinReason::HeroDown, 232, 0x00f9cd46be63da25),
+    (PlayerId::One, WinReason::HeroDown, 204, 0x8d9ec8d4af2fa1f3),
+    (PlayerId::One, WinReason::HeroDown, 189, 0xf6aeb4c7607645cf),
+    (PlayerId::One, WinReason::HeroDown, 177, 0xc1525e30cbe4012a),
+    (PlayerId::One, WinReason::HeroDown, 178, 0x26ce644d14d16e5d),
+    (PlayerId::One, WinReason::HeroDown, 181, 0xd57f00aa8f9b3cfb),
+    (PlayerId::One, WinReason::HeroDown, 210, 0x17eb298e2329e84d),
+    (PlayerId::One, WinReason::HeroDown, 193, 0x4b754f0a6c801d44),
+    (PlayerId::One, WinReason::HeroDown, 187, 0xa60458870f5eaf9f),
+];
+
+#[test]
+fn starter_1_1_0_standard_journals_have_their_golden() {
+    let observed: Vec<_> = (0..20)
+        .map(|seed| {
+            let mut setup = game_setup_from_data(
+                CARDS,
+                DECKS,
+                "rush",
+                "bulwark",
+                vec!["starter@1.1.0".to_string()],
+            )
+            .unwrap();
+            setup.rules = RuleSet::standard();
+            let (state, log) = play_scripted(setup, seed);
+            let (winner, reason) = state.winner().unwrap();
+            let json = serde_json::to_string(&log).unwrap();
+            (winner, reason, log.len(), fnv1a(json.as_bytes()))
+        })
+        .collect();
+    assert_eq!(observed, STARTER_1_1_0_STANDARD_GOLDEN);
 }

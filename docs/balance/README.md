@@ -17,6 +17,14 @@ n'est pas une mesure : il ne se compare à rien et ne se reproduit pas.
   Politique gloutonne appariée à `random` (mêmes graines, #160) :
   [`2026-10-18-starter-1.1.0-greedy.md`](reports/2026-10-18-starter-1.1.0-greedy.md).
 
+**Règles historiques et règles par défaut (#127, #172).** Depuis #172 le défaut du moteur est
+`RuleSet::standard()` (riposte du héros active, limite de plateau 5) : un lot sans option affiche
+`rules: hero_riposte=on board_limit=5`. Les rapports consignés avant ce changement (dont la ligne de base
+`random-legacy`) restent des mesures des **règles historiques** : ils ont été produits avec des options
+**explicites** (`--hero-riposte off --board-limit none`, en-tête `rules: hero_riposte=off board_limit=none`) et
+se rejouent à l'identique avec elles ; ils ne se comparent pas à un lot aux règles par défaut sans le dire.
+Les rapports et `throughput.md` ne sont pas réécrits ici : les mesures aux nouvelles règles sont la tâche T4 de #127.
+
 ## Lire le rapport du simulateur
 
 Format détaillé : `README.md` à la racine (« Format du rapport du simulateur »). Ce qui suit dit

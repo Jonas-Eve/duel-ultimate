@@ -323,7 +323,12 @@ fn hero_effects_follow_the_same_rule_with_their_own_cost() {
 /// One summons a creature (cost 1, budget 5 -> 4) whose attack costs 7; Two's hero has
 /// `two_health` health, so a force of 1 is lethal only at 1.
 fn attacking_state(two_health: u32) -> (GameState, Action) {
-    let mut state = built(
+    attacking_state_with(RuleSet::default(), two_health)
+}
+
+fn attacking_state_with(rules: RuleSet, two_health: u32) -> (GameState, Action) {
+    let mut state = built_with(
+        rules,
         side(one_hero(5, 8, vec![draw(1, 1)]), creature(1, 1, 7, 3, 0)),
         side(
             hero(1, 1, 8, 4, two_health, vec![draw(1, 1)]),
@@ -363,10 +368,20 @@ fn a_lethal_attack_on_the_hero_spends_nothing_and_does_not_hand_over() {
 #[test]
 fn a_non_lethal_attack_on_the_hero_pays_and_hands_over() {
     // Same attack against a hero with 2 health: b = 4, c = 7 -> Two receives 7 - 4 + 1 = 4.
-    let (state, attack) = attacking_state(2);
+    // With the options off the attacker lives; under the default (standard) rules the hero
+    // hits back and the preview says so.
+    let (state, attack) = attacking_state_with(RuleSet::legacy(), 2);
     assert_eq!(
         preview_of(&state, attack),
         expect(attack, Some(7), true, Some(4), None)
+    );
+    let (state, attack) = attacking_state(2);
+    assert_eq!(
+        preview_of(&state, attack),
+        ActionPreview {
+            attacker_destroyed: true,
+            ..expect(attack, Some(7), true, Some(4), None)
+        }
     );
 }
 

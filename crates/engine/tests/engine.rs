@@ -859,10 +859,31 @@ fn armed(
     two_max: u32,
     two_health: u32,
 ) -> (GameState, CardInstanceId) {
+    armed_with(
+        RuleSet::default(),
+        force,
+        attack_cost,
+        budget,
+        two_max,
+        two_health,
+    )
+}
+
+/// `armed` under the given rules: a test that states the behaviour before the options (a hit on
+/// the hero costs the attacker nothing) pins `RuleSet::legacy()` here.
+fn armed_with(
+    rules: RuleSet,
+    force: u32,
+    attack_cost: u32,
+    budget: u32,
+    two_max: u32,
+    two_health: u32,
+) -> (GameState, CardInstanceId) {
     let mut s = setup(
         hero(2, budget + 1, 8, vec![draw(1, 1)]),
         hero(1, 1, two_max, vec![draw(1, 1)]),
     );
+    s.rules = rules;
     s.one.cards = attackers(force, attack_cost);
     s.two.cards = attackers(force, attack_cost);
     s.two.hero.health = two_health;
@@ -882,7 +903,9 @@ fn hit(creature: CardInstanceId) -> Action {
 
 #[test]
 fn an_attack_deals_the_force_of_the_creature_to_the_opposing_hero() {
-    let (mut state, creature) = armed(3, 1, 5, 8, 10);
+    // The options off: the attacker survives a hit on the hero (the standard rules: see
+    // `a_hit_on_the_hero_destroys_its_attacker_under_the_standard_rules`).
+    let (mut state, creature) = armed_with(RuleSet::legacy(), 3, 1, 5, 8, 10);
     let events = apply(&mut state, hit(creature)).unwrap();
     assert_eq!(state.hero_health(PlayerId::Two), 7);
     assert_eq!(
@@ -899,6 +922,20 @@ fn an_attack_deals_the_force_of_the_creature_to_the_opposing_hero() {
         vec![creature],
         "the creature stays in play"
     );
+}
+
+#[test]
+fn a_hit_on_the_hero_destroys_its_attacker_under_the_standard_rules() {
+    let (mut state, creature) = armed_with(RuleSet::standard(), 3, 1, 5, 8, 10);
+    let events = apply(&mut state, hit(creature)).unwrap();
+    assert_eq!(state.hero_health(PlayerId::Two), 7);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::HeroRiposted { .. }))
+    );
+    assert!(state.board(PlayerId::One).is_empty());
+    assert_eq!(state.discard(PlayerId::One), vec![creature]);
 }
 
 #[test]
@@ -924,7 +961,7 @@ fn attacking_costs_the_attack_cost_through_the_time_rule() {
 #[test]
 fn a_creature_can_attack_right_after_being_summoned_and_as_often_as_the_budget_allows() {
     // `armed` already attacks without any delay after the summoning; here budget 5, cost 1.
-    let (mut state, c) = armed(2, 1, 5, 8, 100);
+    let (mut state, c) = armed_with(RuleSet::legacy(), 2, 1, 5, 8, 100);
     for n in 1..=4 {
         let events = apply(&mut state, hit(c)).unwrap();
         assert_eq!(state.hero_health(PlayerId::Two), 100 - 2 * n);
@@ -944,7 +981,7 @@ fn a_creature_can_attack_right_after_being_summoned_and_as_often_as_the_budget_a
 
 #[test]
 fn a_non_lethal_attack_logs_in_order() {
-    let (mut state, c) = armed(3, 2, 5, 8, 10);
+    let (mut state, c) = armed_with(RuleSet::legacy(), 3, 2, 5, 8, 10);
     let events = apply(&mut state, hit(c)).unwrap();
     assert_eq!(
         events,
@@ -964,7 +1001,7 @@ fn a_non_lethal_attack_logs_in_order() {
             },
         ]
     );
-    let (mut state, c) = armed(3, 2, 2, 8, 10);
+    let (mut state, c) = armed_with(RuleSet::legacy(), 3, 2, 2, 8, 10);
     let events = apply(&mut state, hit(c)).unwrap();
     assert_eq!(
         kinds(&events),
@@ -1307,6 +1344,20 @@ fn a_full_game_to_a_victory_by_attack_is_deterministic() {
 
 // ---- S1 golden fingerprints -------------------------------------------------------------------
 
+/// The journal of a game played with `RuleSet::legacy()` as JSON, **without** the `rules` key
+/// that `GameStarted` now records for it (legacy is no longer the default, #127): what is
+/// fingerprinted is the journal the engine wrote before the options existed, byte for byte.
+fn legacy_journal_json(log: &[Event]) -> String {
+    const KEY: &str = r#","rules":{"hero_riposte":false,"board_limit":null}"#;
+    let json = serde_json::to_string(log).unwrap();
+    assert_eq!(
+        json.matches(KEY).count(),
+        1,
+        "GameStarted records the legacy rules"
+    );
+    json.replacen(KEY, "", 1)
+}
+
 /// FNV-1a (64 bits) of a byte string: a stable, dependency-free fingerprint.
 fn fnv1a(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
@@ -1346,7 +1397,7 @@ fn s1_hero_only_games_keep_their_exact_outcome_and_journal() {
         .map(|seed| {
             let (state, log) = play_to_the_end_from(without_versions(s1_setup()), seed);
             let (winner, reason) = state.winner().unwrap();
-            let json = serde_json::to_string(&log).unwrap();
+            let json = legacy_journal_json(&log);
             (winner, reason, log.len(), fnv1a(json.as_bytes()))
         })
         .collect();
@@ -1360,6 +1411,15 @@ fn s1_hero_only_games_keep_their_exact_outcome_and_journal() {
 /// by the test (a 64-bit LCG), so that the policy does not depend on the engine's own seed.
 /// Returns the final state and the journal.
 fn play_scripted_s2a_from(setup: GameSetup, seed: u64) -> (GameState, Vec<Event>) {
+    play_scripted_s2a_observed(setup, seed, |_| {})
+}
+
+/// `play_scripted_s2a_from`, calling `after_step` with the state after each real action.
+fn play_scripted_s2a_observed(
+    setup: GameSetup,
+    seed: u64,
+    mut after_step: impl FnMut(&GameState),
+) -> (GameState, Vec<Event>) {
     let (mut state, mut log) = new_game(setup, seed).unwrap();
     let mut rng = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0xdead_beef;
     while state.winner().is_none() {
@@ -1376,6 +1436,7 @@ fn play_scripted_s2a_from(setup: GameSetup, seed: u64) -> (GameState, Vec<Event>
             .wrapping_add(1_442_695_040_888_963_407);
         let pick = usize::try_from((rng >> 33) % actions.len() as u64).unwrap();
         log.extend(apply(&mut state, actions[pick]).unwrap());
+        after_step(&state);
     }
     (state, log)
 }
@@ -1407,12 +1468,14 @@ const S2A_GOLDEN: [(PlayerId, WinReason, usize, u64); 20] = [
 ];
 
 #[test]
-fn s2a_scripted_games_keep_their_exact_outcome_and_journal() {
+fn s2a_scripted_games_keep_their_exact_outcome_and_journal_with_the_options_disabled() {
     let mut deaths = 0;
     let mut creature_attacks = 0;
     let observed: Vec<_> = (0..20)
         .map(|seed| {
-            let (state, log) = play_scripted_s2a_from(without_versions(s1_setup()), seed);
+            let mut setup = without_versions(s1_setup());
+            setup.rules = RuleSet::legacy();
+            let (state, log) = play_scripted_s2a_from(setup, seed);
             deaths += log
                 .iter()
                 .filter(|e| matches!(e, Event::Died { .. }))
@@ -1422,7 +1485,7 @@ fn s2a_scripted_games_keep_their_exact_outcome_and_journal() {
                 .filter(|e| matches!(e, Event::CreatureDamaged { .. }))
                 .count();
             let (winner, reason) = state.winner().unwrap();
-            let json = serde_json::to_string(&log).unwrap();
+            let json = legacy_journal_json(&log);
             (winner, reason, log.len(), fnv1a(json.as_bytes()))
         })
         .collect();
@@ -1447,11 +1510,69 @@ fn s2a_golden_replays_with_explicit_legacy_rules() {
             setup.rules = RuleSet::legacy();
             let (state, log) = play_scripted_s2a_from(without_versions(setup), seed);
             let (winner, reason) = state.winner().unwrap();
-            let json = serde_json::to_string(&log).unwrap();
+            let json = legacy_journal_json(&log);
             (winner, reason, log.len(), fnv1a(json.as_bytes()))
         })
         .collect();
     assert_eq!(observed, S2A_GOLDEN);
+}
+
+/// The same 20 scripted games under `RuleSet::standard()` written out (hero riposte on, board
+/// limit 5), recorded on the engine of #172 after the switch of the default (#127). Differs
+/// from `S2A_GOLDEN` by design: the hero now destroys an attacker that does not kill it, and
+/// no board holds more than five creatures.
+const STANDARD_GOLDEN: [(PlayerId, WinReason, usize, u64); 20] = [
+    (PlayerId::Two, WinReason::HeroDown, 84, 0xd138610073eb0758),
+    (PlayerId::Two, WinReason::HeroDown, 100, 0xa06d23bc590ed576),
+    (PlayerId::Two, WinReason::HeroDown, 314, 0xd5eda311b99d559f),
+    (PlayerId::One, WinReason::HeroDown, 119, 0x3bd405654f28b5bc),
+    (PlayerId::Two, WinReason::HeroDown, 254, 0x1267fabcda337361),
+    (PlayerId::One, WinReason::HeroDown, 286, 0xff84decc6dc3da17),
+    (PlayerId::One, WinReason::HeroDown, 286, 0x4ccf81fd3bc0e204),
+    (PlayerId::Two, WinReason::HeroDown, 228, 0xbded09dae91f4724),
+    (PlayerId::Two, WinReason::HeroDown, 180, 0x4ceae7afaf6edb9c),
+    (PlayerId::Two, WinReason::HeroDown, 141, 0xdac064d4d60c3a2f),
+    (PlayerId::Two, WinReason::HeroDown, 130, 0xb2e7da0277d6e3fc),
+    (PlayerId::Two, WinReason::HeroDown, 232, 0xd8da0edf3dfef113),
+    (PlayerId::Two, WinReason::HeroDown, 183, 0xd7209ca01528564f),
+    (PlayerId::One, WinReason::HeroDown, 149, 0x2c68d7ab72b00e97),
+    (PlayerId::Two, WinReason::HeroDown, 103, 0x7eb5b9d6dd26996b),
+    (PlayerId::Two, WinReason::HeroDown, 134, 0x6a9abff98d9d5bf6),
+    (PlayerId::One, WinReason::HeroDown, 113, 0x29227055b43fb6eb),
+    (PlayerId::One, WinReason::HeroDown, 184, 0xb5b491a4bb18a30c),
+    (PlayerId::Two, WinReason::HeroDown, 105, 0x402c7f822eaf92ef),
+    (PlayerId::One, WinReason::HeroDown, 91, 0xc181132473671a7b),
+];
+
+#[test]
+fn s2a_scripted_games_under_the_standard_rules_have_their_golden_journal() {
+    let (mut riposted, mut deaths, mut full_board) = (0, 0, false);
+    let observed: Vec<_> = (0..20)
+        .map(|seed| {
+            let mut setup = without_versions(s1_setup());
+            setup.rules = RuleSet::standard();
+            let (state, log) = play_scripted_s2a_observed(setup, seed, |state| {
+                full_board |= [PlayerId::One, PlayerId::Two]
+                    .iter()
+                    .any(|p| state.board(*p).len() == 5);
+            });
+            riposted += log
+                .iter()
+                .filter(|e| matches!(e, Event::HeroRiposted { .. }))
+                .count();
+            deaths += log
+                .iter()
+                .filter(|e| matches!(e, Event::Died { .. }))
+                .count();
+            let (winner, reason) = state.winner().unwrap();
+            let json = serde_json::to_string(&log).unwrap();
+            (winner, reason, log.len(), fnv1a(json.as_bytes()))
+        })
+        .collect();
+    assert!(riposted > 0, "the golden games must include a hero riposte");
+    assert!(deaths > 0, "the golden games must include a death");
+    assert!(full_board, "the golden games must reach the board limit");
+    assert_eq!(observed, STANDARD_GOLDEN);
 }
 
 // ---- Data versions do not change the journals ---------------------------------------------------
@@ -1971,12 +2092,17 @@ fn the_new_events_and_error_travel_with_stable_shapes() {
 /// Both heroes have no effect and a single card in hand (the rest stays in the pile, out of
 /// reach), every card being `creature`; One (initiative 2, 1 time unit) starts.
 fn lone_card_duel(creature: CreatureStats) -> GameState {
+    lone_card_duel_with(RuleSet::default(), creature)
+}
+
+fn lone_card_duel_with(rules: RuleSet, creature: CreatureStats) -> GameState {
     let lone = |initiative| {
         let mut h = hero(initiative, 1, 8, vec![]);
         h.starting_hand = 1;
         h
     };
     let mut s = setup(lone(2), lone(1));
+    s.rules = rules;
     s.one.cards = vec![creature.clone(); 30];
     s.two.cards = vec![creature; 30];
     new_game(s, 7).unwrap().0
@@ -1984,7 +2110,8 @@ fn lone_card_duel(creature: CreatureStats) -> GameState {
 
 #[test]
 fn a_player_with_a_living_creature_is_never_exhausted_even_without_hand_or_effect() {
-    let mut state = lone_card_duel(stats(1, 1, 1, 3));
+    // The options off: the creatures all survive their hits on the hero.
+    let mut state = lone_card_duel_with(RuleSet::legacy(), stats(1, 1, 1, 3));
     // Each side summons its only card, then has nothing but its creature to act with.
     play_first(&mut state);
     play_first(&mut state);
