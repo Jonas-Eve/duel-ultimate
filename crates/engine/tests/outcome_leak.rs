@@ -418,3 +418,104 @@ fn a_suicidal_hit_on_the_hero_reveals_nothing_hidden_in_the_outcome() {
     }
     assert!(suicides > 20, "suicidal hits seen: {suicides}");
 }
+
+// ---- #209: the tags, the kind and the effects of a drawn card stay hidden ------------------------
+
+/// Every card carries the tag `TAG-<id>`; a third are spells whose effect amount is unique
+/// (`5000 + id`), a third immobile units, a third plain units. A drawn card must show none of it.
+fn tagged_setup() -> GameSetup {
+    let side = |offset: u32| {
+        let cards: Vec<serde_json::Value> = (0..DECK_SIZE)
+            .map(|i| {
+                let id = offset + i;
+                let tags = serde_json::json!([format!("TAG-{id}")]);
+                match i % 3 {
+                    0 => serde_json::json!({"kind": "spell", "cost": 1, "tags": tags, "effects": [
+                        {"trigger": "on_play", "ops": [{"op": "attack",
+                            "target": {"select": "hero_or_unit", "side": "opposing"},
+                            "amount": 5000 + id}]}]}),
+                    1 => {
+                        serde_json::json!({"cost": 1, "health": 3, "immobile": true, "tags": tags})
+                    }
+                    _ => serde_json::json!({"cost": 1, "force": 2, "attack_cost": 1, "health": 3,
+                                            "tags": tags}),
+                }
+            })
+            .collect();
+        serde_json::json!({"hero": hero(), "cards": cards,
+            "card_names": (0..DECK_SIZE).map(|i| format!("n{}", offset + i)).collect::<Vec<_>>()})
+    };
+    serde_json::from_value(serde_json::json!({
+        "one": side(0), "two": side(DECK_SIZE), "data_versions": []
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_drawn_card_hides_its_tags_kind_and_effects() {
+    let mut checked_draws = 0;
+    for seed in 0..30 {
+        let (mut state, _) = new_game(tagged_setup(), seed).unwrap();
+        let mut rng = Xorshift(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+        while state.winner().is_none() {
+            let seat = state.active();
+            let obs = Observation::of(&state).unwrap();
+            let hidden_from_outcome: BTreeSet<u32> = deck_ids(&state, seat)
+                .into_iter()
+                .chain(deck_ids(&state, seat.opponent()))
+                .chain(state.hand(seat.opponent()).iter().map(|c| c.0))
+                .collect();
+            for (i, action) in obs.actions().iter().enumerate() {
+                let drawn: BTreeSet<u32> = drawn_by(&state, action.clone())
+                    .iter()
+                    .map(|c| c.0)
+                    .collect();
+                let outcome = obs.outcome(i).unwrap();
+                let text = serde_json::to_string(&outcome.view_after).unwrap();
+                let tagged: BTreeSet<u32> = mentioned_ids(&text, "TAG-").collect();
+                assert!(
+                    tagged.is_disjoint(&drawn),
+                    "seed {seed}, action {i}: drawn tag in {text}"
+                );
+                assert!(
+                    tagged.is_disjoint(&hidden_from_outcome),
+                    "seed {seed}, action {i}"
+                );
+                // The unique amount of a spell is found where the spell is public, and a spell
+                // is never public here: it only lives in a hand, a pile or nowhere.
+                for id in drawn.iter().chain(hidden_from_outcome.iter()) {
+                    assert!(
+                        !text.contains(&format!("\"amount\":{}", 5000 + id)),
+                        "seed {seed}"
+                    );
+                }
+                if !drawn.is_empty() {
+                    checked_draws += 1;
+                    assert_eq!(outcome.view_after.you.hand_unseen, drawn.len());
+                    // What was already known and stays in the hand keeps its public tags.
+                    let known: BTreeSet<u32> = outcome
+                        .view_after
+                        .you
+                        .hand_known
+                        .iter()
+                        .map(|c| c.id.0)
+                        .collect();
+                    assert!(known.is_disjoint(&drawn));
+                    assert!(
+                        known.iter().all(|id| tagged.contains(id)),
+                        "seed {seed}: a known card lost its tag in {text}"
+                    );
+                }
+            }
+            let playable: Vec<Action> = legal_actions(&state)
+                .into_iter()
+                .filter(|a| *a != Action::Concede)
+                .collect();
+            apply(&mut state, playable[rng.below(playable.len())].clone()).unwrap();
+        }
+    }
+    assert!(
+        checked_draws > 50,
+        "the check ran on real draws: {checked_draws}"
+    );
+}

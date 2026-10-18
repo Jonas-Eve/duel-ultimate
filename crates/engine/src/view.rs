@@ -408,7 +408,9 @@ mod tests {
                 "attack_cost",
                 "health",
                 "provocation",
-                "riposte"
+                "riposte",
+                "kind",
+                "effects"
             ])
         );
     }
@@ -506,7 +508,7 @@ mod tests {
         let json = serde_json::to_string(&player_view(&state, PlayerId::One)).unwrap();
         let c = |id: u32, name: &str, health: u32| {
             format!(
-                r#"{{"id":{id},"name":{name},"cost":3,"force":4,"attack_cost":2,"health":{health},"provocation":true,"riposte":1}}"#
+                r#"{{"id":{id},"name":{name},"cost":3,"force":4,"attack_cost":2,"health":{health},"provocation":true,"riposte":1,"kind":"unit","effects":[{{"trigger":"activated","cost":2,"ops":[{{"op":"attack","target":{{"select":"hero_or_unit","side":"opposing"}},"amount":4,"polarity":"bonus"}}],"picks":[{{"role":"target","kind":"hero_or_unit","side":"opposing"}}]}}]}}"#
             )
         };
         let hero = |name: &str, health: u32, max_time: u32, effects: &str| {
@@ -717,6 +719,166 @@ mod tests {
         assert!(text.contains(&format!("SECRET-{}\"", returned.id.0)));
         // Without provenance information nothing is masked (the masking is the events' job).
         assert_eq!(outcome_view(&state, seat, &[]).you.hand_unseen, 0);
+    }
+
+    // ---- #209: tags, kind and the reason of a board unit ---------------------------------
+
+    use crate::state::{CardExtras, CardKind};
+    use std::sync::Arc;
+
+    /// `card` carrying extras: its kind, the immobile keyword and its tags.
+    fn with_extras(
+        mut card: CardInstance,
+        kind: CardKind,
+        immobile: bool,
+        tags: &[&str],
+    ) -> CardInstance {
+        card.extras = Some(Arc::new(CardExtras {
+            kind,
+            immobile,
+            tags: tags.iter().map(|t| (*t).to_owned()).collect(),
+            effects: Vec::new(),
+        }));
+        card
+    }
+
+    fn force(mut card: CardInstance, force: u32) -> CardInstance {
+        card.stats.force = force;
+        card
+    }
+
+    fn unavailable_of(value: &Value, zone: &[&str]) -> Vec<Option<String>> {
+        let mut cursor = value;
+        for key in zone {
+            cursor = &cursor[*key];
+        }
+        cursor
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c.get("unavailable").map(|v| v.as_str().unwrap().to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn a_board_unit_with_force_zero_says_attack_force_zero_and_only_on_my_board() {
+        let mut state = handmade();
+        let immobile = with_extras(
+            force(card(21, Some("wall"), 3), 0),
+            CardKind::Unit,
+            true,
+            &[],
+        );
+        state.one.board = vec![
+            force(card(20, Some("idle"), 3), 0),
+            immobile,
+            force(card(22, Some("fine"), 3), 1),
+        ];
+        state.one.discard = vec![force(card(23, Some("dead"), 0), 0)];
+        state.two.board = vec![force(card(43, Some("their-idle"), 3), 0)];
+        state.two.discard = vec![force(card(44, Some("their-dead"), 0), 0)];
+        let one = serde_json::to_value(player_view(&state, PlayerId::One)).unwrap();
+        // Force 0 without the keyword: the reason; the immobile one has no attack to blame; force 1
+        // is the boundary: no reason.
+        assert_eq!(
+            unavailable_of(&one, &["you", "board"]),
+            vec![Some("attack_force_zero".to_owned()), None, None]
+        );
+        assert_eq!(unavailable_of(&one, &["you", "discard"]), vec![None]);
+        assert_eq!(unavailable_of(&one, &["opponent", "board"]), vec![None]);
+        assert_eq!(unavailable_of(&one, &["opponent", "discard"]), vec![None]);
+        // The same cards seen from the other seat: now they are the opponent's, no reason.
+        let two = serde_json::to_value(player_view(&state, PlayerId::Two)).unwrap();
+        assert_eq!(
+            unavailable_of(&two, &["opponent", "board"]),
+            vec![None, None, None]
+        );
+        // It does not depend on whose turn it is (the view of the seat that waits has it too).
+        assert_eq!(state.active, PlayerId::Two);
+        // A finished game blocks nothing.
+        state.winner = Some((PlayerId::One, WinReason::Concede));
+        let done = serde_json::to_value(player_view(&state, PlayerId::One)).unwrap();
+        assert_eq!(
+            unavailable_of(&done, &["you", "board"]),
+            vec![None, None, None]
+        );
+        // The outcome view never carries the reason, hand or board.
+        state.winner = None;
+        let outcome = serde_json::to_string(&outcome_view(&state, PlayerId::One, &[])).unwrap();
+        assert!(!outcome.contains("unavailable"), "{outcome}");
+    }
+
+    #[test]
+    fn the_tags_of_the_public_zones_are_public_and_the_hidden_hand_ones_are_not() {
+        let mut state = handmade();
+        let tag = |c: CardInstance, t: &str| with_extras(c, CardKind::Unit, false, &[t]);
+        state.one.hand = vec![tag(card(7, Some("Alpha"), 4), "own-hand")];
+        state.one.deck = vec![tag(card(8, Some("a"), 1), "own-deck")];
+        state.one.board = vec![tag(card(5, Some("Beta"), 2), "own-board")];
+        state.one.discard = vec![tag(card(9, Some("Gamma"), 0), "own-discard")];
+        state.two.hand = vec![
+            tag(card(40, Some("h"), 1), "SECRET-hand"),
+            with_extras(
+                card(45, Some("s"), 1),
+                CardKind::Spell,
+                false,
+                &["SECRET-spell"],
+            ),
+        ];
+        state.two.deck = vec![tag(card(41, Some("d"), 1), "SECRET-deck")];
+        state.two.board = vec![tag(card(42, Some("b"), 1), "public-board")];
+        state.two.discard = vec![tag(card(43, Some("x"), 0), "public-discard")];
+        let one = serde_json::to_string(&player_view(&state, PlayerId::One)).unwrap();
+        for shown in [
+            "own-hand",
+            "own-board",
+            "own-discard",
+            "public-board",
+            "public-discard",
+        ] {
+            assert!(one.contains(shown), "{shown} in {one}");
+        }
+        for hidden in ["own-deck", "SECRET-hand", "SECRET-deck", "SECRET-spell"] {
+            assert!(!one.contains(hidden), "{hidden} in {one}");
+        }
+        assert!(
+            !one.contains(r#""kind":"spell""#),
+            "the hidden spell: {one}"
+        );
+        // The witness: the other seat reads its own hand.
+        let two = serde_json::to_string(&player_view(&state, PlayerId::Two)).unwrap();
+        assert!(two.contains("SECRET-hand") && two.contains("SECRET-spell"));
+        assert!(two.contains(r#""kind":"spell""#));
+        assert!(!two.contains("SECRET-deck"));
+    }
+
+    #[test]
+    fn a_drawn_card_hides_its_tags_kind_and_effects_but_a_returned_one_keeps_them() {
+        let mut state = running_game(5);
+        let seat = state.active;
+        let side = state.player_mut(seat);
+        let mut returned = side.deck.pop().expect("a pile");
+        returned = with_extras(returned, CardKind::Unit, true, &["returned-tag"]);
+        side.discard.push(returned.clone());
+        let back = side.discard.pop().expect("the card just discarded");
+        side.hand.push(back);
+        let drawn = with_extras(
+            side.deck.pop().expect("a pile"),
+            CardKind::Spell,
+            false,
+            &["drawn-tag"],
+        );
+        let drawn_id = drawn.id;
+        side.hand.push(drawn);
+        let view = outcome_view(&state, seat, &[drawn_id]);
+        let text = serde_json::to_string(&view).unwrap();
+        assert!(!text.contains("drawn-tag"), "{text}");
+        assert!(!text.contains(r#""kind":"spell""#), "{text}");
+        assert!(text.contains("returned-tag"), "{text}");
+        assert!(text.contains(r#""immobile":true"#), "{text}");
+        // The ordinary view of the seat shows both (the card is in its hand).
+        let own = serde_json::to_string(&player_view(&state, seat)).unwrap();
+        assert!(own.contains("drawn-tag") && own.contains("returned-tag"));
     }
 
     #[test]

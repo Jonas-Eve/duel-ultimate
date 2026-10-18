@@ -25,6 +25,12 @@ const ROLES: Record<keyof CardView, Role> = {
   // The engine's reason this card cannot be played now (#171): a code, never shown as a value or a keyword;
   // the play button of the sheet turns it into its French sentence (`messageFor`).
   unavailable: "meta",
+  // The fields of #209 are classified PROVISIONALLY (T5 of #137 reclassifies them when the sheet shows them):
+  // the kind is an identity, the keyword and the tags and the structured effect lines are meta for now.
+  kind: "identity",
+  immobile: "meta",
+  tags: "meta",
+  effects: "meta",
 };
 
 describe("the fields of a CardView", () => {
@@ -32,8 +38,9 @@ describe("the fields of a CardView", () => {
     const s = newSession("rush", "bulwark", 3);
     try {
       const card = s.view("One").you.hand[0];
-      // `unavailable` is optional: absent from a card that can be played.
-      expect(Object.keys(card).sort()).toEqual(Object.keys(ROLES).filter((k) => k !== "unavailable").sort());
+      // `unavailable`, `immobile` and `tags` are optional: absent from a plain card that can be played.
+      const optional = ["unavailable", "immobile", "tags"];
+      expect(Object.keys(card).sort()).toEqual(Object.keys(ROLES).filter((k) => !optional.includes(k)).sort());
     } finally {
       s.dispose();
     }
@@ -46,7 +53,7 @@ describe("the fields of a CardView", () => {
       const play = s.legalActionsWithTime().find((p) => isPlay(p.action))!;
       s.apply(play.action);
       const card = s.view("One").you.hand[0];
-      expect(Object.keys(card).sort()).toEqual(Object.keys(ROLES).sort());
+      expect(Object.keys(card).sort()).toEqual(Object.keys(ROLES).filter((k) => !["immobile", "tags"].includes(k)).sort());
       expect(card.unavailable).toBe("board_full");
       expect(ROLES.unavailable).toBe("meta");
     } finally {

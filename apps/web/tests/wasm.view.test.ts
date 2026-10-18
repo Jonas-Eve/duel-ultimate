@@ -30,6 +30,10 @@ interface Card {
   health: number;
   provocation: boolean;
   riposte: number;
+  kind: "unit" | "spell";
+  immobile?: boolean;
+  tags?: string[];
+  effects: { index?: number; trigger: string; cost?: number; ops: unknown[]; picks: unknown[] }[];
   unavailable?: string;
 }
 interface Hero {
@@ -80,8 +84,15 @@ describe("Game.view(seat) in the browser build", () => {
       expect(Object.keys(one.opponent).sort()).toEqual(["board", "deck_count", "discard", "hand_count", "hero"]);
       expect(Object.keys(one.you.hero).sort()).toEqual(["effects", "health", "max_time", "name"]);
       expect(Object.keys(one.you.hand[0]).sort()).toEqual(
-        ["attack_cost", "cost", "force", "health", "id", "name", "provocation", "riposte"],
+        ["attack_cost", "cost", "effects", "force", "health", "id", "kind", "name", "provocation", "riposte"],
       );
+      // The attack of a plain unit is a line of the view, without an index (#209).
+      for (const card of one.you.hand) {
+        expect(card.kind).toBe("unit");
+        expect(card.effects).toHaveLength(1);
+        expect(card.effects[0].index).toBeUndefined();
+        expect(card.effects[0].trigger).toBe("activated");
+      }
       // The same public blocks, seen from the two seats.
       expect(one.you.hero).toEqual(two.opponent.hero);
       expect(one.opponent.hero).toEqual(two.you.hero);

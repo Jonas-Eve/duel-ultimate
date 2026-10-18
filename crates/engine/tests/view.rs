@@ -630,7 +630,13 @@ mod unavailable {
         play(&mut state, 0);
         let text = serde_json::to_string(&player_view(&state, PlayerId::One)).unwrap();
         assert!(
-            text.contains(r#""riposte":0,"unavailable":"board_full"}"#),
+            text.contains(concat!(
+                r#""riposte":0,"kind":"unit","effects":[{"trigger":"activated","cost":1,"#,
+                r#""ops":[{"op":"attack","target":{"select":"hero_or_unit","side":"opposing"},"#,
+                r#""amount":2,"polarity":"bonus"}],"#,
+                r#""picks":[{"role":"target","kind":"hero_or_unit","side":"opposing"}]}],"#,
+                r#""unavailable":"board_full"}"#
+            )),
             "{text}"
         );
     }
@@ -753,5 +759,644 @@ mod unavailable {
                 .iter()
                 .all(|c| c.unavailable == Some("board_full"))
         );
+    }
+}
+
+// ---- #209: `kind`, `immobile`, `tags`, `effects`, `unavailable` per card ----------------------
+
+mod new_kinds {
+    use super::*;
+    use duel_engine::RuleSet;
+    use serde_json::{Value, json};
+
+    const ATTACK_ON_HERO_OR_UNIT: &str =
+        r#"{"op":"attack","target":{"select":"hero_or_unit","side":"opposing"},"amount":3}"#;
+
+    fn hero(initiative: u32, start_budget: u32, starting_hand: u32) -> Value {
+        json!({"name": format!("hero-{initiative}"), "max_time": 30, "starting_hand": starting_hand,
+               "initiative": initiative, "start_budget": start_budget, "health": 20, "effects": []})
+    }
+
+    fn plain(cost: u32, force: u32, attack_cost: u32, health: u32) -> Value {
+        json!({"cost": cost, "force": force, "attack_cost": attack_cost, "health": health,
+               "provocation": true, "riposte": 1})
+    }
+
+    fn unit_with(effects: Value) -> Value {
+        let mut card = plain(2, 2, 1, 4);
+        card["effects"] = effects;
+        card
+    }
+
+    fn special_attack(cost: u32, extra: &str) -> Value {
+        let op: Value = serde_json::from_str(ATTACK_ON_HERO_OR_UNIT).unwrap();
+        let mut op = op;
+        if !extra.is_empty() {
+            for (k, v) in serde_json::from_str::<Value>(extra)
+                .unwrap()
+                .as_object()
+                .unwrap()
+            {
+                op[k] = v.clone();
+            }
+        }
+        json!({"trigger": "activated", "cost": cost, "ops": [op]})
+    }
+
+    /// A setup from the JSON of the cards of each side (named `c<position>` unless given).
+    fn setup_json(one: Vec<Value>, two: Vec<Value>, hands: (u32, u32), budget: u32) -> GameSetup {
+        let side = |cards: Vec<Value>, initiative: u32, hand: u32| {
+            let names: Vec<String> = (0..cards.len()).map(|n| format!("c{n}")).collect();
+            json!({"hero": hero(initiative, budget, hand), "cards": cards, "card_names": names})
+        };
+        serde_json::from_value(json!({
+            "one": side(one, 2, hands.0),
+            "two": side(two, 1, hands.1),
+            "data_versions": [],
+        }))
+        .unwrap()
+    }
+
+    fn filler(n: usize) -> Vec<Value> {
+        (0..n).map(|_| plain(1, 1, 1, 3)).collect()
+    }
+
+    /// `first` then plain units up to 30 cards.
+    fn deck_of(first: Vec<Value>) -> Vec<Value> {
+        let n = 30 - first.len();
+        first.into_iter().chain(filler(n)).collect()
+    }
+
+    fn view_text(state: &GameState, seat: PlayerId) -> String {
+        serde_json::to_string(&player_view(state, seat)).unwrap()
+    }
+
+    fn view_json(state: &GameState, seat: PlayerId) -> Value {
+        serde_json::from_str(&view_text(state, seat)).unwrap()
+    }
+
+    /// The card of the hand of `seat` named `name`.
+    fn hand_card(state: &GameState, seat: PlayerId, name: &str) -> Value {
+        view_json(state, seat)["you"]["hand"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap_or_else(|| panic!("{name} is in the hand"))
+            .clone()
+    }
+
+    fn keys(value: &Value) -> BTreeSet<String> {
+        value.as_object().unwrap().keys().cloned().collect()
+    }
+
+    fn game(one: Vec<Value>, two: Vec<Value>) -> GameState {
+        new_game(setup_json(one, two, (30, 30), 20), 1).unwrap().0
+    }
+
+    #[test]
+    fn a_plain_unit_view_gains_only_kind_and_effects() {
+        let mut card = plain(3, 4, 2, 5);
+        card["riposte"] = json!(1);
+        let state = game(deck_of(vec![card.clone()]), filler(30));
+        for seat in SEATS {
+            let json = view_text(&state, seat);
+            let value = view_json(&state, seat);
+            let own = &value["you"]["hand"];
+            for c in own.as_array().unwrap() {
+                // Old keys, then the two new ones, in this order.
+                assert_eq!(
+                    keys(c),
+                    BTreeSet::from(
+                        [
+                            "id",
+                            "name",
+                            "cost",
+                            "force",
+                            "attack_cost",
+                            "health",
+                            "provocation",
+                            "riposte",
+                            "kind",
+                            "effects"
+                        ]
+                        .map(String::from)
+                    ),
+                    "{c}"
+                );
+                assert_eq!(c["kind"], "unit");
+            }
+            assert!(
+                json.contains(r#""riposte":1,"kind":"unit","effects":[{"trigger":"activated""#)
+            );
+        }
+        // The exact JSON of one card: the old part verbatim, then kind and the attack line.
+        let c0 = hand_card(&state, PlayerId::One, "c0");
+        let id = c0["id"].as_u64().unwrap();
+        let expected = format!(
+            concat!(
+                r#"{{"id":{id},"name":"c0","cost":3,"force":4,"attack_cost":2,"health":5,"#,
+                r#""provocation":true,"riposte":1,"kind":"unit","effects":["#,
+                r#"{{"trigger":"activated","cost":2,"ops":[{{"op":"attack","target":"#,
+                r#"{{"select":"hero_or_unit","side":"opposing"}},"amount":4,"polarity":"bonus"}}],"#,
+                r#""picks":[{{"role":"target","kind":"hero_or_unit","side":"opposing"}}]}}]}}"#
+            ),
+            id = id
+        );
+        assert!(
+            view_text(&state, PlayerId::One).contains(&expected),
+            "{expected}"
+        );
+        assert!(c0.get("index").is_none());
+        assert!(c0["effects"][0].get("index").is_none());
+    }
+
+    #[test]
+    fn the_normal_attack_line_and_a_special_attack_line_have_the_same_shape() {
+        let special = special_attack(3, r#"{"amount": 5}"#);
+        let state = game(deck_of(vec![unit_with(json!([special]))]), filler(30));
+        let card = hand_card(&state, PlayerId::One, "c0");
+        let lines = card["effects"].as_array().unwrap();
+        assert_eq!(lines.len(), 2, "{card}");
+        let (normal, declared) = (&lines[0], &lines[1]);
+        assert!(normal.get("index").is_none());
+        assert_eq!(declared["index"], 0);
+        let mut without_index = keys(declared);
+        without_index.remove("index");
+        assert_eq!(keys(normal), without_index);
+        assert_eq!(keys(&normal["ops"][0]), keys(&declared["ops"][0]));
+        assert_eq!(normal["trigger"], declared["trigger"]);
+        assert_eq!(normal["ops"][0]["op"], "attack");
+        assert_eq!(normal["ops"][0]["target"], declared["ops"][0]["target"]);
+        assert_eq!(normal["ops"][0]["polarity"], declared["ops"][0]["polarity"]);
+        assert_eq!(normal["picks"], declared["picks"]);
+        // Only the values differ.
+        assert_eq!(normal["ops"][0]["amount"], 2);
+        assert_eq!(declared["ops"][0]["amount"], 5);
+        assert_eq!(normal["cost"], 1);
+        assert_eq!(declared["cost"], 3);
+    }
+
+    #[test]
+    fn an_immobile_unit_has_no_attack_line_and_a_spell_has_none() {
+        let immobile = json!({"cost": 1, "health": 4, "immobile": true});
+        let spell = json!({"kind": "spell", "cost": 1, "effects": [
+            {"trigger": "on_play", "ops": [{"op": "draw", "target": {"select": "hero", "side": "own"}, "count": 1}]}]});
+        let state = game(deck_of(vec![immobile, spell]), filler(30));
+        let immobile = hand_card(&state, PlayerId::One, "c0");
+        assert_eq!(immobile["effects"], json!([]), "always written, empty");
+        assert_eq!(immobile["force"], 0);
+        assert_eq!(immobile["attack_cost"], 0);
+        let spell = hand_card(&state, PlayerId::One, "c1");
+        let lines = spell["effects"].as_array().unwrap();
+        assert_eq!(lines.len(), 1, "only the declared line: {spell}");
+        assert_eq!(lines[0]["index"], 0);
+        assert_eq!(lines[0]["trigger"], "on_play");
+        assert!(
+            lines[0].get("cost").is_none(),
+            "no cost for an on_play effect"
+        );
+        assert_eq!(spell["health"], 0);
+        assert_eq!(spell["force"], 0);
+    }
+
+    #[test]
+    fn declared_effects_follow_the_attack_line_with_their_index() {
+        let draw = json!({"trigger": "on_play", "ops": [
+            {"op": "draw", "target": {"select": "hero", "side": "own"}, "count": 2}]});
+        let cont = json!({"trigger": "continuous", "ops": [
+            {"op": "modify_stat", "target": {"select": "self"}, "stat": "force", "delta": 1}]});
+        let state = game(
+            deck_of(vec![unit_with(json!([draw, special_attack(2, ""), cont]))]),
+            filler(30),
+        );
+        let card = hand_card(&state, PlayerId::One, "c0");
+        let lines = card["effects"].as_array().unwrap();
+        let shape: Vec<(Option<u64>, &str)> = lines
+            .iter()
+            .map(|l| (l["index"].as_u64(), l["trigger"].as_str().unwrap()))
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                (None, "activated"),
+                (Some(0), "on_play"),
+                (Some(1), "activated"),
+                (Some(2), "continuous")
+            ]
+        );
+        assert_eq!(lines[1]["ops"][0]["count"], 2);
+        assert_eq!(lines[3]["ops"][0]["delta"], 1);
+        assert!(lines[1].get("cost").is_none());
+        assert_eq!(lines[2]["cost"], 2);
+        assert!(lines[3].get("cost").is_none());
+    }
+
+    #[test]
+    fn the_attack_line_reads_effective_force_and_cost() {
+        let state = game(
+            deck_of(vec![plain(6, 7, 3, 2), plain(1, 1, 5, 9)]),
+            filler(30),
+        );
+        for (name, force, cost) in [("c0", 7, 3), ("c1", 1, 5)] {
+            let card = hand_card(&state, PlayerId::One, name);
+            assert_eq!(
+                (card["force"].as_u64(), card["attack_cost"].as_u64()),
+                (Some(force), Some(cost))
+            );
+            let line = &card["effects"][0];
+            assert_eq!(line["ops"][0]["amount"].as_u64(), Some(force), "{card}");
+            assert_eq!(line["cost"].as_u64(), Some(cost), "{card}");
+        }
+    }
+
+    #[test]
+    fn kind_immobile_and_tags_are_written_or_omitted_as_specified() {
+        let mut immobile = json!({"cost": 1, "health": 4, "immobile": true});
+        immobile["tags"] = json!(["bâtiment", "machine"]);
+        let mut spell = json!({"kind": "spell", "cost": 2, "effects": [
+            {"trigger": "on_play", "ops": [{"op": "draw", "target": {"select": "hero", "side": "own"}, "count": 1}]}]});
+        spell["tags"] = json!(["rituel"]);
+        let state = game(
+            deck_of(vec![immobile, spell, plain(1, 1, 1, 1)]),
+            filler(30),
+        );
+        let text = view_text(&state, PlayerId::One);
+        let find = |needle: &str| {
+            text.find(needle)
+                .unwrap_or_else(|| panic!("{needle} in {text}"))
+        };
+
+        let imm = hand_card(&state, PlayerId::One, "c0");
+        assert_eq!(imm["kind"], "unit");
+        assert_eq!(imm["immobile"], true);
+        assert_eq!(imm["tags"], json!(["bâtiment", "machine"]));
+        let sp = hand_card(&state, PlayerId::One, "c1");
+        assert_eq!(sp["kind"], "spell");
+        assert!(sp.get("immobile").is_none(), "omitted when false: {sp}");
+        assert_eq!(sp["tags"], json!(["rituel"]));
+        let pl = hand_card(&state, PlayerId::One, "c2");
+        assert_eq!(pl["kind"], "unit");
+        assert!(pl.get("immobile").is_none());
+        assert!(pl.get("tags").is_none(), "omitted when empty: {pl}");
+        assert!(pl.get("effects").is_some(), "always written");
+
+        // Order of the keys: riposte, kind, immobile, tags, effects.
+        let (r, k, i, t, e) = (
+            find(r#""riposte":0,"kind":"unit","immobile":true"#),
+            find(r#""kind":"unit","immobile":true"#),
+            find(r#""immobile":true,"tags":["bâtiment","machine"],"effects":[]"#),
+            find(r#""tags":["bâtiment","machine"],"effects":[]"#),
+            find(r#""effects":[]"#),
+        );
+        assert!(r <= k && k < i && i < t && t < e, "{text}");
+    }
+
+    #[test]
+    fn picks_are_the_expected_picks_of_the_data() {
+        let spell = json!({"kind": "spell", "cost": 2, "effects": [
+            {"trigger": "on_play", "ops": [{"op": "attack",
+                "target": {"select": "hero_or_unit", "side": "opposing"},
+                "amount": 3, "attackers": 2, "mode": "simultaneous"}]}]});
+        let sweeper = unit_with(json!([
+            {"trigger": "on_play", "ops": [{"op": "deal_damage",
+                "target": {"select": "all_units", "side": "both"}, "amount": 1}]}]));
+        let state = game(deck_of(vec![spell, sweeper]), filler(30));
+        let spell = hand_card(&state, PlayerId::One, "c0");
+        assert_eq!(
+            spell["effects"][0]["picks"],
+            json!([
+                {"role": "attacker", "kind": "unit", "side": "own"},
+                {"role": "attacker", "kind": "unit", "side": "own"},
+                {"role": "target", "kind": "hero_or_unit", "side": "opposing"}
+            ])
+        );
+        assert_eq!(spell["effects"][0]["ops"][0]["attackers"], 2);
+        assert_eq!(spell["effects"][0]["ops"][0]["mode"], "simultaneous");
+        let sweeper = hand_card(&state, PlayerId::One, "c1");
+        assert_eq!(
+            sweeper["effects"][1]["picks"],
+            json!([]),
+            "all_units: no pick"
+        );
+        assert!(sweeper["effects"][1].get("index").is_some());
+    }
+
+    #[test]
+    fn polarity_is_the_derived_one() {
+        let own_draw =
+            json!({"op": "draw", "target": {"select": "hero", "side": "own"}, "count": 1});
+        let hit_them = json!({"op": "deal_damage", "target": {"select": "hero_or_unit", "side": "opposing"}, "amount": 1});
+        let hit_us = json!({"op": "deal_damage", "target": {"select": "all_units", "side": "own"}, "amount": 1});
+        let hit_all = json!({"op": "deal_damage", "target": {"select": "all_units", "side": "both"}, "amount": 1});
+        let two_effects = json!([
+            {"trigger": "on_play", "ops": [own_draw, hit_them, hit_us]},
+            {"trigger": "on_play", "ops": [hit_all]}
+        ]);
+        let state = game(deck_of(vec![unit_with(two_effects)]), filler(30));
+        let card = hand_card(&state, PlayerId::One, "c0");
+        let polarities = |line: usize| -> Vec<String> {
+            card["effects"][line]["ops"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|o| o["polarity"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        assert_eq!(polarities(1), ["bonus", "bonus", "malus"]);
+        assert_eq!(polarities(2), ["neutral"]);
+        // A cost that goes up is a malus for its owner (inverted stats).
+        let cost_up = json!([{"trigger": "continuous", "ops": [
+            {"op": "modify_stat", "target": {"select": "self"}, "stat": "cost", "delta": 1},
+            {"op": "modify_stat", "target": {"select": "self"}, "stat": "force", "delta": -1},
+            {"op": "grant_keyword", "target": {"select": "self"}, "keyword": "ranged"}]}]);
+        let state = game(deck_of(vec![unit_with(cost_up)]), filler(30));
+        let card = hand_card(&state, PlayerId::One, "c0");
+        let polarities: Vec<&str> = card["effects"][1]["ops"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|o| o["polarity"].as_str().unwrap())
+            .collect();
+        assert_eq!(polarities, ["malus", "malus", "bonus"]);
+    }
+
+    fn limited(state_rules: u32) -> RuleSet {
+        RuleSet {
+            board_limit: Some(state_rules),
+            ..RuleSet::legacy()
+        }
+    }
+
+    fn spell_card() -> Value {
+        json!({"kind": "spell", "cost": 1, "effects": [
+            {"trigger": "on_play", "ops": [{"op": "draw", "target": {"select": "hero", "side": "own"}, "count": 1}]}]})
+    }
+
+    fn limited_game(limit: u32) -> GameState {
+        let mut setup = setup_json(
+            deck_of(vec![spell_card(), plain(1, 2, 1, 3)]),
+            filler(30),
+            (30, 30),
+            20,
+        );
+        setup.rules = limited(limit);
+        new_game(setup, 1).unwrap().0
+    }
+
+    fn reason(card: &Value) -> Option<&str> {
+        card.get("unavailable").map(|v| v.as_str().unwrap())
+    }
+
+    #[test]
+    fn hand_unavailable_is_per_card() {
+        let mut state = limited_game(1);
+        // Board not full: the unit has no reason, the spell has the temporary one.
+        assert_eq!(reason(&hand_card(&state, PlayerId::One, "c1")), None);
+        assert_eq!(
+            reason(&hand_card(&state, PlayerId::One, "c0")),
+            Some("unsupported_effect")
+        );
+        // Board full: a unit says board_full, a spell is still not playable for its own reason.
+        let unit = hand_card(&state, PlayerId::One, "c1")["id"]
+            .as_u64()
+            .unwrap();
+        apply(
+            &mut state,
+            Action::play(CardInstanceId(u32::try_from(unit).unwrap())),
+        )
+        .unwrap();
+        assert_eq!(
+            state.active(),
+            PlayerId::One,
+            "still One's turn at this budget"
+        );
+        for name in ["c2", "c3", "c4"] {
+            assert_eq!(
+                reason(&hand_card(&state, PlayerId::One, name)),
+                Some("board_full"),
+                "{name}"
+            );
+        }
+        assert_eq!(
+            reason(&hand_card(&state, PlayerId::One, "c0")),
+            Some("unsupported_effect")
+        );
+        // A finished game blocks nothing.
+        apply(&mut state, Action::Concede).unwrap();
+        for seat in SEATS {
+            assert!(!view_text(&state, seat).contains("unavailable"), "{seat:?}");
+        }
+    }
+
+    #[test]
+    fn an_immobile_board_unit_carries_no_unavailable() {
+        let immobile = json!({"cost": 1, "health": 4, "immobile": true});
+        let mut state = game(deck_of(vec![immobile]), filler(30));
+        let id = hand_card(&state, PlayerId::One, "c0")["id"]
+            .as_u64()
+            .unwrap();
+        apply(
+            &mut state,
+            Action::play(CardInstanceId(u32::try_from(id).unwrap())),
+        )
+        .unwrap();
+        let board = &view_json(&state, PlayerId::One)["you"]["board"];
+        assert_eq!(board.as_array().unwrap().len(), 1);
+        assert_eq!(reason(&board[0]), None, "{board}");
+        assert_eq!(board[0]["effects"], json!([]));
+    }
+
+    #[test]
+    fn a_plain_board_unit_with_force_has_no_reason() {
+        let mut state = game(deck_of(vec![plain(1, 2, 1, 3)]), filler(30));
+        let id = hand_card(&state, PlayerId::One, "c0")["id"]
+            .as_u64()
+            .unwrap();
+        apply(
+            &mut state,
+            Action::play(CardInstanceId(u32::try_from(id).unwrap())),
+        )
+        .unwrap();
+        for seat in SEATS {
+            let view = view_json(&state, seat);
+            for side in ["you", "opponent"] {
+                for card in view[side]["board"].as_array().unwrap() {
+                    assert_eq!(reason(card), None, "{seat:?} {side}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unavailable_is_the_predicate_usable_uses() {
+        // A mixed game with a full board of 2: hand cards and board units are checked against the
+        // refusal `apply` gives to the action each one stands for.
+        let immobile = json!({"cost": 1, "health": 4, "immobile": true});
+        let mut setup = setup_json(
+            deck_of(vec![
+                spell_card(),
+                immobile,
+                plain(1, 2, 1, 3),
+                plain(1, 3, 1, 3),
+            ]),
+            filler(30),
+            (30, 30),
+            20,
+        );
+        setup.rules = limited(2);
+        let (mut state, _) = new_game(setup, 1).unwrap();
+        for step in 0..3 {
+            let view = view_json(&state, PlayerId::One);
+            for card in view["you"]["hand"].as_array().unwrap() {
+                let id = CardInstanceId(u32::try_from(card["id"].as_u64().unwrap()).unwrap());
+                let mut copy = state.clone();
+                let refused = apply(&mut copy, Action::play(id)).err().map(|e| e.code());
+                assert_eq!(refused, reason(card), "step {step} hand {card}");
+            }
+            for card in view["you"]["board"].as_array().unwrap() {
+                if card["immobile"] == true {
+                    assert_eq!(reason(card), None);
+                    continue;
+                }
+                let id = CardInstanceId(u32::try_from(card["id"].as_u64().unwrap()).unwrap());
+                let mut copy = state.clone();
+                let refused = apply(
+                    &mut copy,
+                    Action::Attack {
+                        attacker: id,
+                        target: duel_engine::Target::Hero,
+                    },
+                )
+                .err()
+                .map(|e| e.code());
+                assert_eq!(refused, reason(card), "step {step} board {card}");
+            }
+            // Play the first playable card to grow the board.
+            let next = legal_actions(&state)
+                .into_iter()
+                .find(|a| matches!(a, Action::Play { .. }));
+            let Some(next) = next else { break };
+            apply(&mut state, next).unwrap();
+        }
+        assert!(
+            !state.board(PlayerId::One).is_empty(),
+            "the check ran on a real board"
+        );
+    }
+
+    // ---- no leak ---------------------------------------------------------------------------
+
+    /// The deck of a seat: every card carries the tag `<prefix>-<instance id>` (the id is the
+    /// position in the setup, offset 0 for One and 30 for Two), and the spells a unique amount.
+    fn tagged(prefix: &str, offset: usize, amount: u32) -> Vec<Value> {
+        (0..30)
+            .map(|n| {
+                let tag = json!([format!("{prefix}-{}", offset + n)]);
+                match n % 4 {
+                    0 => json!({"kind": "spell", "cost": 2, "tags": tag, "effects": [
+                        {"trigger": "on_play", "ops": [{"op": "attack",
+                            "target": {"select": "hero_or_unit", "side": "opposing"},
+                            "amount": amount}]}]}),
+                    1 => json!({"cost": 1, "health": 4, "immobile": true, "tags": tag}),
+                    2 => {
+                        let mut c = unit_with(json!([special_attack(2, "")]));
+                        c["tags"] = tag;
+                        c
+                    }
+                    _ => {
+                        let mut c = plain(1, 2, 1, 3);
+                        c["tags"] = tag;
+                        c
+                    }
+                }
+            })
+            .collect()
+    }
+
+    fn secret_ids(text: &str, prefix: &str) -> BTreeSet<u32> {
+        text.split(&format!("{prefix}-"))
+            .skip(1)
+            .map(|rest| {
+                rest.chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect::<String>()
+                    .parse()
+                    .unwrap()
+            })
+            .collect()
+    }
+
+    fn ids(cards: Vec<CardInstanceId>) -> BTreeSet<u32> {
+        cards.into_iter().map(|c| c.0).collect()
+    }
+
+    /// One summons a card (the budget of 1 hands the token over), then Two summons one.
+    fn played_game(two_tags: &str) -> GameState {
+        let setup = setup_json(
+            tagged("PUBLIC", 0, 4001),
+            tagged(two_tags, 30, 4242),
+            (30, 30),
+            1,
+        );
+        let (mut state, _) = new_game(setup, 5).unwrap();
+        assert_eq!(state.active(), PlayerId::One);
+        for _ in 0..2 {
+            let play = legal_actions(&state)
+                .into_iter()
+                .find(|a| matches!(a, Action::Play { .. }))
+                .expect("a summonable card");
+            apply(&mut state, play).unwrap();
+        }
+        state
+    }
+
+    #[test]
+    fn a_secret_tag_never_reaches_the_other_seat() {
+        let state = played_game("SECRET");
+        let public: BTreeSet<u32> =
+            ids([state.board(PlayerId::Two), state.discard(PlayerId::Two)].concat());
+        assert!(!public.is_empty(), "Two has a public card: {public:?}");
+        let one = view_text(&state, PlayerId::One);
+        // Only the tags of the public cards of Two (board, discard) reach One.
+        assert_eq!(secret_ids(&one, "SECRET"), public, "{one}");
+        // The unique amount of the spells of Two lives in its hand only.
+        assert!(!one.contains("4242"), "{one}");
+        // Positive witness: Two sees its own hand, board and discard.
+        let two = view_text(&state, PlayerId::Two);
+        let own: BTreeSet<u32> = ids([
+            state.hand(PlayerId::Two),
+            state.board(PlayerId::Two),
+            state.discard(PlayerId::Two),
+        ]
+        .concat());
+        assert_eq!(secret_ids(&two, "SECRET"), own);
+        assert!(two.contains("4242"), "a spell of Two is in its hand");
+        // And the pile never: no tag of a card in the draw pile appears in either view.
+        let piles: BTreeSet<u32> = (30..60).filter(|id| !own.contains(id)).collect();
+        for text in [&one, &two] {
+            assert!(secret_ids(text, "SECRET").is_disjoint(&piles));
+        }
+        // The other way round, One's tags are public to Two as the board and discard of One.
+        let one_public: BTreeSet<u32> =
+            ids([state.board(PlayerId::One), state.discard(PlayerId::One)].concat());
+        assert_eq!(
+            secret_ids(&two, "PUBLIC"),
+            one_public,
+            "Two sees the tags of the public cards of One only"
+        );
+    }
+
+    #[test]
+    fn view_of_the_other_seat_is_independent_of_the_hidden_hand_tags() {
+        // Two setups that only differ by the tags of the hand of Two (and the spells' amount).
+        let (a, b) = (played_game("SECRET"), played_game("OTHER"));
+        assert_eq!(a.board(PlayerId::Two), b.board(PlayerId::Two));
+        let (va, vb) = (view_text(&a, PlayerId::One), view_text(&b, PlayerId::One));
+        // The tags of the two public cards differ by name, the rest is the same byte for byte.
+        let normalise = |t: &str, prefix: &str| t.replace(&format!("{prefix}-"), "T-");
+        assert_eq!(normalise(&va, "SECRET"), normalise(&vb, "OTHER"));
+        // Control: the view of Two does depend on its own tags.
+        assert_ne!(view_text(&a, PlayerId::Two), view_text(&b, PlayerId::Two));
     }
 }
