@@ -517,3 +517,53 @@ fn the_hero_riposte_reaches_apply_and_the_view() {
             .any(|c| c["id"] == creature)
     );
 }
+
+// ---- #171: `board_limit` acts --------------------------------------------------------------
+
+/// With `{"board_limit":1}` the second summoning of a seat is refused with `board_full` and
+/// the game is left exactly as it was (legal actions, view of both seats).
+#[test]
+fn a_board_limit_in_rules_json_refuses_a_second_summoning_with_board_full() {
+    let mut game = with_rules(Some(r#"{"hero_riposte":false,"board_limit":1}"#), VERSIONS).unwrap();
+    let plays = |game: &Duel| -> Vec<String> {
+        let list: Vec<Value> = serde_json::from_str(&game.legal_actions_json().unwrap()).unwrap();
+        list.iter()
+            .filter(|a| a.get("play").is_some())
+            .map(Value::to_string)
+            .collect()
+    };
+    // The active seat summons until the token changes sides or its board is full.
+    let first = plays(&game).into_iter().next().expect("a summoning");
+    game.apply_json(&first).unwrap();
+    // Whoever is active now, a seat with a creature on its board is refused another one: play
+    // on until some seat is active with a board of one and cards in hand.
+    for _ in 0..4 {
+        let view: Value = serde_json::from_str(&game.view_json("One").unwrap()).unwrap();
+        let active = view["active"].as_str().unwrap().to_owned();
+        let seat = serde_json::from_str::<Value>(&game.view_json(&active).unwrap()).unwrap();
+        if seat["you"]["board"].as_array().unwrap().len() == 1 {
+            let card = seat["you"]["hand"][0]["id"].as_u64().unwrap();
+            let legal_before = game.legal_actions_json().unwrap();
+            let views_before = (
+                game.view_json("One").unwrap(),
+                game.view_json("Two").unwrap(),
+            );
+            let error = game
+                .apply_json(&format!(r#"{{"play":{{"card":{card}}}}}"#))
+                .unwrap_err();
+            assert_eq!(code(&error), "board_full", "{error}");
+            assert_eq!(game.legal_actions_json().unwrap(), legal_before);
+            assert_eq!(
+                (
+                    game.view_json("One").unwrap(),
+                    game.view_json("Two").unwrap()
+                ),
+                views_before
+            );
+            return;
+        }
+        let next = plays(&game).into_iter().next().expect("a summoning");
+        game.apply_json(&next).unwrap();
+    }
+    panic!("no seat reached a full board");
+}

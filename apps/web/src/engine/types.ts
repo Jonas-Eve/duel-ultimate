@@ -48,6 +48,8 @@ export interface CardView {
   health: number;
   provocation: boolean;
   riposte: number;
+  /** Why the card cannot be played now: an engine code (never interpreted here), only on a card of my own hand. */
+  unavailable?: string;
 }
 export interface OwnSide {
   hero: HeroView;

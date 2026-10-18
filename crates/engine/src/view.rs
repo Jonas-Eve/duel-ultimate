@@ -14,6 +14,7 @@
 //! as `"One"` / `"Two"` (as [`PlayerId`] serializes everywhere else), reasons as
 //! `hero_down`, `exhaustion`, `concede`.
 
+use crate::rules;
 use crate::state::{CardInstance, CardInstanceId, GameState, PlayerId, PlayerState, WinReason};
 use duel_cards::HeroEffect;
 use serde::Serialize;
@@ -46,6 +47,10 @@ pub struct CardView {
     pub health: u32,
     pub provocation: bool,
     pub riposte: u32,
+    /// Why the card cannot be played right now (an engine code, the same table as the errors),
+    /// absent when it can; only ever set on the cards of the hand of the seat asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unavailable: Option<&'static str>,
 }
 
 /// The seat's own side: its hand is visible, its pile only as a count.
@@ -117,13 +122,28 @@ pub fn player_view(state: &GameState, seat: PlayerId) -> PlayerView {
         result: result_of(state),
         you: OwnSide {
             hero: hero_view(you),
-            hand: card_views(&you.hand),
+            hand: hand_views(state, seat),
             deck_count: you.deck.len(),
             board: card_views(&you.board),
             discard: card_views(&you.discard),
         },
         opponent: opponent_side(state, seat),
     }
+}
+
+/// The hand of `seat`, each card with the reason it cannot be played, if there is one. The
+/// reason is the same for every card (it reads the public board of the seat), computed once.
+fn hand_views(state: &GameState, seat: PlayerId) -> Vec<CardView> {
+    let unavailable = rules::play_blocker(state, seat).map(|e| e.code());
+    state
+        .player(seat)
+        .hand
+        .iter()
+        .map(|card| CardView {
+            unavailable,
+            ..card_view(card)
+        })
+        .collect()
 }
 
 /// Projects `state_after`, the state right after an action of `seat`, for that seat. `drawn` are
@@ -196,6 +216,7 @@ fn card_view(card: &CardInstance) -> CardView {
         health: card.stats.health,
         provocation: card.stats.provocation,
         riposte: card.stats.riposte,
+        unavailable: None,
     }
 }
 

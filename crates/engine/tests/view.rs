@@ -127,6 +127,7 @@ impl Tracker {
             health: self.health[&id],
             provocation: stats.provocation,
             riposte: stats.riposte,
+            unavailable: None,
         }
     }
 
@@ -511,5 +512,236 @@ fn the_cards_named_by_the_data_sets_appear_in_the_views_with_their_names() {
     for card in &view.you.hand {
         let expected = &setup.one.card_names[card.id.0 as usize];
         assert_eq!(card.name.as_ref(), Some(expected));
+    }
+}
+
+// ---- #171: `unavailable`, the reason a card of the hand cannot be played --------------------
+
+mod unavailable {
+    use super::*;
+    use duel_cards::{CreatureStats, Hero};
+    use duel_engine::{Observation, PlayerSetup, RuleSet, Target};
+    use serde_json::Value;
+
+    fn unit(cost: u32, health: u32) -> CreatureStats {
+        CreatureStats {
+            cost,
+            force: 2,
+            attack_cost: 1,
+            health,
+            provocation: false,
+            riposte: 0,
+        }
+    }
+
+    fn hero(initiative: u32, start_budget: u32) -> Hero {
+        Hero {
+            name: format!("hero-{initiative}"),
+            max_time: 30,
+            starting_hand: 30,
+            initiative,
+            start_budget,
+            health: 10,
+            effects: vec![],
+        }
+    }
+
+    /// One (active, 20 time units) and Two have their whole deck in hand. `two_health` makes the
+    /// hidden hand of Two differ without changing anything public.
+    fn setup(rules: RuleSet, two_health: u32) -> GameSetup {
+        GameSetup {
+            one: PlayerSetup {
+                hero: hero(2, 20),
+                cards: vec![unit(1, 3); 30],
+                card_names: Vec::new(),
+            },
+            two: PlayerSetup {
+                hero: hero(1, 1),
+                cards: vec![unit(1, two_health); 30],
+                card_names: Vec::new(),
+            },
+            data_versions: Vec::new(),
+            rules,
+        }
+    }
+
+    fn limited(n: u32) -> RuleSet {
+        RuleSet {
+            board_limit: Some(n),
+            ..RuleSet::legacy()
+        }
+    }
+
+    fn play(state: &mut GameState, n: u32) {
+        apply(
+            state,
+            Action::Play {
+                card: CardInstanceId(n),
+            },
+        )
+        .unwrap();
+    }
+
+    fn json(state: &GameState, seat: PlayerId) -> Value {
+        serde_json::to_value(player_view(state, seat)).unwrap()
+    }
+
+    fn cards(value: &Value) -> Vec<&Value> {
+        value.as_array().unwrap().iter().collect()
+    }
+
+    /// Whether the key appears anywhere in the document.
+    fn mentions(value: &Value, key: &str) -> bool {
+        match value {
+            Value::Object(map) => map.contains_key(key) || map.values().any(|v| mentions(v, key)),
+            Value::Array(items) => items.iter().any(|v| mentions(v, key)),
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn every_card_of_the_hand_of_a_seat_with_a_full_board_says_why() {
+        let (mut state, _) = new_game(setup(limited(2), 3), 5).unwrap();
+        play(&mut state, 0);
+        // One place left: nothing is blocked yet.
+        assert!(!mentions(&json(&state, PlayerId::One), "unavailable"));
+        play(&mut state, 1);
+        let view = json(&state, PlayerId::One);
+        let hand = cards(&view["you"]["hand"]);
+        assert_eq!(hand.len(), 28);
+        for card in hand {
+            assert_eq!(card["unavailable"], "board_full", "{card}");
+        }
+    }
+
+    #[test]
+    fn the_key_is_last_and_only_there() {
+        let (mut state, _) = new_game(setup(limited(1), 3), 5).unwrap();
+        play(&mut state, 0);
+        let text = serde_json::to_string(&player_view(&state, PlayerId::One)).unwrap();
+        assert!(
+            text.contains(r#""riposte":0,"unavailable":"board_full"}"#),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_other_seat_the_opponent_boards_and_discards_never_have_the_key() {
+        let (mut state, _) = new_game(setup(limited(1), 3), 5).unwrap();
+        play(&mut state, 0);
+        // One is full; Two has an empty board, so its hand is playable, and it never reads the
+        // board of One.
+        let two = json(&state, PlayerId::Two);
+        assert!(!mentions(&two, "unavailable"), "{two}");
+        let one = json(&state, PlayerId::One);
+        assert!(mentions(&one["you"]["hand"], "unavailable"), "control");
+        assert!(!mentions(&one["opponent"], "unavailable"));
+        assert!(!mentions(&one["you"]["board"], "unavailable"));
+        assert!(!mentions(&one["you"]["discard"], "unavailable"));
+        // The same holds with a dead creature in a discard.
+        let (mut state, _) = new_game(
+            setup(
+                RuleSet {
+                    hero_riposte: true,
+                    board_limit: Some(1),
+                },
+                3,
+            ),
+            5,
+        )
+        .unwrap();
+        play(&mut state, 0);
+        apply(
+            &mut state,
+            Action::Attack {
+                attacker: CardInstanceId(0),
+                target: Target::Hero,
+            },
+        )
+        .unwrap();
+        assert_eq!(state.discard(PlayerId::One), vec![CardInstanceId(0)]);
+        for seat in SEATS {
+            let view = json(&state, seat);
+            assert!(!mentions(&view["opponent"], "unavailable"));
+            assert!(!mentions(&view["you"]["discard"], "unavailable"));
+        }
+    }
+
+    #[test]
+    fn a_finished_game_blocks_nothing() {
+        let (mut state, _) = new_game(setup(limited(1), 3), 5).unwrap();
+        play(&mut state, 0);
+        assert!(mentions(&json(&state, PlayerId::One), "unavailable"));
+        apply(&mut state, Action::Concede).unwrap();
+        for seat in SEATS {
+            assert!(!mentions(&json(&state, seat), "unavailable"), "{seat:?}");
+        }
+    }
+
+    #[test]
+    fn a_view_without_a_full_board_is_the_view_it_always_was() {
+        // A limit that is never reached writes the very same bytes as no limit at all.
+        for seed in 0..10 {
+            let (mut plain, _) = new_game(setup(RuleSet::legacy(), 3), seed).unwrap();
+            let (mut roomy, _) = new_game(setup(limited(30), 3), seed).unwrap();
+            for step in 0..6 {
+                for seat in SEATS {
+                    let (a, b) = (
+                        serde_json::to_string(&player_view(&plain, seat)).unwrap(),
+                        serde_json::to_string(&player_view(&roomy, seat)).unwrap(),
+                    );
+                    assert_eq!(a, b, "seed {seed} step {step} {seat:?}");
+                    assert!(!a.contains("unavailable"), "{a}");
+                }
+                if plain.active() != PlayerId::One {
+                    break;
+                }
+                play(&mut plain, step);
+                play(&mut roomy, step);
+            }
+        }
+    }
+
+    #[test]
+    fn the_reason_never_reads_the_hidden_hand_of_the_other_seat() {
+        // Two states that only differ by what Two holds: the view of One is the same, but for
+        // the card counts, which are equal here too.
+        let (mut a, _) = new_game(setup(limited(1), 1), 5).unwrap();
+        let (mut b, _) = new_game(setup(limited(1), 4), 5).unwrap();
+        play(&mut a, 0);
+        play(&mut b, 0);
+        assert!(mentions(&json(&a, PlayerId::One), "unavailable"), "control");
+        assert_eq!(json(&a, PlayerId::One), json(&b, PlayerId::One));
+    }
+
+    #[test]
+    fn the_known_hand_of_an_outcome_never_has_the_key() {
+        let (mut state, _) = new_game(setup(limited(1), 3), 5).unwrap();
+        play(&mut state, 0);
+        let observation = Observation::of(&state).unwrap();
+        assert!(!observation.actions().is_empty());
+        for i in 0..observation.actions().len() {
+            let outcome = observation.outcome(i).unwrap();
+            assert!(
+                outcome
+                    .view_after
+                    .you
+                    .hand_known
+                    .iter()
+                    .all(|c| c.unavailable.is_none()),
+                "action {i}"
+            );
+            let text = serde_json::to_string(&outcome.view_after).unwrap();
+            assert!(!text.contains("unavailable"), "{text}");
+        }
+        // Control: the view of the same state does carry the reason.
+        assert!(
+            observation
+                .view()
+                .you
+                .hand
+                .iter()
+                .all(|c| c.unavailable == Some("board_full"))
+        );
     }
 }
