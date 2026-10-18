@@ -2,7 +2,7 @@
 //! revalidates every card, and the setup JSON still reads creatures of four or six keys and
 //! refuses unknown ones, exactly as it did with `CreatureStats`.
 
-use duel_cards::{CardSpec, CardsError, MAX_STAT};
+use duel_cards::{CardSpec, CardsError, MAX_STAT, UnitSpec};
 use duel_engine::{GameSetup, SetupError, game_setup_from_data, new_game};
 use serde_json::Value;
 
@@ -16,7 +16,7 @@ fn setup() -> GameSetup {
 
 fn spec_mut(setup: &mut GameSetup, index: usize) -> &mut duel_cards::CreatureStats {
     match &mut setup.one.cards[index] {
-        CardSpec::Creature(stats) => stats,
+        CardSpec::Unit(unit) => &mut unit.stats,
     }
 }
 
@@ -86,7 +86,7 @@ fn new_game_revalidates_every_card_spec() {
     );
     let mut second_side = setup();
     match &mut second_side.two.cards[29] {
-        CardSpec::Creature(stats) => stats.cost = 0,
+        CardSpec::Unit(unit) => unit.stats.cost = 0,
     }
     assert_eq!(
         new_game(second_side, 1).unwrap_err(),
@@ -132,5 +132,53 @@ fn a_setup_json_with_an_unknown_card_key_is_invalid_json_as_before() {
     assert!(
         error.to_string().contains("unknown field `bonus`"),
         "{error}"
+    );
+}
+
+fn unit_mut(setup: &mut GameSetup, index: usize) -> &mut UnitSpec {
+    match &mut setup.one.cards[index] {
+        CardSpec::Unit(unit) => unit,
+    }
+}
+
+#[test]
+fn new_game_refuses_what_it_cannot_play_yet() {
+    // Temporary guard (#206, lifted by task 3 of #137): fail-closed, code `invalid_setup`.
+    let mut immobile = setup();
+    let unit = unit_mut(&mut immobile, 3);
+    unit.immobile = true;
+    unit.stats.force = 0;
+    unit.stats.attack_cost = 0;
+    let error = new_game(immobile, 1).unwrap_err();
+    assert!(matches!(error, SetupError::Unsupported(_)), "{error:?}");
+    assert_eq!(error.code(), "invalid_setup");
+
+    let mut tagged = setup();
+    unit_mut(&mut tagged, 3).tags = vec!["bâtiment".into()];
+    let error = new_game(tagged, 1).unwrap_err();
+    assert!(matches!(error, SetupError::Unsupported(_)), "{error:?}");
+    assert_eq!(error.code(), "invalid_setup");
+
+    // On the second side too.
+    let mut second = setup();
+    match &mut second.two.cards[29] {
+        CardSpec::Unit(unit) => unit.tags = vec!["x".into()],
+    }
+    assert!(matches!(
+        new_game(second, 1).unwrap_err(),
+        SetupError::Unsupported(_)
+    ));
+
+    // A plain unit passes.
+    assert!(new_game(setup(), 1).is_ok());
+
+    // An invalid spec keeps its `CardsError`: the guard runs after validation.
+    let mut invalid = setup();
+    let unit = unit_mut(&mut invalid, 0);
+    unit.immobile = true;
+    unit.stats.force = 3;
+    assert_eq!(
+        new_game(invalid, 1).unwrap_err(),
+        SetupError::Invalid(CardsError::ImmobileWithAttackStat { field: "force" })
     );
 }

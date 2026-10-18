@@ -60,18 +60,54 @@ fn card_spec_reads_four_or_six_keys() {
 
 #[test]
 fn card_spec_errors_are_the_creature_stats_errors() {
+    // Same cause, same position as `CreatureStats` (#206 re-pins this test: the text of an
+    // `unknown field` error, which lists the expected keys, is pinned in full below).
     let bad = [
-        r#"{"cost":1,"force":1,"attack_cost":1,"health":1,"bonus":9}"#,
         r#"{"cost":"1","force":1,"attack_cost":1,"health":1}"#,
         r#"{"cost":1,"force":1,"attack_cost":1}"#,
         r#"{"cost":1,"force":1,"attack_cost":1,"health":1,"riposte":-1}"#,
-        r#"[1,2]"#,
-        r#"null"#,
     ];
     for json in bad {
         let expected = serde_json::from_str::<CreatureStats>(json).unwrap_err();
         let got = serde_json::from_str::<CardSpec>(json).unwrap_err();
         assert_eq!(got.to_string(), expected.to_string(), "{json}");
+    }
+    // `null` has the same cause (the struct name is that of the wire form, `CardSpec`).
+    let got = serde_json::from_str::<CardSpec>("null").unwrap_err().to_string();
+    assert!(got.starts_with("invalid type: null, expected"), "{got}");
+    assert!(serde_json::from_str::<CardSpec>("[1,2]").is_err());
+}
+
+#[test]
+fn card_spec_pins_the_text_of_its_unknown_field_error() {
+    let json = r#"{"cost":1,"force":1,"attack_cost":1,"health":1,"bonus":9}"#;
+    assert_eq!(
+        serde_json::from_str::<CardSpec>(json).unwrap_err().to_string(),
+        "unknown field `bonus`, expected one of `kind`, `cost`, `force`, `attack_cost`, `health`, \
+         `provocation`, `riposte`, `immobile`, `tags` at line 1 column 54"
+    );
+}
+
+#[test]
+fn card_spec_reports_the_first_missing_field_in_a_pinned_order() {
+    // Required fields of the flat form first (`cost`, `health`), then `force`, then `attack_cost`.
+    for (json, expected) in [
+        (r#"{}"#, "missing field `cost` at line 1 column 2"),
+        (r#"{"cost":1}"#, "missing field `health` at line 1 column 10"),
+        (
+            r#"{"cost":1,"health":1}"#,
+            "missing field `force` at line 1 column 21",
+        ),
+        (
+            r#"{"cost":1,"force":1,"health":1}"#,
+            "missing field `attack_cost` at line 1 column 31",
+        ),
+    ] {
+        assert_eq!(
+            serde_json::from_str::<CardSpec>(json).unwrap_err().to_string(),
+            expected,
+            "{json}"
+        );
     }
 }
 

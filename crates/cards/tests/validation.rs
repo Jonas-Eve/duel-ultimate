@@ -439,8 +439,11 @@ fn rejects_unknown_field() {
 
 #[test]
 fn rejects_unknown_kind() {
-    let json = r#"[{"kind":"spell","id":"a","name":"A"}]"#;
-    assert!(matches!(parse_cards(json), Err(CardsError::Json(_))));
+    // `spell` becomes a valid kind in #137 (task 2): the unknown kinds used here are others.
+    for kind in ["building", "equipment"] {
+        let json = format!(r#"[{{"kind":"{kind}","id":"a","name":"A"}}]"#);
+        assert!(matches!(parse_cards(&json), Err(CardsError::Json(_))), "{kind}");
+    }
 }
 
 #[test]
