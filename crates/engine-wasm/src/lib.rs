@@ -3,8 +3,8 @@
 //!
 //! The surface is deliberately small: a constructor from a JSON setup, a constructor from the
 //! data (`from_data`: `cards.json` and `decks.json` strings, decks by identifier, each string
-//! bounded to 1 MiB, no disk, plus an optional sixth input `rules_json`, a `RuleSet` with no
-//! effect before #127), `legal_actions()` and `apply(action)`, all as JSON strings, plus `start_events()`: the events of the setup
+//! bounded to 1 MiB, no disk, plus an optional sixth input `rules_json`, a `RuleSet`: `hero_riposte`
+//! acts, `board_limit` has no effect before #171), `legal_actions()` and `apply(action)`, all as JSON strings, plus `start_events()`: the events of the setup
 //! (`game_started` with the recorded `data_versions` and, when not the engine default, `rules`,
 //! possibly `game_won`), which are public
 //! (no hand, pile or card id). Still no accessor for the full state; instead, `view(seat)` gives
@@ -15,7 +15,8 @@
 //! instance ids of the active hand, which a server would have to redact.
 //! `legal_actions_with_time()` lists the same legal actions, in the same order, each with its
 //! time cost, whether it hands the token over (`hands_over`, to read together with
-//! `ends_game`) and the budget after it, obtained by a dry run on a clone
+//! `ends_game`), the budget after it and whether it destroys the attacker (`attacker_destroyed`,
+//! a boolean always present, six keys in all), obtained by a dry run on a clone
 //! (`duel_engine::preview_legal_actions`); `legal_actions` and `apply` are unchanged.
 //! `computer_action(seat, policy, draw)` is the computer's choice (`duel_ai::choose`): a pure function
 //! of the state, the active seat, a policy of the closed list (`"random"`, `"greedy"`, each
@@ -54,8 +55,9 @@ impl Duel {
     /// mirror). `data_versions_json` is a JSON array of strings, recorded as is.
     /// `rules_json` is optional: `None` is the engine default rules, `Some` a JSON `RuleSet`
     /// object (a partial object reads the default for each absent field; `""` and `"null"` are
-    /// not "absent" but `invalid_json`, nothing is normalised). The options have no effect on
-    /// the game before #127; they are only recorded in `game_started` when they differ from
+    /// not "absent" but `invalid_json`, nothing is normalised). `hero_riposte` acts (a
+    /// non-lethal hit on the hero destroys the attacker); `board_limit` has no effect before
+    /// #171; the options are only recorded in `game_started` when they differ from
     /// the default.
     ///
     /// Order of the checks, the first to fail answers: (1) the size of every string present,
@@ -127,7 +129,7 @@ impl Duel {
     }
 
     /// The legal actions with their time facts, as a JSON array of
-    /// `{"action","cost","hands_over","budget_after","ends_game"}`: same length and order as
+    /// `{"action","cost","hands_over","budget_after","ends_game","attacker_destroyed"}`: same length and order as
     /// [`Duel::legal_actions_json`], computed by the engine by a dry run on a clone (the state
     /// and its generator are untouched, nothing drawn is revealed). `action` is the action as
     /// `legal_actions` returns it, to send back to `apply` unchanged. Empty once the game is over.

@@ -104,7 +104,8 @@ fn the_costs_and_the_handover_come_from_the_engine() {
             "cost": null,
             "hands_over": false,
             "budget_after": null,
-            "ends_game": {"winner": "Two", "reason": "concede"}
+            "ends_game": {"winner": "Two", "reason": "concede"},
+            "attacker_destroyed": false
         })
     );
 }

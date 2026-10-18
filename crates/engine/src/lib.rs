@@ -19,16 +19,18 @@
 //! the [`GameState`] (the signature is the guarantee, nothing is authenticated).
 //!
 //! [`preview_legal_actions`] gives, for each legal action and in the same order, its time cost,
-//! whether it hands the token over, the budget after it and whether it ends the game, by a dry
-//! run on a clone (the time rule stays in one place, the generator is never touched); it never
+//! whether it hands the token over, the budget after it, whether it ends the game and whether it
+//! destroys the attacker, by a dry run on a clone (the time rule stays in one place, the generator is never touched); it never
 //! copies what a draw brings. `Observation::outcome` reuses that same dry run and adds the view of
 //! the acting seat after the action, where a drawn card is only counted ([`OutcomeView`]: the
 //! masking follows the `Drew` events, not a difference of hands).
 //!
 //! [`RuleSet`] holds the per-game options (two closed ones: `hero_riposte`, `board_limit`),
 //! carried by `GameSetup.rules`, validated by [`new_game`] (`invalid_setup`) and copied into
-//! `Event::GameStarted` only when they differ from the engine default. They have no effect yet
-//! (#127) and never touch the generator. To replay a historical game, pass its rules explicitly.
+//! `Event::GameStarted` only when they differ from the engine default. `hero_riposte` acts (#170:
+//! a non-lethal hit on the hero destroys the attacker, `Event::HeroRiposted`); `board_limit` has no
+//! effect yet (#171). Neither touches the generator. To replay a historical game, pass its rules
+//! explicitly.
 //!
 //! Randomness is consumed only at setup, in this documented order: shuffle of One's deck,
 //! shuffle of Two's deck, then `random_below(2)` if (and only if) the initiatives are equal.

@@ -92,6 +92,15 @@ pub enum Event {
         creature: CardInstanceId,
         amount: u32,
     },
+    /// The hero of the defender's side hit back (`hero_riposte`): the creature `creature` of
+    /// `player` (the attacker, as in [`Event::Riposted`]) is destroyed, whatever its health.
+    /// No amount: `Riposted::amount` names the nominal riposte of a creature target, and this
+    /// one is not a number. Only for a non-lethal attack on the hero with the option on,
+    /// after `Damaged` and before the `Died` that buries the attacker.
+    HeroRiposted {
+        player: PlayerId,
+        creature: CardInstanceId,
+    },
     /// The creature left `player`'s board for their discard pile.
     Died {
         player: PlayerId,

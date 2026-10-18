@@ -211,17 +211,6 @@ pub fn opening(
     opened(scenario(one, two), mine, theirs)
 }
 
-/// [`opening`] with the rules written out.
-pub fn opening_with_rules(
-    one: (Hero, Vec<Card>),
-    two: (Hero, Vec<Card>),
-    mine: &[&str],
-    theirs: &[&str],
-    rules: Value,
-) -> GameState {
-    opened(scenario_with_rules(one, two, rules), mine, theirs)
-}
-
 fn opened(mut state: GameState, mine: &[&str], theirs: &[&str]) -> GameState {
     assert_eq!(state.active(), PlayerId::One);
     for name in mine {

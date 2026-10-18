@@ -111,7 +111,7 @@ impl GameState {
         &self.data_versions
     }
 
-    /// The rule options this game was started with. No rule reads them yet (#127).
+    /// The rule options this game was started with (`hero_riposte` is read by `combat.rs`; `board_limit` by no rule yet).
     pub fn rules(&self) -> RuleSet {
         self.rules
     }

@@ -232,6 +232,7 @@ fn expect(
         hands_over,
         budget_after,
         ends_game,
+        attacker_destroyed: false,
     }
 }
 
@@ -414,7 +415,10 @@ fn an_attacker_killed_by_the_riposte_still_pays_its_cost() {
     };
     assert_eq!(
         preview_of(&state, attack),
-        expect(attack, Some(2), true, Some(2), None)
+        ActionPreview {
+            attacker_destroyed: true,
+            ..expect(attack, Some(2), true, Some(2), None)
+        }
     );
     // Control through the real application: the attacker did die.
     let mut copy = state.clone();

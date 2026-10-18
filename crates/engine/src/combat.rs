@@ -16,6 +16,11 @@
 //! - a summoning moves one card from a hand to a board: −1;
 //! - an attack removes `min(force, remaining health of the target) >= 1` from a hero or a
 //!   creature (the excess damage is lost, so it removes nothing more);
+//! - the riposte of the hero (`hero_riposte`, only against a non-lethal hit on a hero) removes
+//!   in addition the whole remaining health of the attacker: a finite integer `>= 1` (a creature
+//!   in play had `health >= 1` before the action), added to nothing, so Φ decreases strictly
+//!   more than without the option; a lethal hit has no riposte and removes only its own
+//!   `min(force, health) >= 1`;
 //! - its riposte (S2b, only against a creature) removes `min(riposte, current health of the
 //!   attacker) >= 0` more: finite health of a creature in play, never added to anything, so
 //!   it can only lower Φ further, and is 0 at riposte 0 (the attack's `>= 1` alone is then
@@ -47,8 +52,11 @@ pub(crate) struct AttackDamage {
     pub(crate) target: Target,
     /// The attacker's force: nominal, the excess over the target's health is lost.
     pub(crate) on_target: u32,
-    /// The target's riposte: always 0 for a hero.
+    /// The target's riposte: always 0 for a hero (the hero's own riposte is `attacker_slain`).
     pub(crate) on_attacker: u32,
+    /// The hero's riposte: the attack is on a hero, the option is on and the hit does not kill
+    /// it (`hero health > force`, read before the attack): the attacker is destroyed.
+    pub(crate) attacker_slain: bool,
 }
 
 /// Step 1, pure: both damages of `attacker` (on `player`'s board) against `target`, read from
@@ -76,12 +84,17 @@ pub(crate) fn plan_damage(
             .find(|c| c.id == creature)
             .map_or(0, |c| c.stats.riposte),
     };
+    // The one place that decides "lethal" (`health <= force`): a lethal hit has no riposte.
+    let attacker_slain = matches!(target, Target::Hero)
+        && state.rules().hero_riposte
+        && state.player(player.opponent()).health > on_target;
     AttackDamage {
         player,
         attacker,
         target,
         on_target,
         on_attacker,
+        attacker_slain,
     }
 }
 
@@ -96,6 +109,23 @@ pub(crate) fn apply_damage(state: &mut GameState, plan: AttackDamage, events: &m
                 player: victim,
                 amount: plan.on_target,
             });
+            if plan.attacker_slain {
+                // Infinite riposte: the attacker's health does not matter. `bury_dead` buries it.
+                if let Some(attacker) = state
+                    .player_mut(plan.player)
+                    .board
+                    .iter_mut()
+                    .find(|c| c.id == plan.attacker)
+                {
+                    attacker.stats.health = 0;
+                    events.push(Event::HeroRiposted {
+                        player: plan.player,
+                        creature: plan.attacker,
+                    });
+                } else {
+                    debug_assert!(false, "validated attacker on its board");
+                }
+            }
         }
         Target::Creature(creature) => {
             let Some(target) = state
@@ -225,6 +255,7 @@ mod tests {
                     target: Target::Creature(CardInstanceId(101)),
                     on_target,
                     on_attacker,
+                    attacker_slain: false,
                 },
                 "force {force}, riposte {riposte}"
             );
@@ -250,11 +281,80 @@ mod tests {
             target: Target::Creature(CardInstanceId(101)),
             on_target: 1,
             on_attacker: 2,
+            attacker_slain: false,
         };
         let mut events = Vec::new();
         apply_damage(&mut state, plan, &mut events);
         assert_eq!(state.creature_health(CardInstanceId(101)), Some(4));
         assert_eq!(state.creature_health(CardInstanceId(100)), Some(3));
         assert_eq!(events.len(), 2);
+    }
+
+    fn with_hero_riposte(mut state: GameState, hero_riposte: bool) -> GameState {
+        state.rules = crate::RuleSet {
+            hero_riposte,
+            ..crate::RuleSet::legacy()
+        };
+        state
+    }
+
+    #[test]
+    fn plan_damage_slays_the_attacker_of_a_non_lethal_hit_on_the_hero_only_with_the_option() {
+        // The hero (One's opponent: Two) has 8 health in `facing`; the attacker has force 2.
+        for (option, health, slain) in [
+            (true, 8, true),
+            (true, 3, true),
+            (false, 8, false),
+            // Lethal (health <= force, read before the attack): never a riposte.
+            (true, 2, false),
+            (true, 1, false),
+        ] {
+            let mut state = with_hero_riposte(facing((2, 5, 0), (1, 5, 0)), option);
+            state.two.health = health;
+            let before = state.clone();
+            let plan = plan_damage(&state, PlayerId::One, CardInstanceId(100), Target::Hero);
+            assert_eq!(state, before, "planning must not mutate the state");
+            assert_eq!(
+                plan.attacker_slain, slain,
+                "option {option}, health {health}"
+            );
+            assert_eq!((plan.on_target, plan.on_attacker), (2, 0));
+        }
+    }
+
+    #[test]
+    fn plan_damage_never_slays_the_attacker_of_an_attack_on_a_creature() {
+        let state = with_hero_riposte(facing((2, 5, 0), (1, 5, 0)), true);
+        let plan = plan_damage(
+            &state,
+            PlayerId::One,
+            CardInstanceId(100),
+            Target::Creature(CardInstanceId(101)),
+        );
+        assert!(!plan.attacker_slain);
+    }
+
+    #[test]
+    fn apply_damage_slays_the_attacker_the_plan_names_and_logs_it_after_damaged() {
+        let mut state = with_hero_riposte(facing((2, 9, 0), (1, 5, 0)), true);
+        let plan = plan_damage(&state, PlayerId::One, CardInstanceId(100), Target::Hero);
+        assert!(plan.attacker_slain);
+        let mut events = Vec::new();
+        apply_damage(&mut state, plan, &mut events);
+        assert_eq!(
+            events,
+            vec![
+                Event::Damaged {
+                    player: PlayerId::Two,
+                    amount: 2
+                },
+                Event::HeroRiposted {
+                    player: PlayerId::One,
+                    creature: CardInstanceId(100)
+                },
+            ]
+        );
+        assert_eq!(state.creature_health(CardInstanceId(100)), Some(0));
+        assert_eq!(state.two.health, 8);
     }
 }

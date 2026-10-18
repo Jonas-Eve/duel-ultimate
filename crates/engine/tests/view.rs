@@ -157,6 +157,10 @@ impl Tracker {
                     let h = self.health.get_mut(&creature).unwrap();
                     *h = h.saturating_sub(amount);
                 }
+                Event::HeroRiposted { creature, .. } => {
+                    // The attacker is destroyed whatever its health.
+                    *self.health.get_mut(&creature).unwrap() = 0;
+                }
                 Event::Died { player, creature } => {
                     self.board[slot(player)].retain(|c| *c != creature);
                     self.discard[slot(player)].push(creature);
