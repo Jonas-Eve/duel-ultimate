@@ -114,6 +114,12 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
   `ENGINE_CODES`). Les erreurs de règle laissent l'état intact ; les codes `internal_error`,
   `serialization_failed`, `computer_stuck` et `computer_chain_limit` sont fatals. `not_active_seat`,
   `invalid_policy` et `computer_stuck` viennent du binding (`ENGINE_CODES`) ; `computer_chain_limit` est un code du client. Depuis #180, `too_many_picks`, `invalid_picks` et `source_not_on_board` (champs additifs `picks` et `source` d'une action, que le client n'émet jamais ; `Pick`, `PlayAction.picks?`, `ActivateAction.source?`/`picks?` dans `src/engine/types.ts`) sont aussi des codes du moteur, non fatals, avec leur texte français.
+  Depuis #209 (T4 de #137), `CardView` gagne `kind`, `immobile?`, `tags?` et `effects` (types `Side`, `Selector`, `Trigger`,
+  `Polarity`, `StatName`, `KeywordName`, `AttackMode`, `OpLine`, `PickSlot`, `EffectLine` dans `src/engine/types.ts`) : le
+  client lit ces champs sans rien déduire, l'attaque normale d'une unité non immobile est la première ligne de `effects`
+  (sans `index`, comme une attaque spéciale qui, elle, porte l'`index` de la liste déclarée), et `unavailable` vaut aussi pour
+  mes unités du plateau (`attack_force_zero`). Les clés sont classées **provisoirement** dans `ROLES`
+  (`tests/card-detail-keywords.test.ts`) ; aucun composant ne les affiche encore (texte et affichage : T5).
 - **Contrat JSON** : `EVENT_KINDS` doit égaler les variantes de `enum Event`
   (`crates/engine/src/rules.rs`) ; `tests/wasm.contract.test.ts` vérifie les clés exactes de chaque
   événement, action et aperçu sur 160 parties réelles (80 par jeu de règles). Ajouter une variante côté Rust
