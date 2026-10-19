@@ -7,6 +7,12 @@ import type { CardView } from "../src/engine/types";
 import { isAttackBy } from "../src/engine/types";
 import type { Snapshot } from "../src/game/controller";
 import { CardDetailSheet } from "../src/ui/CardDetailSheet";
+import { messageFor } from "../src/ui/errors.fr";
+import type { GameSession } from "../src/engine/session";
+import { isAttack } from "../src/engine/types";
+import { newSessionFromSetup } from "./support/engine";
+import { newKindsSetup, newKindsViews } from "./support/new-kinds";
+import { attackLine as attackLineOf } from "./support/card-view";
 import { expectedCardLabel } from "./support/card-label";
 import { selectAttacker } from "./support/play";
 import { playUntil, randomPreview } from "./support/policies";
@@ -247,5 +253,150 @@ describe("on the real engine", () => {
     for (const t of own) expect(t.getAttribute("aria-haspopup")).toBe("dialog");
     await user.click(own[0]);
     expect(screen.getByRole("dialog", { name: c.getSnapshot().views.One!.you.board[0].name! })).toBeTruthy();
+  });
+});
+
+describe("effect lines, tags, immobile and spells (#210)", () => {
+  afterEach(cleanup);
+
+  test("the tags are shown as text", () => {
+    const { dialog, unmount } = sheet({ tags: ["bâtiment", "rituel"] });
+    const line = dialog.querySelector(".card-detail-tags")!;
+    expect(line.textContent).toBe("Étiquettes : bâtiment, rituel");
+    expect(line.children).toHaveLength(0);
+    unmount();
+    expect(sheet().dialog.querySelector(".card-detail-tags")).toBeNull();
+    cleanup();
+    expect(sheet({ tags: [] }).dialog.querySelector(".card-detail-tags")).toBeNull();
+  });
+
+  test("immobile and ranged are explained from the single source", async () => {
+    const { dialog } = sheet({ immobile: true, force: 0, effects: [] });
+    expect(dialog.querySelector(".card-detail-passive")!.textContent).toBe("Immobile : ne peut pas attaquer, même si elle gagne de la force.");
+    cleanup();
+    // `ranged` is granted by an effect: its label is the single source's, the line says so.
+    const granting = sheet({
+      effects: [
+        attackLineOf(1, 2),
+        { trigger: "continuous", ops: [{ op: "grant_keyword", target: { select: "self" }, keyword: "ranged", polarity: "bonus" }], picks: [] },
+      ],
+    });
+    expect([...granting.dialog.querySelectorAll(".card-detail-effect")].map((l) => l.textContent)).toEqual([
+      "Attaque (2) : inflige 1 dégât, pour 2 temps",
+      "Tant qu'elle est en jeu : Tir accordé sur cette unité",
+    ]);
+  });
+
+  test("only the line without index is the attack button", () => {
+    const special = { ...attackLineOf(5, 2), index: 0 };
+    const c = card({ force: 2, attack_cost: 1, effects: [attackLineOf(2, 1), special] });
+    const onAttack = vi.fn();
+    render(<CardDetailSheet card={c} deckName="Rempart" onClose={() => undefined} attack={{ available: true, reason: "", onAttack }} />);
+    const dialog = screen.getByRole("dialog");
+    const buttons = within(dialog).getAllByRole("button");
+    expect(buttons.map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["Attaque (1) : inflige 2 dégâts, pour 1 temps", "Fermer"]);
+    const lines = [...dialog.querySelectorAll(".card-detail-effect")];
+    expect(lines.map((l) => l.tagName)).toEqual(["BUTTON", "P"]);
+    expect(lines[1].textContent).toBe("Attaque (2) : inflige 5 dégâts, pour 2 temps");
+  });
+
+  test("a read-only sheet has no attack button, whatever its lines", () => {
+    const { dialog } = sheet({ effects: [attackLineOf(2, 1), { ...attackLineOf(5, 2), index: 0 }] });
+    expect(within(dialog).getAllByRole("button").map((b) => b.textContent)).toEqual(["Fermer"]);
+  });
+
+  test("a spell sheet shows its effects and no attack, riposte or life", async () => {
+    const { spell } = await newKindsViews();
+    render(<CardDetailSheet card={spell} deckName="Ruée" onClose={() => undefined} />);
+    const dialog = screen.getByRole("dialog", { name: "zz-spell" });
+    expect(dialog.querySelector(".card-detail-cost")!.textContent).toBe("Coût 1 temps");
+    expect(dialog.querySelectorAll(".card-detail-value")).toHaveLength(0);
+    expect(dialog.querySelector(".card-detail-bottom")).toBeNull();
+    expect([...dialog.querySelectorAll(".card-detail-effect")].map((l) => l.textContent)).toEqual(["À la pose : Inflige 2 dégâts sur une unité adverse ; Pioche 1 carte"]);
+    expect(dialog.textContent).not.toMatch(/Attaque|Riposte|Vie/);
+  });
+
+  test("an immobile unit sheet shows no attack value and no attack line, but its riposte and life", async () => {
+    const { immobile } = await newKindsViews();
+    render(<CardDetailSheet card={immobile} deckName="Ruée" onClose={() => undefined} />);
+    const dialog = screen.getByRole("dialog");
+    expect([...dialog.querySelectorAll(".card-detail-value")].map((v) => v.textContent)).toEqual(["Riposte0", "Vie4"]);
+    expect(dialog.querySelectorAll(".card-detail-effect")).toHaveLength(0);
+    expect(dialog.querySelector(".card-detail-tags")!.textContent).toBe("Étiquettes : bâtiment");
+    expect(dialog.querySelector(".card-detail-passive")!.textContent).toContain("Immobile");
+  });
+
+  test("the spoken summary lists tags and every effect", async () => {
+    const { dialog } = sheet({ tags: ["bâtiment"], effects: [attackLineOf(1, 2), { ...attackLineOf(5, 2), index: 0 }] });
+    expect(described(dialog)).toBe(
+      "Coût 3 temps. Attaque 1, riposte 0, vie 6. Étiquettes : bâtiment. Attaque (2) : inflige 1 dégât, pour 2 temps. Attaque (2) : inflige 5 dégâts, pour 2 temps. Deck Rempart",
+    );
+    cleanup();
+    const { spell, immobile } = await newKindsViews();
+    render(<CardDetailSheet card={spell} deckName="Ruée" onClose={() => undefined} />);
+    expect(described(screen.getByRole("dialog"))).toBe("Coût 1 temps. Sort. À la pose : Inflige 2 dégâts sur une unité adverse ; Pioche 1 carte.");
+    cleanup();
+    render(<CardDetailSheet card={immobile} deckName="Ruée" onClose={() => undefined} />);
+    expect(described(screen.getByRole("dialog"))).toBe(
+      "Coût 1 temps. Riposte 0, vie 4. Étiquettes : bâtiment. Immobile : ne peut pas attaquer, même si elle gagne de la force.",
+    );
+  });
+
+  test("the polarity is a class on the operation and a text mark for a malus only", () => {
+    const line = {
+      trigger: "on_play" as const,
+      ops: [
+        { op: "deal_damage" as const, target: { select: "hero" as const, side: "own" as const }, amount: 1, polarity: "malus" as const },
+        { op: "draw" as const, target: { select: "hero" as const, side: "own" as const }, count: 1, polarity: "bonus" as const },
+        { op: "draw" as const, target: { select: "hero" as const, side: "both" as const }, count: 1, polarity: "neutral" as const },
+      ],
+      picks: [],
+    };
+    const { dialog } = sheet({ effects: [line] });
+    const ops = [...dialog.querySelectorAll(".card-detail-effect [class*='effect-polarity-']")];
+    expect(ops.map((o) => [...o.classList].find((c) => c.startsWith("effect-polarity-")))).toEqual(["effect-polarity-malus", "effect-polarity-bonus", "effect-polarity-neutral"]);
+    const marks = [...dialog.querySelectorAll(".effect-mark")];
+    expect(marks.map((m) => m.textContent)).toEqual(["Malus"]);
+    expect(ops[0].contains(marks[0])).toBe(true);
+  });
+});
+
+describe("the reason of an attack that cannot be made, on the real engine (#210)", () => {
+  useRealEngine();
+
+  /** The real engine of the new-kinds setup; the view of my board says a force of zero and the engine's reason. */
+  function sessionWithZeroForce(): GameSession {
+    const inner = newSessionFromSetup(newKindsSetup(), 3);
+    return {
+      ...inner,
+      view: (seat) => {
+        const v = inner.view(seat);
+        if (v.seat !== "One") return v;
+        return { ...v, you: { ...v.you, board: v.you.board.map((c) => ({ ...c, force: 0, unavailable: "attack_force_zero" })) } };
+      },
+      legalActionsWithTime: () => inner.legalActionsWithTime().filter((p) => !isAttack(p.action)),
+    };
+  }
+
+  test("the reason of an unavailable attack is shown as French text", async () => {
+    const session = sessionWithZeroForce();
+    const c = makeController("rush", "bulwark", 3, { createSession: () => session });
+    const { user } = mountGame(c);
+    await user.click(screen.getByRole("button", { name: /^zz-special, coût 1/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^Jouer/ }));
+    await user.click(within(screen.getByRole("group", { name: "Ton plateau" })).getByRole("button", { name: /^zz-special/ }));
+    const dialog = screen.getByRole("dialog");
+    const attack = within(dialog).getByRole("button", { name: /^Attaque \(/ });
+    expect(attack.getAttribute("aria-disabled")).toBe("true");
+    attack.focus();
+    expect(document.activeElement).toBe(attack);
+    const reason = messageFor("attack_force_zero");
+    expect(reason).toBe("Cette unité ne peut pas attaquer : sa force est nulle.");
+    expect(dialog.querySelector(".play-reason")!.textContent).toBe(reason);
+    expect(attack.getAttribute("aria-describedby")).toBe(dialog.querySelector(".play-reason")!.id);
+    // Pressing it does nothing: the dialog stays, no selection.
+    await user.click(attack);
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(screen.queryByText("Choisis une cible")).toBeNull();
   });
 });

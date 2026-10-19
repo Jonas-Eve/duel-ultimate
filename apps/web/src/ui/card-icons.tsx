@@ -49,6 +49,15 @@ export function ShieldIcon({ size = 8 }: IconProps) {
   );
 }
 
+/** Two bars, a unit that does not move: the "Immobile" mark under the card. */
+export function ImmobileIcon({ size = 8 }: IconProps) {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 12 12" width={size} height={size} className="icon" fill="none" stroke="currentColor" strokeWidth="2.4">
+      <path d="M3.5 1.5v9M8.5 1.5v9" />
+    </svg>
+  );
+}
+
 /** Distinct from the heart (a broken cross on a square): the life slot of a destroyed card. */
 export function DestroyedIcon({ size = 8 }: IconProps) {
   return (

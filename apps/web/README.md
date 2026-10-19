@@ -118,8 +118,34 @@ du texte et couvre aussi les fichiers futurs) : `engine/` <- `game/` <- `ui/`.
   `Polarity`, `StatName`, `KeywordName`, `AttackMode`, `OpLine`, `PickSlot`, `EffectLine` dans `src/engine/types.ts`) : le
   client lit ces champs sans rien déduire, l'attaque normale d'une unité non immobile est la première ligne de `effects`
   (sans `index`, comme une attaque spéciale qui, elle, porte l'`index` de la liste déclarée), et `unavailable` vaut aussi pour
-  mes unités du plateau (`attack_force_zero`). Les clés sont classées **provisoirement** dans `ROLES`
-  (`tests/card-detail-keywords.test.ts`) ; aucun composant ne les affiche encore (texte et affichage : T5).
+  mes unités du plateau (`attack_force_zero`). Depuis #210 (T5 de #137) le client les **affiche** (voir « Lignes d'effet
+  génériques ») et `ROLES` (`tests/card-detail-keywords.test.ts`) est final : `kind` identité, `immobile` mot-clé,
+  `tags`, `effects`.
+- **Lignes d'effet génériques (#210)** : `ui/card-effects.ts` (pur) construit `active`, la liste des `EffectLine` de la
+  vue ; l'attaque normale (sans `index`) et chaque attaque spéciale sortent **au même format**, sans distinction
+  affichée. `effectLineText`/`effectLineLabel` restent l'unique écrivain de la ligne : l'attaque normale reste octet
+  pour octet « Attaque (N) : inflige D dégâts » + `.sr-only` « , pour N temps » (lu par `tests/support/card-label.ts`
+  et l'e2e), une attaque spéciale n'y ajoute que ses paramètres présents (« ; ignore la provocation », « ; 2
+  attaquants ensemble » ou « à la suite », « ; s'ajoute à la force »), les opérations d'une ligne sont séparées par
+  « ; » et une ligne `on_play`, `continuous` ou activée sans attaque s'ouvre par « À la pose : », « Tant qu'elle est
+  en jeu : » ou « Effet (N) : ». La polarité est lue sur la vue, jamais calculée : chaque opération porte la classe
+  `effect-polarity-bonus|malus|neutral` (une bordure, pleine, tiretée ou pointillée) et seul un malus ajoute le texte
+  « Malus ». Le texte de chaque opération vient de la table fermée `ui/effects.fr.ts` (`OP_FR`, `SELECTOR_FR`,
+  `STAT_FR`, `MODE_FR`, `TRIGGER_FR` ; tout texte neuf dit « unité »), gardée par `tests/effects-fr.test.ts` contre
+  les constantes `OP_NAMES`, `SELECT_NAMES`, `SIDE_NAMES`, `TRIGGER_NAMES`, `KEYWORD_NAMES`, `STAT_NAMES` et
+  `MODE_NAMES` de `crates/cards/src/effects.rs` (un élément ajouté côté Rust seulement, ou une entrée morte, casse le
+  test). Seule la ligne sans `index` dont l'opération est `attack` est le bouton d'attaque ; les attaques spéciales et
+  les autres lignes sont en lecture seule (aucune action avant #129 et #138). `keywords.fr.ts` gagne `immobile` et
+  `ranged` (mot-clé accordé par un effet, « Tir accordé sur ... »). Les étiquettes (`tags`) sont une ligne
+  « Étiquettes : bâtiment, ... » du détail et du résumé parlé, en nœuds texte React seulement (jamais de HTML,
+  `tests/security-policy.test.ts`), jamais sur la tuile. La raison d'indisponibilité que donne le moteur
+  (`CardView.unavailable`) s'affiche en texte par `messageFor` : `attack_force_zero` sur la ligne d'attaque d'une
+  unité, `unsupported_effect` sous « Jouer » d'un sort. Une unité immobile n'a ni valeur ni « attaque N » dans son
+  libellé (« Nom, coût N, riposte N, vie N, immobile ») et porte la marque « Immobile » sous la carte ; un sort dit
+  « sort » et n'a ni attaque, ni riposte, ni vie (`.card-face` reste `--card-w` x 112 px). Aucune carte jouable ne
+  porte encore ces champs : la couverture est par des tests de composant sur le vrai moteur
+  (`tests/support/new-kinds.ts`, `newSessionFromSetup` de `tests/support/engine.ts`) ; l'aide `tests/support/card-view.ts`
+  (`cardView`, `attackLine`) écrit une `CardView` littérale avec les lignes que le moteur écrirait.
 - **Contrat JSON** : `EVENT_KINDS` doit égaler les variantes de `enum Event`
   (`crates/engine/src/rules.rs`) ; `tests/wasm.contract.test.ts` vérifie les clés exactes de chaque
   événement, action et aperçu sur 160 parties réelles (80 par jeu de règles). Ajouter une variante côté Rust
@@ -342,8 +368,8 @@ même, alimenté par `toScreenModel` :
   visible « Cible non disponible » (un appui ne fait rien, `apply` n'est pas appelé). L'interface ne dit
   pas pourquoi ; elle marque seulement les provocateurs (donnée de la carte).
 - **Sélection (#106)** : toucher une de ses créatures ouvre son détail (toujours possible, même au tour
-  de l'ordinateur) ; on n'attaque pas depuis la tuile. La ligne d'effet « Attaque (N) : inflige D
-  dégâts » du détail est un bouton de 44 px au moins, nommé par `effectLineLabel` (« Attaque (N) :
+  de l'ordinateur) ; on n'attaque pas depuis la tuile. La ligne d'effet d'attaque normale (« Attaque (N) : inflige D
+  dégâts », sans `index`) du détail est un bouton de 44 px au moins, nommé par `effectLineLabel` (« Attaque (N) :
   inflige D dégâts, pour N temps »). L'appui ferme le détail, sélectionne l'attaquant (bordure épaisse et
   texte « Sélectionnée », pas d'`aria-pressed` ; idempotent) et affiche le texte poli « Choisis une
   cible ». « Annuler la sélection » ou Échap (hors détail) la retire ; Échap dans le détail ne ferme
@@ -368,8 +394,10 @@ même, alimenté par `toScreenModel` :
   10 px au moins : attaque (étoile, `force`), riposte (flèche de retour, affichée même à 0), vie (cœur,
   PV courants). Sous la carte : « Provocation », la légende de main « Reste N » ou « Passe la main » (lue sur
   l'aperçu du moteur, jamais calculée) et la marque « Sélectionnée » /
-  « Cible possible » / « Cible non disponible ». Nom accessible : « Nom, coût N (main seulement), attaque N,
-  riposte N, vie N[, provocation][, passe la main | Reste N][, marque] » (le texte visible exact : label-in-name ; la forme parlée « il te restera N de temps » est la description du bouton « Jouer ») ; le coût d'attaque
+  « Cible possible » / « Cible non disponible ». Nom accessible d'une unité : « Nom, coût N (main seulement), attaque N,
+  riposte N, vie N[, provocation][, immobile][, passe la main | Reste N][, marque] » (une unité immobile n'a pas « attaque N » :
+  son emplacement reste vide ; marque « Immobile » sous la carte) et d'un sort : « Nom, coût N (main seulement), sort[, passe la
+  main | Reste N][, marque] » (#210) (le texte visible exact : label-in-name ; la forme parlée « il te restera N de temps » est la description du bouton « Jouer ») ; le coût d'attaque
   n'est plus sur la carte (il reste dans `AttackSheet`). Cinq cartes tiennent en main à 360 px (rangées :
   `gap: 2px`, `padding: 4px`). `.card` reste partagé avec la défausse (`DiscardDialog`, repris dans la tâche suivante de #87) : la taille fixe
   est sur le modificateur `.card-compact`. Pas de vie maximale dans `CardView` : aucun style « blessé » pour
@@ -413,10 +441,11 @@ même, alimenté par `toScreenModel` :
   chaque rendu et l'état est remis à `null` pendant le rendu si elle a disparu. Pendant le choix d'une cible,
   un toucher sur une carte adverse la choisit (jamais le détail). Les tuiles concernées sont des
   `<button aria-haspopup="dialog">` (`opensDialog`), nom accessible inchangé. `card-effects.ts` (pur) range
-  les champs de la carte en effets actifs (`EffectLine` : « Attaque », `attack_cost`, `force`, jamais calculés),
-  effets passifs et valeurs ; `effectLineText`/`effectLineLabel` écrivent la ligne d'effet une seule fois
+  la vue de la carte en lignes d'effet (celles de la vue, jamais recalculées), effets passifs et valeurs (`null` pour
+  ce qu'une carte n'a pas : l'attaque d'une unité immobile, tout sauf le coût d'un sort) ;
+  `effectLineText`/`effectLineLabel` écrivent la ligne d'effet une seule fois
   (« Attaque (2) : inflige 1 dégât » + `.sr-only` « , pour 2 temps »). `keywords.fr.ts` est la source unique
-  des explications (Provocation), gardée par `tests/card-detail-keywords.test.ts` contre les clés d'une vraie
+  des explications (Provocation, Immobile, Tir), gardée par `tests/card-detail-keywords.test.ts` contre les clés d'une vraie
   `CardView`. Annonce : nom de la carte, puis un résumé parlé (coût, valeurs, effets) et le nom du deck.
   `Dialog` gagne `hideTitle`, `initialFocus="dialog"` et `describedBy` (optionnels), et Maj+Tab depuis le
   conteneur remonte au dernier contrôle. `SideModel.deckName` porte le nom du deck.

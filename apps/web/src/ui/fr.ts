@@ -91,6 +91,17 @@ export const fr = {
   detailRiposteCaption: "Riposte",
   detailLifeCaption: "Vie",
   detailDeck: (deck: string) => `Deck ${deck}`,
+  /** Tags of a card (#210): "Étiquettes : bâtiment, rituel", raw text of the data. */
+  detailTags: "Étiquettes",
+  // Effect lines (#210): the prefix of a line by its trigger, the mark of a malus, the new kinds of card.
+  effectGeneric: "Effet",
+  effectOnPlay: "À la pose",
+  effectContinuous: "Tant qu'elle est en jeu",
+  malus: "Malus",
+  immobile: "Immobile",
+  immobileWord: "immobile",
+  spell: "Sort",
+  spellWord: "sort",
 
   selected: "Sélectionnée",
   targetPossible: "Cible possible",

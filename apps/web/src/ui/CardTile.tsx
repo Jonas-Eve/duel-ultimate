@@ -1,6 +1,6 @@
 import type { CardView } from "../engine/types";
 import type { DeckEmblem } from "../game/controller";
-import { ArtPlaceholder, BackArrowIcon, DestroyedIcon, HeartIcon, HourglassIcon, ShieldIcon, StarIcon } from "./card-icons";
+import { ArtPlaceholder, BackArrowIcon, DestroyedIcon, HeartIcon, HourglassIcon, ImmobileIcon, ShieldIcon, StarIcon } from "./card-icons";
 import { fr } from "./fr";
 
 /** The attack flow's state of a tile, always written as text as well as drawn as a border. */
@@ -27,16 +27,25 @@ export interface CardTileProps {
   emblem?: DeckEmblem;
 }
 
-/** The complete accessible name: "Pillard, coût 2, attaque 3, riposte 0, vie 2, provocation, Reste 3 | passe la main, sélectionnée". */
+/**
+ * The complete accessible name, the visible text verbatim (label in name):
+ * unit "Pillard, coût 2, attaque 3, riposte 0, vie 2, provocation, immobile, Reste 3 | passe la main, sélectionnée"
+ * (an immobile unit has no "attaque N": its attack value is not shown), spell "Éclair, coût 1, sort, Reste 2".
+ */
 export function cardLabel(card: CardView, opts: { cost?: number; handsOver?: boolean; timeLeft?: string; mark?: CardMark; destroyed?: boolean } = {}): string {
+  const head = `${card.name ?? fr.unknownCard}` + (opts.cost === undefined ? "" : `, ${fr.costWord} ${opts.cost}`);
+  const tail =
+    (opts.handsOver ? `, ${fr.passesLegend.toLowerCase()}` : opts.timeLeft === undefined ? "" : `, ${opts.timeLeft}`) +
+    (opts.mark === undefined ? "" : `, ${markText[opts.mark].toLowerCase()}`);
+  if (card.kind === "spell") return `${head}, ${fr.spellWord}${tail}`;
   return (
-    `${card.name ?? fr.unknownCard}` +
-    (opts.cost === undefined ? "" : `, ${fr.costWord} ${opts.cost}`) +
-    `, ${fr.attackWord} ${card.force}, ${fr.riposteWord} ${card.riposte}` +
+    head +
+    (card.immobile === true ? "" : `, ${fr.attackWord} ${card.force}`) +
+    `, ${fr.riposteWord} ${card.riposte}` +
     (opts.destroyed ? `, ${fr.destroyed.toLowerCase()}` : `, ${fr.lifeWord} ${card.health}`) +
     (card.provocation ? `, ${fr.provocation.toLowerCase()}` : "") +
-    (opts.handsOver ? `, ${fr.passesLegend.toLowerCase()}` : opts.timeLeft === undefined ? "" : `, ${opts.timeLeft}`) +
-    (opts.mark === undefined ? "" : `, ${markText[opts.mark].toLowerCase()}`)
+    (card.immobile === true ? `, ${fr.immobileWord}` : "") +
+    tail
   );
 }
 
@@ -61,18 +70,28 @@ export function CardFace({ card, cost, destroyed = false, emblem }: { card: Card
       </span>
       <ArtPlaceholder emblem={emblem} name={card.name} />
       <span className="card-values">
-        <span className="card-value">
-          <StarIcon />
-          {card.force}
-        </span>
-        <span className="card-value">
-          <BackArrowIcon />
-          {card.riposte}
-        </span>
-        <span className="card-value">
-          {destroyed ? <DestroyedIcon /> : <HeartIcon />}
-          {destroyed ? null : card.health}
-        </span>
+        {card.kind === "spell" ? (
+          <span className="card-kind">{fr.spell}</span>
+        ) : (
+          <>
+            {card.immobile === true ? (
+              <span className="card-value card-value-empty" aria-hidden="true" />
+            ) : (
+              <span className="card-value">
+                <StarIcon />
+                {card.force}
+              </span>
+            )}
+            <span className="card-value">
+              <BackArrowIcon />
+              {card.riposte}
+            </span>
+            <span className="card-value">
+              {destroyed ? <DestroyedIcon /> : <HeartIcon />}
+              {destroyed ? null : card.health}
+            </span>
+          </>
+        )}
       </span>
     </span>
   );
@@ -81,7 +100,7 @@ export function CardFace({ card, cost, destroyed = false, emblem }: { card: Card
 export function CardTile({ card, cost, timeLeft, handsOver = false, destroyed = false, emblem, onPress, disabled = false, inactive = false, mark, opensDialog = false }: CardTileProps) {
   // The visible mark is part of the accessible name too (label in name).
   const label = cardLabel(card, { cost, handsOver, timeLeft, mark, destroyed });
-  const hasTags = card.provocation || cost !== undefined || mark !== undefined || destroyed;
+  const hasTags = card.provocation || card.immobile === true || cost !== undefined || mark !== undefined || destroyed;
   const body = (
     <>
       <CardFace card={card} cost={cost} destroyed={destroyed} emblem={emblem} />
@@ -91,6 +110,12 @@ export function CardTile({ card, cost, timeLeft, handsOver = false, destroyed = 
             <span className="card-keyword">
               <ShieldIcon />
               {fr.provocation}
+            </span>
+          )}
+          {card.immobile === true && (
+            <span className="card-keyword">
+              <ImmobileIcon />
+              {fr.immobile}
             </span>
           )}
           {cost !== undefined && (handsOver ? <span className="card-legend">{fr.passesLegend}</span> : timeLeft !== undefined && <span className="card-legend">{timeLeft}</span>)}

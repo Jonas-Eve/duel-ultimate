@@ -1,8 +1,8 @@
-import { useId, type ReactNode } from "react";
-import type { CardView } from "../engine/types";
+import { Fragment, useId, type ReactNode } from "react";
+import type { CardView, EffectLine } from "../engine/types";
 import type { DeckEmblem } from "../game/controller";
 import { BackArrowIcon, DetailArt, EmblemChip, HeartIcon, HourglassIcon, StarIcon } from "./card-icons";
-import { cardEffects, effectLineLabel, effectLineText, type EffectLine } from "./card-effects";
+import { cardEffects, effectLineLabel, effectLineParts } from "./card-effects";
 import { fr } from "./fr";
 
 interface CardDetailProps {
@@ -13,7 +13,7 @@ interface CardDetailProps {
   summaryId: string;
   /** Id of the deck symbol, which names the deck (listed in the sheet's `aria-describedby`). */
   deckId?: string;
-  /** Own board creature (#106): the attack line becomes a button; the rest of the detail stays read-only. */
+  /** Own board unit (#106): the attack line becomes a button; the rest of the detail stays read-only. */
   attack?: AttackLineProps;
 }
 
@@ -25,21 +25,38 @@ export interface AttackLineProps {
   onAttack(): void;
 }
 
-/** One effect line: the drawn text with its hourglass between the parentheses, then the spoken addition. */
+/**
+ * One effect line: the lead, the cost with its hourglass between the parentheses (activated lines), then each
+ * operation in a span that carries its polarity (a border, and the text mark "Malus" for a malus), then the spoken
+ * addition. The text content is `effectLineText(line).visible + hidden`, nothing else.
+ */
 function EffectText({ line }: { line: EffectLine }) {
-  const { visible, hidden } = effectLineText(line);
-  // "Attaque (2) : inflige 1 dégât" -> name, cost, rest; the hourglass is drawn before the cost.
-  const parts = /^(.*) \((\d+)\)(.*)$/.exec(visible);
+  const { lead, cost, ops, hidden } = effectLineParts(line);
   return (
     <>
-      {parts === null ? (
-        visible
-      ) : (
+      <b className="card-detail-effect-name">{lead}</b>
+      {cost !== undefined && (
         <>
-          <b className="card-detail-effect-name">{parts[1]}</b> (<HourglassIcon size={11} />
-          {parts[2]}){parts[3]}
+          {" "}
+          (<HourglassIcon size={11} />
+          {cost})
         </>
-      )}
+      )}{" "}
+      :{" "}
+      {ops.map((op, i) => (
+        <Fragment key={i}>
+          {i > 0 && " ; "}
+          <span className={`effect-op effect-polarity-${op.polarity}`}>
+            {op.text}
+            {op.polarity === "malus" && (
+              <>
+                {" \u2014 "}
+                <span className="effect-mark">{fr.malus}</span>
+              </>
+            )}
+          </span>
+        </Fragment>
+      ))}
       <span className="sr-only">{hidden}</span>
     </>
   );
@@ -80,12 +97,23 @@ function AttackLineButton({ line, attack }: { line: EffectLine; attack: AttackLi
   );
 }
 
-/** What a screen reader hears after the card's name: cost, values (riposte at 0 too), every effect line, every passive effect. */
+const capital = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+
+/**
+ * What a screen reader hears after the card's name: cost, values (riposte at 0 too; the word "Sort" for a spell,
+ * which has none; no attack for an immobile unit), the tags, every effect line, every passive effect.
+ */
 export function spokenSummary(card: CardView): string {
   const { active, passive, values } = cardEffects(card);
+  const figures = [
+    values.attack === null ? null : `${fr.attackWord} ${values.attack}`,
+    values.riposte === null ? null : `${fr.riposteWord} ${values.riposte}`,
+    values.health === null ? null : `${fr.lifeWord} ${values.health}`,
+  ].filter((f): f is string => f !== null);
   return [
     `${fr.detailCostCaption} ${values.cost} ${fr.detailTimeWord}.`,
-    `${fr.detailAttackCaption} ${values.attack}, ${fr.riposteWord} ${values.riposte}, ${fr.lifeWord} ${values.health}.`,
+    card.kind === "spell" ? `${fr.spell}.` : `${capital(figures.join(", "))}.`,
+    ...(card.tags === undefined || card.tags.length === 0 ? [] : [`${fr.detailTags} : ${card.tags.join(", ")}.`]),
     ...active.map((l) => `${effectLineLabel(l)}.`),
     ...passive.map((k) => `${k.label} : ${k.explanation}`),
   ].join(" ");
@@ -129,26 +157,47 @@ export function CardDetail({ card, emblem, deckName, summaryId, deckId, attack }
       </div>
       <DetailArt name={card.name} />
       <div className="card-detail-effects" role="region" aria-label={fr.detailEffects} tabIndex={0}>
-        {active.map((line) => (attack === undefined ? <EffectLineView key={line.name} line={line} /> : <AttackLineButton key={line.name} line={line} attack={attack} />))}
+        {active.map((line, i) =>
+          // Only the normal attack (no `index`, an attack operation) is a button; the others are read-only.
+          attack !== undefined && line.index === undefined && line.ops[0]?.op === "attack" ? (
+            <AttackLineButton key={i} line={line} attack={attack} />
+          ) : (
+            <EffectLineView key={i} line={line} />
+          ),
+        )}
         {passive.map((k) => (
           <p key={k.key} className="card-detail-passive">
             <b>{k.label}</b> : {k.explanation}
           </p>
         ))}
+        {card.tags !== undefined && card.tags.length > 0 && (
+          // React text nodes only: a tag is data, never markup.
+          <p className="card-detail-tags">
+            {fr.detailTags} : {card.tags.join(", ")}
+          </p>
+        )}
       </div>
-      <div className="card-detail-bottom">
-        <div className="card-detail-left">
-          <Value caption={fr.detailAttackCaption} icon={<StarIcon size={20} />}>
-            {values.attack}
-          </Value>
-          <Value caption={fr.detailRiposteCaption} icon={<BackArrowIcon size={20} />}>
-            {values.riposte}
-          </Value>
+      {card.kind !== "spell" && (
+        <div className="card-detail-bottom">
+          <div className="card-detail-left">
+            {values.attack !== null && (
+              <Value caption={fr.detailAttackCaption} icon={<StarIcon size={20} />}>
+                {values.attack}
+              </Value>
+            )}
+            {values.riposte !== null && (
+              <Value caption={fr.detailRiposteCaption} icon={<BackArrowIcon size={20} />}>
+                {values.riposte}
+              </Value>
+            )}
+          </div>
+          {values.health !== null && (
+            <Value caption={fr.detailLifeCaption} icon={<HeartIcon size={22} />}>
+              {values.health}
+            </Value>
+          )}
         </div>
-        <Value caption={fr.detailLifeCaption} icon={<HeartIcon size={22} />}>
-          {values.health}
-        </Value>
-      </div>
+      )}
     </div>
   );
 }

@@ -1,4 +1,8 @@
-import { describe, expect, test } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { createElement } from "react";
+import { afterEach, describe, expect, test } from "vitest";
+import { CardDetailSheet } from "../src/ui/CardDetailSheet";
+import { newKindsViews } from "./support/new-kinds";
 import { sourceFiles, stripComments } from "./support/source-scan";
 
 // Decisions S1 (no network, no persistence, no telemetry) and S2 (untrusted text is never
@@ -49,4 +53,20 @@ describe("apps/web/src policy", () => {
       }
     });
   }
+});
+
+describe("a hostile tag", () => {
+  afterEach(cleanup);
+
+  test("a hostile tag is rendered as text", async () => {
+    const hostile = "<img src=x onerror=a()>";
+    const { immobile } = await newKindsViews(hostile);
+    expect(immobile.tags).toEqual([hostile]);
+    const { baseElement } = render(createElement(CardDetailSheet, { card: immobile, deckName: "Ruée", onClose: () => undefined }));
+    expect(screen.getByRole("dialog").querySelector(".card-detail-tags")!.textContent).toBe(`Étiquettes : ${hostile}`);
+    // Nothing was created from the text: no image of the page but the decorative art, none with an onerror.
+    expect(baseElement.querySelector("[onerror]")).toBeNull();
+    expect(baseElement.querySelector("img[src='x']")).toBeNull();
+    expect(baseElement.innerHTML).toContain("&lt;img src=x onerror=a()&gt;");
+  });
 });
