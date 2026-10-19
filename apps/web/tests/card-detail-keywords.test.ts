@@ -1,8 +1,12 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeAll, describe, expect, test } from "vitest";
 import type { CardView } from "../src/engine/types";
 import { isPlay } from "../src/engine/types";
 import { KEYWORDS_FR } from "../src/ui/keywords.fr";
 import { initTestEngine, newSession, rulesFactory } from "./support/engine";
+import { repoRoot } from "./support/paths";
+import { constantNames } from "./support/rust-sets";
 
 // The detail sheet explains every field of a card. This test reads the keys of a REAL `CardView`
 // of the engine and sorts each into where the sheet shows it: a new field breaks it until the
@@ -12,7 +16,7 @@ beforeAll(async () => {
   await initTestEngine();
 });
 
-type Role = "identity" | "value" | "active-effect" | "keyword" | "meta";
+type Role = "identity" | "value" | "active-effect" | "keyword" | "tags" | "effects" | "meta";
 const ROLES: Record<keyof CardView, Role> = {
   id: "identity",
   name: "identity",
@@ -25,15 +29,23 @@ const ROLES: Record<keyof CardView, Role> = {
   // The engine's reason this card cannot be played now (#171): a code, never shown as a value or a keyword;
   // the play button of the sheet turns it into its French sentence (`messageFor`).
   unavailable: "meta",
-  // The fields of #209 are classified PROVISIONALLY (T5 of #137 reclassifies them when the sheet shows them):
-  // the kind is an identity, the keyword and the tags and the structured effect lines are meta for now.
+  // The fields of #209, finalised by #210 (the sheet shows them all): the kind says which values a card has,
+  // `immobile` is a keyword (explained from the single source), the tags are one text line, the effect lines
+  // are the generic lines of the sheet (the normal attack and the declared ones in the same format).
   kind: "identity",
-  immobile: "meta",
-  tags: "meta",
-  effects: "meta",
+  immobile: "keyword",
+  tags: "tags",
+  effects: "effects",
 };
 
 describe("the fields of a CardView", () => {
+  test("the roles of the new fields are final", () => {
+    expect(ROLES.kind).toBe("identity");
+    expect(ROLES.immobile).toBe("keyword");
+    expect(ROLES.tags).toBe("tags");
+    expect(ROLES.effects).toBe("effects");
+  });
+
   test("every key of a real card view is classified, and no classified key is missing", () => {
     const s = newSession("rush", "bulwark", 3);
     try {
@@ -61,11 +73,14 @@ describe("the fields of a CardView", () => {
     }
   });
 
-  test("every keyword field has its French explanation in the single source, and only those", () => {
+  test("the keys of KEYWORDS_FR are the keyword fields of the view plus the KEYWORD_NAMES of Rust", () => {
     const keywords = Object.entries(ROLES)
       .filter(([, role]) => role === "keyword")
       .map(([key]) => key);
-    expect(Object.keys(KEYWORDS_FR).sort()).toEqual(keywords.sort());
+    // `ranged` is not a field of a card but a keyword that an effect grants.
+    const granted = constantNames(readFileSync(resolve(repoRoot, "crates/cards/src/effects.rs"), "utf8"), "KEYWORD_NAMES");
+    expect(granted.length).toBeGreaterThan(0);
+    expect(Object.keys(KEYWORDS_FR).sort()).toEqual([...new Set([...keywords, ...granted])].sort());
     for (const k of Object.values(KEYWORDS_FR)) {
       expect(k.label.length).toBeGreaterThan(0);
       expect(k.explanation.length).toBeGreaterThan(10);

@@ -53,6 +53,25 @@ describe("index.css", () => {
     expect(Number(size![1])).toBeGreaterThanOrEqual(10);
   });
 
+  test("the three card forms keep the 62 x 112 face: the new classes never size the face", () => {
+    const code = stripComments(css);
+    const rule = (selector: string) => new RegExp(`${selector.replace(/\./g, "\\.")}\\s*\\{([^}]*)\\}`).exec(code)?.[1] ?? "";
+    for (const cls of [".card-kind", ".card-value-empty"]) {
+      expect(rule(cls), `${cls} is styled`).not.toBe("");
+      expect(rule(cls), cls).not.toMatch(/(^|[;\s])(width|height|min-width|min-height|max-width|max-height)\s*:/);
+    }
+    expect(rule(".card-face")).toMatch(/height:\s*112px/);
+    expect(rule(".card-face")).toMatch(/width:\s*var\(--card-w\)/);
+  });
+
+  test("a polarity is carried by a border and a text mark, never by colour alone", () => {
+    const code = stripComments(css);
+    const rule = (selector: string) => new RegExp(`${selector.replace(/\./g, "\\.")}\\s*\\{([^}]*)\\}`).exec(code)?.[1] ?? "";
+    for (const p of ["bonus", "malus", "neutral"]) expect(rule(`.effect-polarity-${p}`), p).toMatch(/border-inline-start:\s*\d+px\s+(solid|dashed|dotted)/);
+    const styles = ["bonus", "malus", "neutral"].map((p) => /border-inline-start:\s*\d+px\s+(solid|dashed|dotted)/.exec(rule(`.effect-polarity-${p}`))![1]);
+    expect(new Set(styles).size).toBe(3);
+  });
+
   test("the card detail sheet: a 520px card, a 230px art slot, a scrolling effects zone, a 48px close button, a screen-reader-only class", () => {
     const code = stripComments(css);
     const rule = (selector: string) => new RegExp(`${selector.replace(/\./g, "\\.")}\\s*\\{([^}]*)\\}`).exec(code)?.[1] ?? "";

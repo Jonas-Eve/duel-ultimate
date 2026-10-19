@@ -7,7 +7,8 @@ import { isPlay } from "../src/engine/types";
 import type { Snapshot } from "../src/game/controller";
 import { messageFor } from "../src/ui/errors.fr";
 import { fr } from "../src/ui/fr";
-import { decorateSession, newSession, rulesFactory } from "./support/engine";
+import { decorateSession, newSession, newSessionFromSetup, rulesFactory } from "./support/engine";
+import { newKindsSetup } from "./support/new-kinds";
 import { playButton } from "./support/play";
 import { inAct, makeCampsController, makeController, mountGame, useRealEngine } from "./support/ui";
 import { cardView } from "./support/card-view";
@@ -342,5 +343,27 @@ describe("two camps", () => {
     expect(screen.getByRole("dialog").textContent).not.toMatch(/te restera|adversaire/);
     await user.click(playButton());
     expect(c.getSnapshot().records.length).toBeGreaterThan(before.records.length);
+  });
+});
+
+describe("a spell in hand (#210)", () => {
+  test("a spell in hand opens its sheet and Play says why it cannot be played", async () => {
+    const { session, probe } = decorateSession(newSessionFromSetup(newKindsSetup(), 3));
+    const c = makeController("rush", "bulwark", 3, { createSession: () => session });
+    const { user } = mountGame(c);
+    const tile = within(hand()).getByRole("button", { name: "zz-spell, coût 1, sort, Reste 2" });
+    await user.click(tile);
+    const dialog = screen.getByRole("dialog", { name: "zz-spell" });
+    const play = within(dialog).getByRole("button", { name: "Jouer" });
+    expect(play.getAttribute("aria-disabled")).toBe("true");
+    play.focus();
+    expect(document.activeElement).toBe(play);
+    const reason = dialog.querySelector(".play-reason")!;
+    expect(reason.textContent).toBe(messageFor("unsupported_effect"));
+    expect(reason.textContent).toBe("Cette carte utilise un effet que le jeu ne gère pas encore.");
+    expect(play.getAttribute("aria-describedby")).toBe(reason.id);
+    await user.click(play);
+    expect(probe.calls.apply).toBe(0);
+    expect(screen.getByRole("dialog")).toBe(dialog);
   });
 });

@@ -96,6 +96,22 @@ export const starterConfig = (deckOne: string, deckTwo: string, seed: number): S
   dataVersion: DATA_VERSION,
 });
 
+/**
+ * A session of the real engine on a setup JSON written by hand (`new Game(setup, seed)`), for the cards that no
+ * deck of the starter set uses yet (spells, immobile units, tags): the factory ignores the data arguments and
+ * reads `seed` from them. Call `initTestEngine()` first.
+ */
+export const setupFactory =
+  (setup: unknown): GameFactory =>
+  (...args) => {
+    if (binding === null) throw new Error("call initTestEngine() first");
+    return new binding.Game(JSON.stringify(setup), args[5]);
+  };
+
+export function newSessionFromSetup(setup: unknown, seed = 3): GameSession {
+  return createWasmSession(setupFactory(setup), starterConfig("rush", "bulwark", seed));
+}
+
 export function newSession(deckOne: string, deckTwo: string, seed: number, factory: GameFactory = testFactory): GameSession {
   return createWasmSession(factory, starterConfig(deckOne, deckTwo, seed));
 }
