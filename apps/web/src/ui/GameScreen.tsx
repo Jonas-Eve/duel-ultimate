@@ -258,7 +258,8 @@ export function GameScreen({ controller, onReplaySameSeed, onReplayNewSeed, onHo
             detail.zone === "own-board"
               ? {
                   available: hasAttack(detailCard.id),
-                  reason: humanTurn ? fr.attackUnavailable : fr.attackUnavailableComputer,
+                  // The engine's reason first (`attack_force_zero`, in its own words), then the turn's.
+                  reason: detailCard.unavailable !== undefined ? messageFor(detailCard.unavailable) : humanTurn ? fr.attackUnavailable : fr.attackUnavailableComputer,
                   // The detail closes (the focus goes back to the tile), the creature is the attacker: targets next. Idempotent.
                   onAttack: () => {
                     setDetail(null);

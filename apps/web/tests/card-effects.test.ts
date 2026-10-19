@@ -167,6 +167,6 @@ describe("the new kinds, as the real engine writes them", () => {
     const texts = (c: CardView) => cardEffects(c).active.map((l) => effectLineLabel(l));
     expect(texts(spell)).toEqual(["À la pose : Inflige 2 dégâts sur une unité adverse ; Pioche 1 carte"]);
     expect(texts(special)).toEqual(["Attaque (1) : inflige 2 dégâts, pour 1 temps", "Attaque (2) : inflige 5 dégâts ; ignore la provocation, pour 2 temps"]);
-    expect(texts(aura)).toEqual(["Tant qu'elle est en jeu : +1 force sur toutes vos unités ; +1 coût d'attaque sur toutes vos unités — Malus"]);
+    expect(texts(aura)).toEqual(["Attaque (1) : inflige 2 dégâts, pour 1 temps", "Tant qu'elle est en jeu : +1 force sur toutes vos unités ; +1 coût d'attaque sur toutes vos unités — Malus"]);
   });
 });

@@ -351,7 +351,7 @@ describe("a spell in hand (#210)", () => {
     const { session, probe } = decorateSession(newSessionFromSetup(newKindsSetup(), 3));
     const c = makeController("rush", "bulwark", 3, { createSession: () => session });
     const { user } = mountGame(c);
-    const tile = within(hand()).getByRole("button", { name: "zz-spell, coût 1, sort, Reste 2" });
+    const tile = within(hand()).getByRole("button", { name: "zz-spell, coût 1, sort" });
     await user.click(tile);
     const dialog = screen.getByRole("dialog", { name: "zz-spell" });
     const play = within(dialog).getByRole("button", { name: "Jouer" });

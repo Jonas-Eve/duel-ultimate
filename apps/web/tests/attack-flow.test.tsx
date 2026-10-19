@@ -160,7 +160,7 @@ describe("selecting an attacker", () => {
     const line = attackLine();
     expect(line.tagName).toBe("BUTTON");
     expect(line.className).toContain("btn");
-    expect(line.getAttribute("aria-label") ?? line.textContent).toBe(effectLineLabel({ name: "Attaque", cost: card.attack_cost, damage: card.force }));
+    expect(line.getAttribute("aria-label") ?? line.textContent).toBe(effectLineLabel(card.effects[0]));
     expect(line.textContent).toContain(`inflige ${card.force} dégât`);
     expect(screen.queryByText("Choisis une cible")).toBeNull();
     await user.click(line);
