@@ -1,12 +1,35 @@
 import { beforeAll, describe, expect, test } from "vitest";
 import { EngineError, SessionDisposedError } from "../src/engine/errors";
-import type { GameFactory, GameSession } from "../src/engine/session";
+import type { GameFactory, GameSession, WasmGameLike } from "../src/engine/session";
 import { createWasmSession } from "../src/engine/wasm-session";
 import { DATA_VERSION } from "../src/data/starter";
 import { PAIRS, initTestEngine, instrumentedFactory, newSession, randomPolicy, starterConfig, testFactory } from "./support/engine";
 
 beforeAll(async () => {
   await initTestEngine();
+});
+
+describe("the view of a session (#209)", () => {
+  test("the session hands the view of the engine over as it is, kind and effects included", () => {
+    let raw: WasmGameLike | null = null;
+    const factory: GameFactory = (...args) => {
+      raw = testFactory(...args);
+      return raw;
+    };
+    const s = newSession("rush", "bulwark", 5, factory);
+    try {
+      for (const seat of ["One", "Two"] as const) {
+        const view = s.view(seat);
+        expect(view).toEqual(JSON.parse(raw!.view(seat)));
+        for (const c of view.you.hand) {
+          expect(c.kind).toBe("unit");
+          expect(c.effects).toHaveLength(1);
+        }
+      }
+    } finally {
+      s.dispose();
+    }
+  });
 });
 
 describe("creation from the starter set", () => {

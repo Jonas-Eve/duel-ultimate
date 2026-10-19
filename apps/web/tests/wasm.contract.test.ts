@@ -7,6 +7,8 @@ import { DATA_VERSION } from "../src/data/starter";
 import { CLIENT_CODES, ENGINE_CODES, EngineError } from "../src/engine/errors";
 import { PAIRS, initTestEngine, newSession, randomPolicy, rulesFactory, testFactory } from "./support/engine";
 import { repoRoot } from "./support/paths";
+import { kindsGame } from "./support/kinds-game";
+import type { CardView } from "../src/engine/types";
 
 beforeAll(async () => {
   await initTestEngine();
@@ -122,7 +124,8 @@ describe("JSON shapes of real games", () => {
       expect(keys(v.you)).toEqual(["board", "deck_count", "discard", "hand", "hero"]);
       expect(keys(v.opponent)).toEqual(["board", "deck_count", "discard", "hand_count", "hero"]);
       expect(keys(v.you.hero)).toEqual(["effects", "health", "max_time", "name"]);
-      const cardKeys = ["attack_cost", "cost", "force", "health", "id", "name", "provocation", "riposte"];
+      // The starter sets hold plain units only: `kind` and the attack line (`effects`) are the two keys #209 adds; `immobile` and `tags` never appear.
+      const cardKeys = ["attack_cost", "cost", "effects", "force", "health", "id", "kind", "name", "provocation", "riposte"];
       for (const c of [...v.you.board, ...v.opponent.board, ...v.you.discard]) {
         expect(keys(c)).toEqual(cardKeys);
       }
@@ -309,6 +312,94 @@ describe("Action additive (#128)", () => {
       expect(() => s.apply({ play: { card } })).not.toThrow();
     } finally {
       s.dispose();
+    }
+  });
+});
+
+describe("the CardView contract (#209), read on a real game with a spell, an immobile unit and a special attack", () => {
+  const REQUIRED = ["attack_cost", "cost", "effects", "force", "health", "id", "kind", "name", "provocation", "riposte"];
+  const OPTIONAL = ["immobile", "tags", "unavailable"];
+  const LINE_REQUIRED = ["ops", "picks", "trigger"];
+  const LINE_OPTIONAL = ["cost", "index"];
+  const POLARITIES = ["bonus", "malus", "neutral"];
+
+  const checkLine = (line: Record<string, unknown>) => {
+    const k = keys(line);
+    for (const key of LINE_REQUIRED) expect(k).toContain(key);
+    for (const key of k) expect([...LINE_REQUIRED, ...LINE_OPTIONAL]).toContain(key);
+    expect(["on_play", "activated", "continuous"]).toContain(line.trigger);
+    if ("index" in line) expect(Number.isInteger(line.index)).toBe(true);
+    if ("cost" in line) expect(typeof line.cost).toBe("number");
+    expect(Array.isArray(line.ops)).toBe(true);
+    for (const op of line.ops as Record<string, unknown>[]) {
+      expect(["attack", "deal_damage", "draw", "modify_stat", "grant_keyword"]).toContain(op.op);
+      expect(POLARITIES).toContain(op.polarity);
+      const target = op.target as Record<string, unknown>;
+      expect(["self", "hero", "unit", "hero_or_unit", "all_units"]).toContain(target.select);
+      if (target.select === "self") expect(keys(target)).toEqual(["select"]);
+      else expect(["own", "opposing", "both"]).toContain(target.side);
+    }
+    for (const pick of line.picks as Record<string, unknown>[]) {
+      expect(keys(pick)).toEqual(["kind", "role", "side"]);
+      expect(["attacker", "target"]).toContain(pick.role);
+      expect(["unit", "hero_or_unit"]).toContain(pick.kind);
+      expect(["own", "opposing", "both"]).toContain(pick.side);
+    }
+  };
+
+  const checkCard = (c: CardView) => {
+    const k = keys(c);
+    for (const key of REQUIRED) expect(k, `${key} of ${JSON.stringify(c)}`).toContain(key);
+    for (const key of k) expect([...REQUIRED, ...OPTIONAL], key).toContain(key);
+    expect(["unit", "spell"]).toContain(c.kind);
+    if ("immobile" in c) expect(c.immobile).toBe(true);
+    if ("tags" in c) {
+      expect(c.tags!.length).toBeGreaterThan(0);
+      for (const t of c.tags!) expect(typeof t).toBe("string");
+    }
+    expect(Array.isArray(c.effects)).toBe(true);
+    for (const line of c.effects) checkLine(line as unknown as Record<string, unknown>);
+  };
+
+  test("a CardView has exactly the contract keys", async () => {
+    const game = await kindsGame();
+    try {
+      const view = JSON.parse(game.view("One")) as PlayerView;
+      const hand = view.you.hand;
+      for (const c of hand) checkCard(c);
+      const byName = (n: string) => hand.find((c) => c.name === n)!;
+      // The spell: kind, tags, its declared line only (with an index), two attackers then a target.
+      const spell = byName("zz-spell");
+      expect(spell.kind).toBe("spell");
+      expect(spell.tags).toEqual(["rituel"]);
+      expect(spell.effects).toHaveLength(1);
+      expect(spell.effects[0].index).toBe(0);
+      expect(spell.effects[0].picks.map((p) => p.role)).toEqual(["attacker", "attacker", "target"]);
+      expect(spell.unavailable).toBe("unsupported_effect");
+      // The immobile unit: the keyword, its tag, no attack line.
+      const immobile = byName("zz-immobile");
+      expect(immobile).toMatchObject({ kind: "unit", immobile: true, tags: ["bâtiment"], effects: [] });
+      // The unit with a special attack: the synthesised line first (no index), then the declared one.
+      const special = byName("zz-special");
+      expect(special.effects.map((l) => l.index)).toEqual([undefined, 0]);
+      expect(special.effects.map((l) => l.cost)).toEqual([special.attack_cost, 2]);
+      expect(special.effects[0].ops[0]).toMatchObject({ op: "attack", amount: special.force, polarity: "bonus" });
+      expect(special.effects[1].ops[0]).toMatchObject({ op: "attack", amount: 5, polarity: "bonus" });
+      // A plain unit: only `kind` and the attack line were added; no tags, no keyword.
+      const plain = hand.find((c) => !("tags" in c) && c.kind === "unit" && c.effects.length === 1)!;
+      expect(plain).toBeDefined();
+      expect(plain.effects[0].index).toBeUndefined();
+      expect("immobile" in plain).toBe(false);
+      // The other seat sees no tag of the hand it cannot see.
+      expect(game.view("Two")).not.toContain("rituel");
+      expect(game.view("Two")).not.toContain("bâtiment");
+      // Every card of the two views, whatever the zone, honours the contract.
+      for (const seat of ["One", "Two"] as const) {
+        const v = JSON.parse(game.view(seat)) as PlayerView;
+        for (const c of [...v.you.board, ...v.you.discard, ...v.opponent.board, ...v.opponent.discard]) checkCard(c);
+      }
+    } finally {
+      game.free();
     }
   });
 });

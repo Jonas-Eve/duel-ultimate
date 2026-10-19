@@ -68,6 +68,6 @@ pub use ruleset::{MAX_BOARD_LIMIT, RuleSet, RuleSetError};
 pub use setup::{GameSetup, PlayerSetup, SetupError, new_game};
 pub use state::{CardInstanceId, GameState, PlayerId, WinReason};
 pub use view::{
-    CardView, GameResult, HeroView, OpponentSide, OutcomeOwnSide, OutcomeView, OwnSide, PlayerView,
-    player_view,
+    CardKindView, CardView, EffectLine, GameResult, HeroView, OpLine, OpponentSide, OutcomeOwnSide,
+    OutcomeView, OwnSide, PlayerView, player_view,
 };

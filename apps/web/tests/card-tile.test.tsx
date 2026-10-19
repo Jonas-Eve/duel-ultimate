@@ -3,18 +3,9 @@ import { afterEach, describe, expect, test } from "vitest";
 import type { CardView } from "../src/engine/types";
 import { CardTile } from "../src/ui/CardTile";
 import { expectedCardLabel } from "./support/card-label";
+import { cardView } from "./support/card-view";
 
-const card = (over: Partial<CardView> = {}): CardView => ({
-  id: 7,
-  name: "Garde du rempart",
-  cost: 3,
-  force: 1,
-  attack_cost: 2,
-  health: 6,
-  provocation: false,
-  riposte: 0,
-  ...over,
-});
+const card = cardView;
 
 afterEach(cleanup);
 

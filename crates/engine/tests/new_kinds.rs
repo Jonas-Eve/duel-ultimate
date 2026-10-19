@@ -382,12 +382,36 @@ fn a_unit_with_declared_effects_is_played_like_any_unit() {
             "step {step}"
         );
         for seat in [PlayerId::One, PlayerId::Two] {
-            assert_eq!(player_view(&a, seat), player_view(&b, seat), "step {step}");
+            assert_eq!(
+                without_declared_lines(&a, seat),
+                without_declared_lines(&b, seat),
+                "step {step}"
+            );
         }
         if a.winner().is_some() {
             break;
         }
     }
+}
+
+/// The view of `seat` as JSON, with the declared effect lines (#209: the view shows them, whatever
+/// the engine does with them) dropped from every card: what is left must not depend on them.
+fn without_declared_lines(state: &GameState, seat: PlayerId) -> serde_json::Value {
+    fn strip(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::Array(lines)) = map.get_mut("effects") {
+                    lines.retain(|line| line.get("index").is_none());
+                }
+                map.values_mut().for_each(strip);
+            }
+            serde_json::Value::Array(items) => items.iter_mut().for_each(strip),
+            _ => {}
+        }
+    }
+    let mut value = serde_json::to_value(player_view(state, seat)).unwrap();
+    strip(&mut value);
+    value
 }
 
 #[test]

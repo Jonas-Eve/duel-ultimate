@@ -319,8 +319,10 @@ impl OpKind {
 }
 
 /// Who gains or loses from an operation, from the point of view of the owner of the card. Derived,
-/// never stored: the single source for the view and for the price.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// never stored: the single source for the view and for the price. Written `bonus`, `malus` or
+/// `neutral` by the view of the engine (#209).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Polarity {
     Bonus,
     Malus,

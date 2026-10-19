@@ -11,18 +11,9 @@ import { expectedCardLabel } from "./support/card-label";
 import { selectAttacker } from "./support/play";
 import { playUntil, randomPreview } from "./support/policies";
 import { makeCampsController, makeController, mountGame, useRealEngine } from "./support/ui";
+import { cardView } from "./support/card-view";
 
-const card = (over: Partial<CardView> = {}): CardView => ({
-  id: 7,
-  name: "Garde du rempart",
-  cost: 3,
-  force: 1,
-  attack_cost: 2,
-  health: 6,
-  provocation: false,
-  riposte: 0,
-  ...over,
-});
+const card = cardView;
 
 const PROVOCATION = "Provocation : tant qu'elle est en jeu, l'adversaire ne peut attaquer qu'une créature qui provoque ; son héros n'est pas ciblable.";
 

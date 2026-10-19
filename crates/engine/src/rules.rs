@@ -284,7 +284,7 @@ pub(crate) fn provocation_allows(state: &GameState, target: Target) -> bool {
 /// Why `seat` cannot summon a creature right now, if it cannot: `None` once the game is over
 /// (nothing is blocked by a rule of play then), `Some(BoardFull)` when the board limit is
 /// reached. Read from the seat's public board only, never from a hand. The single answer,
-/// called by `effects::usable` (the active seat) and by `player_view` (the hand of the seat asked).
+/// called by `play_blocker_of` (the per-card answer `effects::usable` and `player_view` read).
 pub(crate) fn play_blocker(state: &GameState, seat: PlayerId) -> Option<RuleError> {
     if state.winner.is_some() {
         return None;
@@ -322,7 +322,7 @@ pub(crate) fn play_blocker_of(
 /// Why `card`, a creature of the active board, cannot attack right now, if it cannot: `None` once
 /// the game is over (as [`play_blocker`]), `Some(AttackForceZero)` when its effective force is 0
 /// (an immobile unit has none), read through `effective` alone. The single predicate of this
-/// reason, called by `effects::usable` and, later, by the view; the caller already holds the
+/// reason, called by `effects::usable` and by `player_view` (the units of the board of the seat asked); the caller already holds the
 /// instance, so there is no second walk of the board.
 pub(crate) fn attack_blocker(state: &GameState, card: &CardInstance) -> Option<RuleError> {
     if state.winner.is_some() {
