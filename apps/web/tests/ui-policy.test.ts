@@ -64,6 +64,12 @@ describe("index.css", () => {
     expect(rule(".card-face")).toMatch(/width:\s*var\(--card-w\)/);
   });
 
+  test("the attack line stays a 44px target", () => {
+    const code = stripComments(css);
+    const rule = /\.card-detail-effect-button\s*\{([^}]*)\}/.exec(code)?.[1] ?? "";
+    expect(rule).toMatch(/min-height:\s*44px/);
+  });
+
   test("a polarity is carried by a border and a text mark, never by colour alone", () => {
     const code = stripComments(css);
     const rule = (selector: string) => new RegExp(`${selector.replace(/\./g, "\\.")}\\s*\\{([^}]*)\\}`).exec(code)?.[1] ?? "";
